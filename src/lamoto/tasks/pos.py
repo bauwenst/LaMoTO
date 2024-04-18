@@ -10,7 +10,7 @@ class POS(FinetuningTask):
         self.tagset = ["B-" + tag for tag in self.loadDataset()["train"].features["upos"].feature.names]
         super().__init__(
             task_name="pos",
-            metrics=MetricSetup(
+            metric_config=MetricSetup(
                 to_compute=["seqeval"],
                 to_track={
                     "seqeval": {"overall_accuracy": "Accuracy"}  # Note that Pr = Re = F1 = Acc without a negative class (BIO's O class which POS doesn't have but NER does).

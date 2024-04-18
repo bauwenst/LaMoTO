@@ -69,18 +69,18 @@ class ModelAugmentation(ABC):
         pass
 
 
+@dataclass
 class FinetuningTask(ABC):
 
-    def __init__(self, task_name: str, metrics: MetricSetup, automodel_class: Type[_BaseAutoModelClass], **automodel_args):
-        self.task_name = task_name
-
-        self.auto = automodel_class
-        self.auto_args = automodel_args
-
-        self.metrics: Dict[str, Metric] = {name: METRICS.load(name) for name in metrics.to_compute}
-        self.result_formatting = metrics.to_track
+    def __init__(self, task_name: str, metric_config: MetricSetup, automodel_class: Type[_BaseAutoModelClass], **automodel_args):
+        self.task_name       = task_name
+        self.metric_config   = metric_config
+        self.automodel_class = automodel_class
+        self.automodel_args  = automodel_args
 
         self.tokenizer: RobertaTokenizer = AutoTokenizer.from_pretrained(CHECKPOINT, add_prefix_space=True)
+        # This field is instantiated at train time to avoid loading duplicate metrics when it isn't necessary.
+        self.metrics: Dict[str, Metric] = None
 
     @abstractmethod
     def loadDataset(self) -> DatasetDict:
@@ -126,9 +126,13 @@ class FinetuningTask(ABC):
         collator = self.getCollator()
 
         # Get model
-        model: PreTrainedModel = self.auto.from_pretrained(CHECKPOINT, **self.auto_args)
-        model = model_augmentation.augment(model)
+        model: PreTrainedModel = self.automodel_class.from_pretrained(CHECKPOINT, **self.automodel_args)
+        if model_augmentation:
+            model = model_augmentation.augment(model)
         model.to("cuda")
+
+        # Set up metrics for accessing in computeMetrics()
+        self.metrics = {name: METRICS.load(name) for name in self.metric_config.to_compute}
 
         # Training arguments
         interval = (len(datasetdict["train"]) // BATCH_SIZE) // EVALS_PER_EPOCH
@@ -173,7 +177,7 @@ class FinetuningTask(ABC):
                 FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=EVALS_PER_EPOCH),
                 FijectCallback(global_model_identifier + "_eval_task", evals_between_commits=EVALS_PER_EPOCH,
                                                                        metric_names_with_formatting={(metric_name + "_" + result_name): formatting
-                                                                                                     for metric_name, result_formats in self.result_formatting.items()
+                                                                                                     for metric_name, result_formats in self.metric_config.to_track.items()
                                                                                                      for result_name, formatting in result_formats.items()}),
                 transformers.trainer_callback.EarlyStoppingCallback(early_stopping_patience=EVALS_OF_PATIENCE)  # Patience is the amount of eval calls you can tolerate worsening loss.
             ],

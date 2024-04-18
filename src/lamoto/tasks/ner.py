@@ -14,7 +14,7 @@ class NER(FinetuningTask):
         self.tagset = self.loadDataset()["train"].features["ner_tags"].feature.names
         super().__init__(
             task_name="ner",
-            metrics=MetricSetup(
+            metric_config=MetricSetup(
                 to_compute=["seqeval"],
                 to_track={
                     "seqeval": {"overall_precision": "Pr", "overall_recall": "Re", "overall_f1": "$F_1$"}

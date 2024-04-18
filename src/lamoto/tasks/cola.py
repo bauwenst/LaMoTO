@@ -9,7 +9,7 @@ class CoLA(FinetuningTask):
     def __init__(self):
         super().__init__(
             task_name="cola",
-            metrics=MetricSetup(
+            metric_config=MetricSetup(
                 to_compute=["precision", "recall", "f1", "accuracy"],
                 to_track={
                     "precision": {"precision": "Pr"},

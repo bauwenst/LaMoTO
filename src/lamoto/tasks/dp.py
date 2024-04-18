@@ -20,7 +20,7 @@ class DP(FinetuningTask):
         self.tag_to_id = {tag: i for i,tag in enumerate(self.tagset)}
         super().__init__(
             task_name="DP",
-            metrics=MetricSetup(
+            metric_config=MetricSetup(
                 to_compute=["dp-attachment"],
                 to_track={
                     "dp-attachment": {
