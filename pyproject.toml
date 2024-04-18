@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lamoto"
+version = "2024.04.01"
+dependencies = [
+    "transformers >= 4.24.0",
+    "datasets >= 2.18.0",
+    "evaluate",
+    "supar @ git+https://github.com/yzhangcs/parser",
+    "tktkt @ git+https://github.com/bauwenst/TkTkT",
+    "fiject @ git+https://github.com/bauwenst/fiject"
+]
+requires-python = ">= 3.10"
+authors = [
+  {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
+]
+maintainers = [
+  {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
+]
+description = "Language Modelling Tasks as Objects (LaMoTO) provides a framework for language model training (masked and causal, pretraining and finetuning) where the tasks, not just the models, are classes themselves."
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["language models", "LMs", "NLP", "PyTorch", "OOP", "object-oriented"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
