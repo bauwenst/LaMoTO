@@ -5,7 +5,7 @@ from abc import abstractmethod, ABC
 import time
 
 from datasets import DatasetDict
-from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, RobertaTokenizer
+from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, RobertaTokenizer, PreTrainedModel
 import transformers.optimization  # TODO: Trainer handles this and you shouldn't do it manually.
 import torch
 import evaluate
@@ -13,8 +13,6 @@ from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
 from fiject.hooks.transformers import FijectCallback, EvaluateBeforeTrainingCallback
 from tktkt.files.paths import DataPaths
-
-from ..model.factory import fromCheckpoint  # TODO: Oops
 
 
 ##################################  TODO: These should become task arguments, perhaps as a config dataclass.
@@ -61,6 +59,16 @@ class MetricSetup:
     to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
 
 
+class ModelAugmentation(ABC):
+
+    def __init__(self, name: str):
+        self.name = name
+
+    @abstractmethod
+    def augment(self, model: PreTrainedModel) -> PreTrainedModel:
+        pass
+
+
 class FinetuningTask(ABC):
 
     def __init__(self, task_name: str, metrics: MetricSetup, automodel_class: Type[_BaseAutoModelClass], **automodel_args):
@@ -102,8 +110,10 @@ class FinetuningTask(ABC):
     def sneakyLogitTransform(self, logits, labels):
         return logits
 
-    def train(self, do_hel: bool=False):
-        global_model_identifier = CHECKPOINT[CHECKPOINT.rfind("/")+1:] + "-HEL"*do_hel + f"_{self.task_name}_{time.strftime('%F_%X').replace(':', '-')}"
+    def train(self, model_augmentation: ModelAugmentation=None):
+        global_model_identifier = CHECKPOINT[CHECKPOINT.rfind("/")+1:] \
+                                + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
+                                + f"_{self.task_name}_{time.strftime('%F_%X').replace(':', '-')}"
 
         # Set up paths for checkpointing
         PATH_CHECKPOINTS = DataPaths.pathToCheckpoints() / global_model_identifier
@@ -116,8 +126,8 @@ class FinetuningTask(ABC):
         collator = self.getCollator()
 
         # Get model
-        model, _, _ = fromCheckpoint(checkpoint=CHECKPOINT, do_hel=do_hel,
-                                     automodel_class=self.auto, **self.auto_args)
+        model: PreTrainedModel = self.auto.from_pretrained(CHECKPOINT, **self.auto_args)
+        model = model_augmentation.augment(model)
         model.to("cuda")
 
         # Training arguments
