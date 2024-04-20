@@ -2,7 +2,7 @@
 Inspired by Edwin Rijgersberg's script to train GEITje.
     https://github.com/Rijgersberg/GEITje
 
-FIXME: This file's imports are not corrected yet since importing.
+TODO: When you don't have WandB logging, you should definitely have Fiject callbacks!
 """
 # Types
 from typing import Iterable, Tuple
@@ -27,9 +27,11 @@ from transformers.training_args import OptimizerNames
 
 # Custom libs
 from tktkt.files.paths import DataPaths
+from fiject.hooks.transformers import EvaluateBeforeTrainingCallback
 
 # Relative
-from ..model.factory import insertHierarchicalLookupGivenTokeniser
+from ._core import ModelAugmentation
+
 
 # An "effective batch" is all the examples used to compute the gradient of one gradient descent step.
 # Classically, the loss function looks like sum_{i=1}^N loss(x_i, y_i). You compute that sum by splitting the effort
@@ -165,19 +167,23 @@ def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_d
 
 class Pretraining(ABC):
 
-    def __init__(self, checkpoint: str, from_scratch: bool, custom_context_length: int=None):
+    def __init__(self, checkpoint: str, from_scratch: bool, custom_context_length: int=None, wandb_project: str=""):
         self.checkpoint = checkpoint
         self.from_scratch = from_scratch
         self.custom_context_length = custom_context_length
+        self.wandb_project = wandb_project
 
     @abstractmethod
     def loadDataset(self):
         pass
 
-    def train(self, do_hel=False):
-        # Names
+    def train(self, model_augmentation: ModelAugmentation=None):
         base_name = self.checkpoint[self.checkpoint.rfind("/")+1:]
-        global_model_identifier = base_name + "-HEL"*do_hel + "_CLM" + f"_{time.strftime('%F_%X').replace(':', '-')}"
+        global_model_identifier = base_name \
+                                + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
+                                + f"_CLM_{time.strftime('%F_%X').replace(':', '-')}"
+
+        # Set up paths for checkpointing
         PATH_CHECKPOINTS = DataPaths.pathToCheckpoints() / global_model_identifier
         PATH_CHECKPOINTS.mkdir(exist_ok=True, parents=True)
 
@@ -208,9 +214,9 @@ class Pretraining(ABC):
 
         # We re-use the old tokeniser.
         tokenizer = AutoTokenizer.from_pretrained(self.checkpoint, use_fast=False)
-
-        if do_hel:
-            insertHierarchicalLookupGivenTokeniser(model, tokenizer)
+        if model_augmentation:
+            model = model_augmentation.augment(model)
+        model.to("cuda")
 
         # Dataset
         datasetdict   = self.loadDataset()
@@ -289,10 +295,12 @@ class Pretraining(ABC):
         )
 
         wandb.init(
-            project="HEL",
+            mode="disabled" if not self.wandb_project else "online",
+
+            project=self.wandb_project,
             group=base_name,
             name=global_model_identifier,
-            tags=["HEL", "CLM"] if do_hel else []
+            tags=[model_augmentation.name, "CLM"] if model_augmentation else ["CLM"]
         )
 
         # optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=L2_REGULARISATION)
@@ -306,6 +314,9 @@ class Pretraining(ABC):
 
             train_dataset=packed_train_dataset,
             eval_dataset=[],  # We explicitly do not want to run classic prediction through the model head; the computeMetrics function generates data from scratch.
+            callbacks=[
+                EvaluateBeforeTrainingCallback()
+            ],
 
             compute_metrics=lambda _: {k:v for k,v in zip(["NLL", "PPL"], ppl(model, tokenizer, valid_dataset))},
             data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)

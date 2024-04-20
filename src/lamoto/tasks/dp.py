@@ -4,7 +4,7 @@ from tktkt.util.printing import gridify
 from supar.utils.metric import AttachmentMetric
 
 from ._core import *
-from ..models.dependency_parsing import AutoModelForDependencyParsing, DataCollatorForDependencyParsing, SuparWithLoss
+from ..modeling.dependency_parsing import AutoModelForDependencyParsing, DataCollatorForDependencyParsing, SuparWithLoss
 
 
 class DP(FinetuningTask):

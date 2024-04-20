@@ -29,7 +29,7 @@ class PerturbDataset(FinetuningTask):
             elif isinstance(original, list):
                 example[self.text_field_name] = [self.perturbation.convert(word) for word in original]
             else:
-                raise ValueError(f"Could not process text field {self.text_field_name}: not a list or string.")
+                raise ValueError(f"Could not process text field '{self.text_field_name}': not a list or string.")
             return example
 
         return self.method_implementations.loadDataset().map(perturbExample, batched=False)
