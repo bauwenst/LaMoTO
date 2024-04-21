@@ -8,12 +8,14 @@ from datasets import DatasetDict
 from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, RobertaTokenizer, PreTrainedModel
 import transformers.optimization  # TODO: Trainer handles this and you shouldn't do it manually.
 import torch
-import evaluate
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
 from fiject.hooks.transformers import FijectCallback, EvaluateBeforeTrainingCallback
 from tktkt.files.paths import DataPaths
 
+from ..augmenting.model import ModelAugmentation
+from ..measuring._core import Metric
+from ..measuring import METRICS
 
 ##################################  TODO: These should become task arguments, perhaps as a config dataclass.
 MAX_TRAINING_EPOCHS = 10
@@ -31,42 +33,10 @@ ADD_SPECIAL_TOKENS = True
 ##################################
 
 
-class Metric(Protocol):
-    def compute(self, predictions: Any, references: Any) -> Dict[str,Any]:
-        pass
-
-
-class MetricRegistry:
-
-    def __init__(self):
-        self.custom_metrics: Dict[str,Type[Metric]] = dict()
-
-    def registerMetric(self, name: str, metric: Type[Metric]):
-        if name in self.custom_metrics:
-            raise ValueError(f"Cannot register custom metric {name} because it already exists.")
-
-        self.custom_metrics[name] = metric
-
-    def load(self, name: str) -> Metric:
-        return self.custom_metrics[name]() if name in self.custom_metrics else evaluate.load(name)
-
-METRICS = MetricRegistry()
-
-
 @dataclass
 class MetricSetup:
     to_compute: List[str]               # Names of all the HuggingFace evaluate metrics to load and compute in the end.
     to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
-
-
-class ModelAugmentation(ABC):
-
-    def __init__(self, name: str):
-        self.name = name
-
-    @abstractmethod
-    def augment(self, model: PreTrainedModel) -> PreTrainedModel:
-        pass
 
 
 @dataclass
@@ -128,7 +98,7 @@ class FinetuningTask(ABC):
         # Get model
         model: PreTrainedModel = self.automodel_class.from_pretrained(CHECKPOINT, **self.automodel_args)
         if model_augmentation:
-            model = model_augmentation.augment(model)
+            model = model_augmentation.augment(model, self.tokenizer)
         model.to("cuda")
 
         # Set up metrics for accessing in computeMetrics()

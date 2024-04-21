@@ -1,7 +1,7 @@
 from collections import Counter
 from datasets import load_dataset
+
 from tktkt.util.printing import gridify
-from supar.utils.metric import AttachmentMetric
 
 from ._core import *
 from ..modeling.dependency_parsing import AutoModelForDependencyParsing, DataCollatorForDependencyParsing, SuparWithLoss
@@ -21,9 +21,9 @@ class DP(FinetuningTask):
         super().__init__(
             task_name="DP",
             metric_config=MetricSetup(
-                to_compute=["dp-attachment"],
+                to_compute=["attachment"],
                 to_track={
-                    "dp-attachment": {
+                    "attachment": {
                         "uas": "UAS",
                         "las": "LAS",
                         "ucm": "UCM",
@@ -192,27 +192,3 @@ class DP(FinetuningTask):
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         return [], []
-
-
-class DependencyParsingMetrics(Metric):
-
-    def __init__(self):
-        self.content = AttachmentMetric()
-
-    def add(self, other: AttachmentMetric):
-        self.content += other
-
-    def compute(self, predictions: Any, references: Any) -> Dict[str,Any]:
-        """
-        Ignore the input and output your own internal metrics.
-        """
-        summary = {
-            "uas": self.content.uas,
-            "las": self.content.las,
-            "ucm": self.content.ucm,
-            "lcm": self.content.lcm
-        }
-        self.content = AttachmentMetric()
-        return summary
-
-METRICS.registerMetric("dp-attachment", DependencyParsingMetrics)

@@ -5,7 +5,7 @@ Inspired by Edwin Rijgersberg's script to train GEITje.
 TODO: When you don't have WandB logging, you should definitely have Fiject callbacks!
 """
 # Types
-from typing import Iterable, Tuple
+from typing import Iterable, Tuple, Optional, List
 from abc import abstractmethod, ABC
 
 # Basic libs
@@ -31,13 +31,14 @@ from fiject.hooks.transformers import EvaluateBeforeTrainingCallback
 
 # Relative
 from ._core import ModelAugmentation
+from ..measuring.ppl import ppl
 
 
 # An "effective batch" is all the examples used to compute the gradient of one gradient descent step.
 # Classically, the loss function looks like sum_{i=1}^N loss(x_i, y_i). You compute that sum by splitting the effort
 # across devices and, per device, splitting the work into several runs because of memory limitations.
 EXAMPLES_PER_EFFECTIVE_BATCH = 512   # From the OpenAI GPT-2 paper.
-EXAMPLES_PER_DEVICEBATCH = 32        # A devicebatch is just whatever fits on the GPU, not N.
+EXAMPLES_PER_DEVICEBATCH = 4        # A devicebatch is just whatever fits on the GPU, not N.
 TOTAL_TOKEN_BUDGET = 10_000_000_000  # Could've been batches like in the BPE-knockout paper, but for CLMs this metric is more popular. In any case, we're just going to train some CLMs until our wall time runs out.
 
 TOTAL_CHECKPOINTS = 10  # Could also specify batches_per_checkpoint, which means more checkpoints for longer training. I do it relatively because that makes more sense.
@@ -70,7 +71,7 @@ def packedDatasetGenerator(dataset: Iterable, tokenizer: PreTrainedTokenizerBase
     cache = []
     for row in dataset:
         # Add extra IDs to cache
-        new_ids = tokenizer(row[key], max_length=1_000_000)['input_ids']  # max_length=None will give a warning because it assumes tokeniser output is passed to the model without further processing.
+        new_ids = tokenizer(row[key], max_length=1_000_000, truncation=True)['input_ids']  # max_length=None will give a warning because it assumes tokeniser output is passed to the model without further processing.
         if not new_ids[-1] == tokenizer.eos_token_id:  # You need an EOS between examples.
             new_ids.append(tokenizer.eos_token_id)
         cache.extend(new_ids)
@@ -85,84 +86,73 @@ def packedDatasetGenerator(dataset: Iterable, tokenizer: PreTrainedTokenizerBase
             cache = cache[context_length:]
 
 
-def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset) -> Tuple[float,float]:
-    """
-    Causal perplexity has two boundary conditions:
-        - One "document" (a coherent sequence of sentences) cannot be conditioned on another.
-        - If you have a fixed context length and a very long example, what you cannot do is process the example as
-          several examples in sequence, because that means you will suddenly lose all context in the middle of the example.
-    To ensure the first, you cannot use packing. To ensure the second, I use the strided implementation of
-        https://huggingface.co/docs/transformers/perplexity#example-calculating-perplexity-with-gpt-2-in--transformers
-    which does use a kind of packing, so I changed that.
+from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, denumpify_detensorize, deepspeed_init, logger, has_length
+class TrainerWithoutEvaluationLoop(Trainer):
 
-    The algorithm looks like this. Imagine you have a maximum input length of 9, i.e. the maximum amount of tokens you
-    can send through the model as context + prediction targets is 9. For a long document, you could compute perplexity as
-    if the document consists of many documents of length 9. With prediction represented by { }:
-        {a a a b b b c c c}d d d e e e f f f g g g h h h i i i
-         a a a b b b c c c{d d d e e e f f f}g g g h h h i i i
-         a a a b b b c c c d d d e e e f f f{g g g h h h i i i}
-    ...where within one prediction context, earlier tokens are used as known context for later tokens, but everything is
-    predicted. Yet, this means the first token in the second piece has no context. You are, however, progressing very
-    fast through your predictions, since every token in your budget is also a predicted token.
-    The trade-off we now make is to instead only predict a small stride of tokens every run, and fill the rest of the
-    budget with context from the previous piece. Let the prediction still be { }, and let the total context be [ ]:
-        [{a  a  a  b  b  b  c  c  c}]d  d  d  e  e  e  f  f  f  g  g  g  h  h  h  i  i  i
-          a  a  a [b  b  b  c  c  c {d  d  d}]e  e  e  f  f  f  g  g  g  h  h  h  i  i  i
-          a  a  a  b  b  b [c  c  c  d  d  d {e  e  e}]f  f  f  g  g  g  h  h  h  i  i  i
-          a  a  a  b  b  b  c  c  c [d  d  d  e  e  e {f  f  f}]g  g  g  h  h  h  i  i  i
-          a  a  a  b  b  b  c  c  c  d  d  d [e  e  e  f  f  f {g  g  g}]h  h  h  i  i  i
-          a  a  a  b  b  b  c  c  c  d  d  d  e  e  e [f  f  f  g  g  g {h  h  h}]i  i  i
-          a  a  a  b  b  b  c  c  c  d  d  d  e  e  e  f  f  f [g  g  g  h  h  h {i  i  i}]
+    def evaluation_loop(self,
+        dataloader: DataLoader,
+        description: str,
+        prediction_loss_only: Optional[bool] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> EvalLoopOutput:
+        """
+        Version of the evaluation loop where, rather than looping over a dataloader, we call compute_metrics on Nones.
+        The reason for not altering evaluate() or get_eval_dataloader() is that we now still have the benefits of
+        getting speed metrics and of logging.
 
-    Note that the last token of the predictions is actually never used because no label is known for it inside the
-    window. Hence, in practice, the tokens that partake in the loss are actually:
-        [{a  a  a  b  b  b  c  c} c] d  d  d  e  e  e  f  f  f  g  g  g  h  h  h  i  i  i
-          a  a  a [b  b  b  c  c {c  d  d} d] e  e  e  f  f  f  g  g  g  h  h  h  i  i  i
-          a  a  a  b  b  b [c  c  c  d  d {d  e  e} e] f  f  f  g  g  g  h  h  h  i  i  i
-          a  a  a  b  b  b  c  c  c [d  d  d  e  e {e  f  f} f] g  g  g  h  h  h  i  i  i
-          a  a  a  b  b  b  c  c  c  d  d  d [e  e  e  f  f {f  g  g} g] h  h  h  i  i  i
-          a  a  a  b  b  b  c  c  c  d  d  d  e  e  e [f  f  f  g  g {g  h  h} h] i  i  i
-          a  a  a  b  b  b  c  c  c  d  d  d  e  e  e  f  f  f [g  g  g  h  h {h  i  i} i]
-    """
-    window_size = model.config.max_position_embeddings
-    stride = int(PPL_STRIDE * window_size)
+        We basically cut out everything to do with logits/labels, while keeping the acceleration setup.
+        """
+        # Copy-pasted from Trainer.evaluation_loop
+        ############################################################################################################
+        if self.is_deepspeed_enabled and self.deepspeed is None:
+            _, _ = deepspeed_init(self, num_training_steps=0, inference=True)
 
-    # Iterate over examples and keep non-averaged NLLs for each.
-    nlls = []
-    total_tokens = 0
-    for example in validation_dataset:
-        encodings = tokenizer(example["text"], return_tensors="pt")  # This is a 1 x n_tokens batch.
-        n_tokens  = encodings.input_ids.size(1)
+        model = self._wrap_model(self.model, training=False, dataloader=dataloader)
 
-        next_token_to_predict = 0
-        for window_start in tqdm(range(0, n_tokens, stride)):  # Notice how the start of the context is INSIDE the previous context.
-            window_end = min(window_start + window_size, n_tokens)  # exclusive bound
-            n_tokens_to_predict_in_window = window_end - next_token_to_predict  # usually equal to the stride
+        if len(self.accelerator._models) == 0 and model is self.model:
+            model = (
+                self.accelerator.prepare(model)
+                if self.is_deepspeed_enabled
+                else self.accelerator.prepare_model(model, evaluation_mode=True)
+            )
+            if self.is_fsdp_enabled:
+                self.model = model
+            if model is not self.model:
+                self.model_wrapped = model
+            if self.is_deepspeed_enabled:
+                self.deepspeed = self.model_wrapped
 
-            input_ids  = encodings.input_ids[:, window_start:window_end].to(model.device)
-            target_ids = input_ids.clone()
-            target_ids[:, 0:-n_tokens_to_predict_in_window] = -100  # This makes the labels look like [-100, -100, -100, -100, ..., 1, 2, 3, 4, 5] where the -100 is context that has already been predicted before.
+        if not self.is_in_train:
+            if self.args.fp16_full_eval:
+                model = model.to(dtype=torch.float16, device=self.args.device)
+            elif self.args.bf16_full_eval:
+                model = model.to(dtype=torch.bfloat16, device=self.args.device)
 
-            with torch.no_grad():
-                outputs = model(input_ids, labels=target_ids)
+        batch_size = self.args.eval_batch_size
 
-                # Loss is calculated using CrossEntropyLoss, which is an average (over the tokens that aren't labelled -100).
-                # N.B.: the model only calculates loss over n_tokens_to_predict_in_window-1 labels. The reason is that actually,
-                #       the label for token i should not be token i (because you can already see it at the input) but
-                #       token i+1. HuggingFace allows us to let target_ids = input_ids.clone() but shifts the labels left
-                #       internally, meaning that the final token in the window has no more label.
-                #
-                #       Given this, I added the three -1's below. They weren't in the original code.
-                nlls.append((n_tokens_to_predict_in_window-1)*outputs.loss)
+        logger.info(f"***** Running {description} *****")
+        if has_length(dataloader):
+            logger.info(f"  Num examples = {self.num_examples(dataloader)}")
+        else:
+            logger.info("  Num examples: Unknown")
+        logger.info(f"  Batch size = {batch_size}")
 
-            next_token_to_predict = window_end-1  # This -1 is not in the original, but you do need it since window_end-1 is the last token for which a logit is computed and it is that logit that is shifted out of the loss, so you need to re-predict it.
-            if next_token_to_predict == n_tokens-1:  # Since there is no next token for the final token (which is presumably EOS), you actually have to stop there.
-                break
+        model.eval()
 
-        total_tokens += n_tokens-1
+        ############################################################################################################
 
-    averaged_nll = (torch.stack(nlls).sum() / total_tokens).item()
-    return averaged_nll, np.exp(averaged_nll)
+        metrics = self.compute_metrics(EvalPrediction(predictions=None, label_ids=None))
+
+        # Copy-pasted from Trainer.evaluation_loop
+        ############################################################################################################
+
+        metrics = denumpify_detensorize(metrics)
+        for key in list(metrics.keys()):
+            if not key.startswith(f"{metric_key_prefix}_"):
+                metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
+
+        return EvalLoopOutput(predictions=None, label_ids=None, metrics=metrics, num_samples=0)
 
 
 class Pretraining(ABC):
@@ -215,7 +205,7 @@ class Pretraining(ABC):
         # We re-use the old tokeniser.
         tokenizer = AutoTokenizer.from_pretrained(self.checkpoint, use_fast=False)
         if model_augmentation:
-            model = model_augmentation.augment(model)
+            model = model_augmentation.augment(model, tokenizer)
         model.to("cuda")
 
         # Dataset
@@ -305,7 +295,7 @@ class Pretraining(ABC):
 
         # optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=L2_REGULARISATION)
         # scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=warmup_steps)
-        trainer = Trainer(
+        trainer = TrainerWithoutEvaluationLoop(
             args=training_args,
             # optimizers=(optimizer,scheduler),
 
@@ -313,12 +303,12 @@ class Pretraining(ABC):
             tokenizer=tokenizer,
 
             train_dataset=packed_train_dataset,
-            eval_dataset=[],  # We explicitly do not want to run classic prediction through the model head; the computeMetrics function generates data from scratch.
+            eval_dataset=[],
             callbacks=[
-                EvaluateBeforeTrainingCallback()
+                # EvaluateBeforeTrainingCallback()
             ],
 
-            compute_metrics=lambda _: {k:v for k,v in zip(["NLL", "PPL"], ppl(model, tokenizer, valid_dataset))},
+            compute_metrics=lambda _: {k:v for k,v in zip(["NLL", "PPL"], ppl(model, tokenizer, valid_dataset, PPL_STRIDE, EXAMPLES_PER_EVALUATION))},
             data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
         )
         trainer.train()
