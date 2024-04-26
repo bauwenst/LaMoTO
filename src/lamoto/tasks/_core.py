@@ -10,12 +10,13 @@ import transformers.optimization  # TODO: Trainer handles this and you shouldn't
 import torch
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
-from fiject.hooks.transformers import FijectCallback, EvaluateBeforeTrainingCallback
+from fiject.hooks.transformers import FijectCallback
 from tktkt.files.paths import DataPaths
 
 from ..augmenting.model import ModelAugmentation
 from ..measuring._core import Metric
 from ..measuring import METRICS
+from ..trainer.callbacks import EvaluateBeforeTrainingCallback
 
 ##################################  TODO: These should become task arguments, perhaps as a config dataclass.
 MAX_TRAINING_EPOCHS = 10
@@ -126,7 +127,7 @@ class FinetuningTask(ABC):
             logging_strategy="no",
             push_to_hub=False,
 
-            load_best_model_at_end=True,
+            load_best_model_at_end=True,  # Will take the best model out of its checkpoint directory and load it into self.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
             metric_for_best_model="eval_loss",
             save_strategy="steps",  # Because we want to load the best model at the end, we need to be able to go back to it. Hence, we need to allow saving each evaluation.
             save_steps=interval,    # ... and save on the same interval.
