@@ -4,11 +4,12 @@ Language Modelling Tasks as Objects (LaMoTO) provides a framework for language m
 ## Installation
 If you don't want to edit the source code yourself, run
 ```
-pip install git+https://github.com/bauwenst/LaMoTO
+pip install "lamoto[github] @ git+https://github.com/bauwenst/LaMoTO.git"
 ```
 and if you do, instead run
 ```
 git clone https://github.com/bauwenst/LaMoTO
 cd LaMoTO
-pip install -e .
+pip install -e .[github]
 ```
+If you are me from the future: don't include the `[github]` tag, it will fuck up the editable installs for the packages I maintain.
