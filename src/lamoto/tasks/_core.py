@@ -1,3 +1,14 @@
+"""
+Core fine-tuning script for any task.
+
+# TODO: In the old code I was using for MBR, I was also saving the tokeniser at the end of training. This is still done
+#       in the CLM script, but not here. The reason you want to save it is that you otherwise can't use checkpoints
+#       without loading the tokeniser from the hub, so you need to pass in two checkpoints.
+#       The reason why you want to be careful saving the tokeniser by giving it to Trainer is that Trainer then also uses
+#       it for a variety of purposes that you might not intend (like padding etc.).
+#       The call you basically just want to insert into Trainer somehow is tokenizer.save_pretrained(save_directory=current_checkpoint.as_posix()).
+#       Maybe a callback will work, but you need the path of the latest checkpoint.
+"""
 from typing import Protocol, Any, Dict, Type, List, Tuple
 from dataclasses import dataclass
 from abc import abstractmethod, ABC
@@ -5,7 +16,7 @@ from abc import abstractmethod, ABC
 import time
 
 from datasets import DatasetDict
-from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, RobertaTokenizer, PreTrainedModel
+from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, RobertaTokenizer, PreTrainedModel, PreTrainedTokenizerBase
 import transformers.optimization  # TODO: Trainer handles this and you shouldn't do it manually.
 import torch
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
@@ -18,20 +29,39 @@ from ..measuring._core import Metric
 from ..measuring import METRICS
 from ..trainer.callbacks import EvaluateBeforeTrainingCallback
 
-##################################  TODO: These should become task arguments, perhaps as a config dataclass.
-MAX_TRAINING_EPOCHS = 10
-BATCH_SIZE = 32
-BATCHES_WARMUP = 100  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-EVALS_PER_EPOCH = 9
-EVALS_OF_PATIENCE = 9
 
-LEARNING_RATE = 2e-5
-L2_REGULARISATION = 0.01
-MAX_INPUT_LENGTH = 512
+@dataclass
+class TaskHyperparameters:
+    MAX_TRAINING_EPOCHS: int
+    BATCH_SIZE: int
+    BATCHES_WARMUP: int  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
+    EVALS_PER_EPOCH: int
+    EVALS_OF_PATIENCE: int
 
-CHECKPOINT = "roberta-base"
-ADD_SPECIAL_TOKENS = True
-##################################
+    LEARNING_RATE: float
+    L2_REGULARISATION: float
+    MAX_INPUT_LENGTH: int
+
+    CHECKPOINT: str = "roberta-base"
+    ADD_SPECIAL_TOKENS: bool = True
+
+
+#################################################
+DEFAULT_HYPERPARAMETERS = TaskHyperparameters(
+    MAX_TRAINING_EPOCHS=10,
+    BATCH_SIZE=32,
+    BATCHES_WARMUP=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
+    EVALS_PER_EPOCH=9,
+    EVALS_OF_PATIENCE=9,
+
+    LEARNING_RATE=2e-5,
+    L2_REGULARISATION=0.01,
+    MAX_INPUT_LENGTH=512,
+
+    CHECKPOINT="roberta-base",
+    ADD_SPECIAL_TOKENS=True
+)
+#################################################
 
 
 @dataclass
@@ -40,7 +70,6 @@ class MetricSetup:
     to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
 
 
-@dataclass
 class FinetuningTask(ABC):
 
     def __init__(self, task_name: str, metric_config: MetricSetup, automodel_class: Type[_BaseAutoModelClass], **automodel_args):
@@ -49,8 +78,10 @@ class FinetuningTask(ABC):
         self.automodel_class = automodel_class
         self.automodel_args  = automodel_args
 
-        self.tokenizer: RobertaTokenizer = AutoTokenizer.from_pretrained(CHECKPOINT, add_prefix_space=True)
-        # This field is instantiated at train time to avoid loading duplicate metrics when it isn't necessary.
+        # Fields that can be used by method implementations, but are only instantiated once .train() is called, to
+        # avoid loading heavy objects that would be duplicated by the super() call of a task wrapper.
+        self.hyperparameters: TaskHyperparameters = None
+        self.tokenizer: PreTrainedTokenizerBase = None
         self.metrics: Dict[str, Metric] = None
 
     @abstractmethod
@@ -81,14 +112,19 @@ class FinetuningTask(ABC):
     def sneakyLogitTransform(self, logits, labels):
         return logits
 
-    def train(self, model_augmentation: ModelAugmentation=None):
-        global_model_identifier = CHECKPOINT[CHECKPOINT.rfind("/")+1:] \
+    def train(self, hyperparameters: TaskHyperparameters=DEFAULT_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None):
+        global_model_identifier = hyperparameters.CHECKPOINT[hyperparameters.CHECKPOINT.rfind("/")+1:] \
                                 + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
                                 + f"_{self.task_name}_{time.strftime('%F_%X').replace(':', '-')}"
 
         # Set up paths for checkpointing
         PATH_CHECKPOINTS = DataPaths.pathToCheckpoints() / global_model_identifier
         PATH_CHECKPOINTS.mkdir(exist_ok=True, parents=True)
+
+        # Set up missing fields for use in the other method calls.
+        self.hyperparameters = hyperparameters
+        self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.CHECKPOINT, add_prefix_space=True)
+        self.metrics = {name: METRICS.load(name) for name in self.metric_config.to_compute}
 
         # Get dataset
         datasetdict = self.prepareDataset(self.loadDataset())
@@ -97,26 +133,23 @@ class FinetuningTask(ABC):
         collator = self.getCollator()
 
         # Get model
-        model: PreTrainedModel = self.automodel_class.from_pretrained(CHECKPOINT, **self.automodel_args)
+        model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.CHECKPOINT, **self.automodel_args)
         if model_augmentation:
             model = model_augmentation.augment(model, self.tokenizer)
         model.to("cuda")
 
-        # Set up metrics for accessing in computeMetrics()
-        self.metrics = {name: METRICS.load(name) for name in self.metric_config.to_compute}
-
         # Training arguments
-        interval = (len(datasetdict["train"]) // BATCH_SIZE) // EVALS_PER_EPOCH
+        interval = (len(datasetdict["train"]) // hyperparameters.BATCH_SIZE) // hyperparameters.EVALS_PER_EPOCH
         training_args = TrainingArguments(
             output_dir=PATH_CHECKPOINTS.as_posix(),
 
             # Training
-            num_train_epochs=MAX_TRAINING_EPOCHS,
-            per_device_train_batch_size=BATCH_SIZE,
-            per_device_eval_batch_size=BATCH_SIZE,
+            num_train_epochs=hyperparameters.MAX_TRAINING_EPOCHS,
+            per_device_train_batch_size=hyperparameters.BATCH_SIZE,
+            per_device_eval_batch_size=hyperparameters.BATCH_SIZE,
             # Not sure whether you need these given the custom AdamW in the Trainer constructor.
-            weight_decay=L2_REGULARISATION,  # L2 regularisation constant
-            learning_rate=LEARNING_RATE,  # Not sure if this is still needed
+            weight_decay=hyperparameters.L2_REGULARISATION,  # L2 regularisation constant
+            learning_rate=hyperparameters.LEARNING_RATE,  # Not sure if this is still needed
 
             # Evaluating
             evaluation_strategy="steps",
@@ -134,8 +167,8 @@ class FinetuningTask(ABC):
             save_total_limit=1,     # This will keep the last model stored plus the best model if those aren't the same. https://stackoverflow.com/a/67615225/9352077
         )
 
-        optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=L2_REGULARISATION)  # Not using transformers.optimization because it gives a deprecation warning.
-        scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=BATCHES_WARMUP)  # Not using a linear decay because that's the whole point of having Adam.
+        optimizer = torch.optim.AdamW(model.parameters(), lr=hyperparameters.LEARNING_RATE, weight_decay=hyperparameters.L2_REGULARISATION)  # Not using transformers.optimization because it gives a deprecation warning.
+        scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=hyperparameters.BATCHES_WARMUP)  # Not using a linear decay because that's the whole point of having Adam.
         trainer = Trainer(
             model=model,
             args=training_args,
@@ -145,12 +178,12 @@ class FinetuningTask(ABC):
             optimizers=(optimizer, scheduler),
             callbacks=[
                 EvaluateBeforeTrainingCallback(),
-                FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=EVALS_PER_EPOCH),
-                FijectCallback(global_model_identifier + "_eval_task", evals_between_commits=EVALS_PER_EPOCH,
+                FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=hyperparameters.EVALS_PER_EPOCH),
+                FijectCallback(global_model_identifier + "_eval_task", evals_between_commits=hyperparameters.EVALS_PER_EPOCH,
                                                                        metric_names_with_formatting={(metric_name + "_" + result_name): formatting
                                                                                                      for metric_name, result_formats in self.metric_config.to_track.items()
                                                                                                      for result_name, formatting in result_formats.items()}),
-                transformers.trainer_callback.EarlyStoppingCallback(early_stopping_patience=EVALS_OF_PATIENCE)  # Patience is the amount of eval calls you can tolerate worsening loss.
+                transformers.trainer_callback.EarlyStoppingCallback(early_stopping_patience=hyperparameters.EVALS_OF_PATIENCE)  # Patience is the amount of eval calls you can tolerate worsening loss.
             ],
 
             eval_dataset=datasetdict["validation"],
@@ -160,17 +193,17 @@ class FinetuningTask(ABC):
         )
 
         print("=== TRAINING SIZES ===")
-        print("Batch size:", BATCH_SIZE)
+        print("Batch size:", hyperparameters.BATCH_SIZE)
         print("Training set:")
         print("\t", len(datasetdict["train"]), "examples per epoch")
-        print("\t", len(datasetdict["train"]) // BATCH_SIZE, "batches per epoch")
-        print("\t", MAX_TRAINING_EPOCHS, "epochs")
-        print("\t", (len(datasetdict["train"]) // BATCH_SIZE)*MAX_TRAINING_EPOCHS, "batches in total")
+        print("\t", len(datasetdict["train"]) // hyperparameters.BATCH_SIZE, "batches per epoch")
+        print("\t", hyperparameters.MAX_TRAINING_EPOCHS, "epochs")
+        print("\t", (len(datasetdict["train"]) // hyperparameters.BATCH_SIZE)*hyperparameters.MAX_TRAINING_EPOCHS, "batches in total")
         print("Evaluation set:")
         print("\t", len(datasetdict["validation"]), "examples per evaluation")
-        print("\t", 1 + (len(datasetdict["validation"])-1) // BATCH_SIZE, "batches per evaluation")
-        print("\t", EVALS_PER_EPOCH, "evals per training epoch")
-        print("\t", (len(datasetdict["train"]) // BATCH_SIZE) // EVALS_PER_EPOCH, "training batches between evals")
+        print("\t", 1 + (len(datasetdict["validation"])-1) // hyperparameters.BATCH_SIZE, "batches per evaluation")
+        print("\t", hyperparameters.EVALS_PER_EPOCH, "evals per training epoch")
+        print("\t", (len(datasetdict["train"]) // hyperparameters.BATCH_SIZE) // hyperparameters.EVALS_PER_EPOCH, "training batches between evals")
         print("======================")
 
         trainer.train()

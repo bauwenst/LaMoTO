@@ -121,7 +121,7 @@ class DP(FinetuningTask):
 
             # We need to do truncation manually because we made many tokenizer() calls without concatenating.
             # The way you compute how much to truncate is by computing how much room you have minus how much is reserved by specials.
-            max_tokens = MAX_INPUT_LENGTH - self.tokenizer.num_special_tokens_to_add(pair=False) - 1
+            max_tokens = self.hyperparameters.MAX_INPUT_LENGTH - self.tokenizer.num_special_tokens_to_add(pair=False) - 1
             tokens_so_far = 0
             for word_idx in range(len(subword_ids_per_word)):
                 subwords = subword_ids_per_word[word_idx]
@@ -136,7 +136,7 @@ class DP(FinetuningTask):
                     deprels              = deprels[:word_idx+1]
                     break
 
-            # TODO: For very very long sentences, you probably shouldn't just truncate the example,but you should use
+            # TODO: For very very long sentences, you probably shouldn't just truncate the example, but you should use
             #       overflow with a stride. Otherwise you're just losing too much interesting dependency data.
             #       This means the above code should split instead of cut, and all the below code would be repeated per
             #       "chunk" of the example, not just once.

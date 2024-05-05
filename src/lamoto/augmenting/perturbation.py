@@ -8,6 +8,9 @@ class PerturbDataset(FinetuningTask):
     """
     Wrapper around a fine-tuning task that corrupts the text field of that task's dataset.
     Used for verifying how stable a model is against corrupted input.
+
+    TODO: Should be able to specify the splits you want to apply this to. Sometimes you want to perturb only the
+          training set, only the testing set, and so on.
     """
 
     def __init__(self, task: FinetuningTask, perturbation: TextMapper, text_field_name: str):

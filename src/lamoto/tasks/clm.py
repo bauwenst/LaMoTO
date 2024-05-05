@@ -34,20 +34,39 @@ from ..trainer.trainers import TrainerWithoutEvaluationLoop
 from ..trainer.callbacks import CheckpointAtTimeInterval, CheckpointLastModel, EvaluateBeforeTrainingCallback
 
 
-# An "effective batch" is all the examples used to compute the gradient of one gradient descent step.
-# Classically, the loss function looks like sum_{i=1}^N loss(x_i, y_i). You compute that sum by splitting the effort
-# across devices and, per device, splitting the work into several runs because of memory limitations.
-EXAMPLES_PER_EFFECTIVE_BATCH = 512   # From the OpenAI GPT-2 paper.
-EXAMPLES_PER_DEVICEBATCH = 64        # A devicebatch is just whatever fits on the GPU, not N.
-TOTAL_TOKEN_BUDGET = 10_000_000_000  # Could've been batches like in the BPE-knockout paper, but for CLMs this metric is more popular. In any case, we're just going to train some CLMs until our wall time runs out.
+@dataclass
+class ClmHyperparameters:  # TODO: These should be consolidated with the non-CLM parameters. Lots of overlap, just with different names.
+    # An "effective batch" is all the examples used to compute the gradient of one gradient descent step.
+    # Classically, the loss function looks like sum_{i=1}^N loss(x_i, y_i). You compute that sum by splitting the effort
+    # across devices and, per device, splitting the work into several runs because of memory limitations.
+    EXAMPLES_PER_EFFECTIVE_BATCH: int
+    EXAMPLES_PER_DEVICEBATCH: int  # A devicebatch is just whatever fits on the GPU, not N.
 
-MINUTES_BETWEEN_CHECKPOINTS = 30
-EFFECTIVE_BATCHES_BETWEEN_EVALUATIONS = 128
-EXAMPLES_PER_EVALUATION = 2**14
-PPL_STRIDE = 1/8  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
+    MINUTES_BETWEEN_CHECKPOINTS: int
+    EFFECTIVE_BATCHES_BETWEEN_EVALUATIONS: int
+    EXAMPLES_PER_EVALUATION: int
 
-LEARNING_RATE = 2e-5
-L2_REGULARISATION = 0.01
+    LEARNING_RATE: float
+    L2_REGULARISATION: float
+
+    # CLM-specific hyperparameters
+    TOTAL_TOKEN_BUDGET: int  # Could've been batches like in the BPE-knockout paper, but for CLMs this metric is more popular. In any case, we're just going to train some CLMs until our wall time runs out.
+    PPL_STRIDE: float  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
+
+
+DEFAULT_CLM_HYPERPARAMETERS = ClmHyperparameters(
+    EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
+    EXAMPLES_PER_DEVICEBATCH = 64,
+    TOTAL_TOKEN_BUDGET = 10_000_000_000,  # From GEITje.
+
+    MINUTES_BETWEEN_CHECKPOINTS = 30,
+    EFFECTIVE_BATCHES_BETWEEN_EVALUATIONS = 128,
+    EXAMPLES_PER_EVALUATION = 2**14,
+    PPL_STRIDE = 1/8,
+
+    LEARNING_RATE = 2e-5,
+    L2_REGULARISATION = 0.01
+)
 
 # Timeout configuration (I tested this and it works, but it sure is a weird use of Python imports... https://github.com/huggingface/datasets/issues/6172#issuecomment-1794876229)
 datasets.config.STREAMING_READ_RETRY_INTERVAL = 60   # Seconds between retries; ideally this would work with exponential backoff, but it doesn't, because... HuggingFace engineers.
@@ -102,7 +121,7 @@ class Pretraining(ABC):
     def loadDataset(self):
         pass
 
-    def train(self, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+    def train(self, hyperparameters: ClmHyperparameters=DEFAULT_CLM_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
         """
         :param model_augmentation: Transformation to apply to the model architecture.
         :param resume_from_folder: Folder containing model weights, optimiser state (momenta etc...) and scheduler state
@@ -153,7 +172,7 @@ class Pretraining(ABC):
         # Dataset
         datasetdict   = self.loadDataset()
         train_dataset = datasetdict["train"]     .shuffle(seed=42, buffer_size=10_000)  # https://huggingface.co/docs/datasets/stream#shuffle
-        valid_dataset = datasetdict["validation"].shuffle(seed=42, buffer_size=10_000).take(EXAMPLES_PER_EVALUATION)
+        valid_dataset = datasetdict["validation"].shuffle(seed=42, buffer_size=10_000).take(hyperparameters.EXAMPLES_PER_EVALUATION)
 
         # For efficiency, instead of training on batches with any padding at all, we pack examples until the input is full.
         # - GPT-2 has no pad token, but this doesn't really matter because it's actually the attention mask that determines
@@ -176,12 +195,12 @@ class Pretraining(ABC):
         #                 "context_length": model.config.max_position_embeddings})
 
         # Statistics
-        n_examples          = TOTAL_TOKEN_BUDGET // model.config.max_position_embeddings
-        n_gradient_descents = n_examples // EXAMPLES_PER_EFFECTIVE_BATCH
-        n_accumulations     = EXAMPLES_PER_EFFECTIVE_BATCH // (torch.cuda.device_count() * EXAMPLES_PER_DEVICEBATCH)  # The amount of times, to get to one effective batch, you have to push a device batch through all devices in parallel.
+        n_examples          = hyperparameters.TOTAL_TOKEN_BUDGET // model.config.max_position_embeddings
+        n_gradient_descents = n_examples // hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
+        n_accumulations     = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // (torch.cuda.device_count() * hyperparameters.EXAMPLES_PER_DEVICEBATCH)  # The amount of times, to get to one effective batch, you have to push a device batch through all devices in parallel.
 
         # n_descents_between_saves = n_gradient_descents // TOTAL_CHECKPOINTS
-        n_descents_between_evals = EFFECTIVE_BATCHES_BETWEEN_EVALUATIONS
+        n_descents_between_evals = hyperparameters.EFFECTIVE_BATCHES_BETWEEN_EVALUATIONS
         n_descents_of_warmup = int(n_gradient_descents * 0.1)
 
         # Training args
@@ -190,13 +209,13 @@ class Pretraining(ABC):
             max_steps=n_gradient_descents,
 
             optim=OptimizerNames.ADAMW_TORCH,
-            learning_rate=LEARNING_RATE,
+            learning_rate=hyperparameters.LEARNING_RATE,
             lr_scheduler_type=SchedulerType.CONSTANT_WITH_WARMUP,
             warmup_steps=n_descents_of_warmup,
-            weight_decay=L2_REGULARISATION,
+            weight_decay=hyperparameters.L2_REGULARISATION,
 
             # Batches
-            per_device_train_batch_size=EXAMPLES_PER_DEVICEBATCH,
+            per_device_train_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,
             gradient_accumulation_steps=n_accumulations,
 
             # Style of computations
@@ -206,7 +225,7 @@ class Pretraining(ABC):
             # Evaluation
             evaluation_strategy="steps",
             eval_steps=n_descents_between_evals,
-            per_device_eval_batch_size=EXAMPLES_PER_DEVICEBATCH,
+            per_device_eval_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,
             eval_accumulation_steps=n_accumulations,  # "Number of predictions steps to accumulate the output tensors for, before moving the results to the CPU."
 
             # Checkpointing via the `DefaultFlowCallback` will be disabled, but we will still save using a time-based callback.
@@ -253,7 +272,7 @@ class Pretraining(ABC):
             eval_dataset=[],
             callbacks=[
                 EvaluateBeforeTrainingCallback(),
-                CheckpointAtTimeInterval(minutes=MINUTES_BETWEEN_CHECKPOINTS),
+                CheckpointAtTimeInterval(minutes=hyperparameters.MINUTES_BETWEEN_CHECKPOINTS),
                 CheckpointLastModel()
             ] + ([] if self.wandb_project else [
                 FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=5,
@@ -262,7 +281,7 @@ class Pretraining(ABC):
                                metric_names_with_formatting={"PPL": "PPL"}),
             ]),
 
-            compute_metrics=lambda _: {k:v for k,v in zip(["NLL", "PPL"], ppl(model, tokenizer, valid_dataset, PPL_STRIDE, EXAMPLES_PER_EVALUATION))},
+            compute_metrics=lambda _: {k:v for k,v in zip(["NLL", "PPL"], ppl(model, tokenizer, valid_dataset, hyperparameters.PPL_STRIDE, hyperparameters.EXAMPLES_PER_EVALUATION))},
             data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
         )
         try:
