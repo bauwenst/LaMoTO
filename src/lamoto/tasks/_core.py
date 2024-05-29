@@ -24,10 +24,11 @@ from transformers.models.auto.auto_factory import _BaseAutoModelClass
 from fiject.hooks.transformers import FijectCallback
 from tktkt.files.paths import DataPaths
 
-from ..augmenting.model import ModelAugmentation
+from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric
 from ..measuring import METRICS
 from ..trainer.callbacks import EvaluateBeforeTrainingCallback
+from ..util.strings import getSubstringAfterLastSlash
 
 
 @dataclass
@@ -113,7 +114,7 @@ class FinetuningTask(ABC):
         return logits
 
     def train(self, hyperparameters: TaskHyperparameters=DEFAULT_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None):
-        global_model_identifier = hyperparameters.CHECKPOINT[hyperparameters.CHECKPOINT.rfind("/")+1:] \
+        global_model_identifier = getSubstringAfterLastSlash(hyperparameters.CHECKPOINT) \
                                 + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
                                 + f"_{self.task_name}_{time.strftime('%F_%X').replace(':', '-')}"
 

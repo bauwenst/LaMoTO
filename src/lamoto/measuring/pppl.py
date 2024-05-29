@@ -29,8 +29,13 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
       not obvious whether left or right is more informative, but it's also not obvious if context should come equally
       from both sides. The fraction that comes from the right is a hyperparameter.
 
-    The example at https://stackoverflow.com/a/70482924 does not support sentences longer than the model's context length,
-    and it hardcodes special tokens. The implementation below supports any context length and any special token format.
+    The implementation at https://stackoverflow.com/a/70482924 has two flaws:
+        1. It hardcodes the location of special tokens.
+        2. It does not support sentences longer than the model's context length.
+
+    The implementation below supports any special token format, and any context length. The latter can be done naively
+    by having equal context on the left and right, or parameterised by the proportion of left/right context. This is the
+    most general version of the algorithm and I have implemented that below.
     """
     # Iterate over examples and keep non-averaged NLLs for each.
     nlls = []
