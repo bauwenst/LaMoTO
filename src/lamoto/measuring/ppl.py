@@ -1,4 +1,4 @@
-import numpy as np
+from math import exp
 import torch
 from tqdm.auto import tqdm
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
@@ -47,7 +47,7 @@ def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_d
           a  a  a  b  b  b  c  c  c  d  d  d  e  e  e  f  f  f [g  g  g  h  h {h  i  i} i]
     """
     window_size = model.config.max_position_embeddings
-    stride_fraction = int(stride_fraction * window_size)
+    stride_tokens = int(stride_fraction * window_size)
 
     # Iterate over examples and keep non-averaged NLLs for each.
     nlls = []
@@ -57,7 +57,7 @@ def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_d
         n_tokens  = encodings.input_ids.size(1)
 
         next_token_to_predict = 0
-        for window_start in range(0, n_tokens, stride_fraction):  # Notice how the start of the context is INSIDE the previous context.
+        for window_start in range(0, n_tokens, stride_tokens):  # Notice how the start of the context is INSIDE the previous context.
             window_end = min(window_start + window_size, n_tokens)  # exclusive bound
             n_tokens_to_predict_in_window = window_end - next_token_to_predict  # usually equal to the stride
 
@@ -83,5 +83,5 @@ def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_d
 
         total_tokens += n_tokens-1
 
-    averaged_nll = (torch.stack(nlls).sum() / total_tokens).item()
-    return averaged_nll, np.exp(averaged_nll)
+    averaged_nll = (torch.cat(nlls).sum() / total_tokens).item()
+    return averaged_nll, exp(averaged_nll)
