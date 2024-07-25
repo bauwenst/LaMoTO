@@ -7,7 +7,7 @@ from typing import Tuple
 
 
 def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset, stride_fraction: float,
-        tqdm_dataset_size: int=None) -> Tuple[float, float]:
+        tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
     """
     Causal perplexity has two boundary conditions:
         - One "document" (a coherent sequence of sentences) cannot be conditioned on another.
@@ -45,6 +45,8 @@ def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_d
           a  a  a  b  b  b  c  c  c  d  d  d [e  e  e  f  f {f  g  g} g] h  h  h  i  i  i
           a  a  a  b  b  b  c  c  c  d  d  d  e  e  e [f  f  f  g  g {g  h  h} h] i  i  i
           a  a  a  b  b  b  c  c  c  d  d  d  e  e  e  f  f  f [g  g  g  h  h {h  i  i} i]
+
+    :return: Perplexity, averaged NLL, total amount of tokens.
     """
     window_size = model.config.max_position_embeddings
     stride_tokens = int(stride_fraction * window_size)
@@ -84,4 +86,4 @@ def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_d
         total_tokens += n_tokens-1
 
     averaged_nll = (torch.cat(nlls).sum() / total_tokens).item()
-    return averaged_nll, exp(averaged_nll)
+    return exp(averaged_nll), averaged_nll, total_tokens

@@ -281,7 +281,7 @@ class Pretraining(ABC):
                                metric_names_with_formatting={"PPL": "PPL"}),
             ]),
 
-            compute_metrics=lambda _: {k:v for k,v in zip(["NLL", "PPL"], ppl(model, tokenizer, valid_dataset, hyperparameters.PPL_STRIDE, hyperparameters.EXAMPLES_PER_EVALUATION))},
+            compute_metrics=lambda _: {k:v for k,v in zip(["PPL", "NLL"], ppl(model, tokenizer, valid_dataset, hyperparameters.PPL_STRIDE, hyperparameters.EXAMPLES_PER_EVALUATION))},
             data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
         )
         try:
