@@ -1,6 +1,9 @@
 """
 Inspired by Edwin Rijgersberg's script to train GEITje.
     https://github.com/Rijgersberg/GEITje
+
+TODO: We desperately need to fix the issue that you first do an effective batch (512 examples of 1024 tokens, i.e. half a million tokens)
+      before evaluation.
 """
 # Types
 from dataclasses import dataclass
@@ -93,6 +96,8 @@ def packedDatasetGenerator(dataset: Iterable, tokenizer: PreTrainedTokenizerBase
     """
     cache = []
     for row in dataset:  # TODO: <--- This can be affected by a network error. If HF doesn't fix their retries, wrap this. https://github.com/huggingface/datasets/pull/6844
+        # print("Loaded row from dataset")
+
         # Add extra IDs to cache
         new_ids = tokenizer(row[key], max_length=1_000_000, truncation=True)['input_ids']  # max_length=None will give a warning because it assumes tokeniser output is passed to the model without further processing.
         if not new_ids[-1] == tokenizer.eos_token_id:  # You need an EOS between examples.
@@ -285,10 +290,17 @@ class Pretraining(ABC):
             data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
         )
         try:
+            print("Training:")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
-        except:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
+        except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
+            print("Caught exception while training:")
+            print("="*32)
+            print(e)
+            print("="*32)
+            print("A final checkpoint will be saved.")
+
             trainer.control.should_save     = True
             trainer.control.should_evaluate = False
             trainer.control.should_log      = False

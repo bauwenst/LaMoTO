@@ -89,7 +89,7 @@ class DP(FinetuningTask):
         (the only time Python allows currying is in expressions `self.method`) and then we access the metric instance
         that is already present in `self` anyway.
         """
-        self.metrics["dp-attachment"].add(SuparWithLoss.logitsAndLabelsToMetric(logits, labels))
+        self.metrics["attachment"].add(SuparWithLoss.logitsAndLabelsToMetric(logits, labels))
         return torch.tensor([[1]], device=logits[0].device)
 
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
