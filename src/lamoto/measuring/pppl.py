@@ -1,14 +1,39 @@
-from typing import Tuple
+from typing import Tuple, Dict
 from tqdm.auto import tqdm
+from dataclasses import dataclass
 
 from math import exp
 import torch
 from torch.utils.data.dataset import Dataset
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
+from ._core import MetricHyperparameters, AutonomousMetric
+
+
+@dataclass
+class PPPL_Parameters(MetricHyperparameters):
+    right_fraction: float
+
+
+class PseudoPerplexity(AutonomousMetric):
+
+    def computeFromEnvironment(self) -> Dict[str, float]:
+        params = PPPL_Parameters.extractFromTask(self.environment.hyperparameters)
+        p, n, t = pppl(
+            model=self.environment.model,
+            tokenizer=self.environment.tokeniser,
+            validation_dataset=self.environment.validation_dataset,
+            rightward_fraction=params.right_fraction
+        )
+        return {
+            "pppl": p,
+            "nll": n,
+            "total_tokens": t
+        }
+
 
 def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset, rightward_fraction: float=0.5,
-         tqdm_dataset_size: int=None) -> Tuple[float, float]:
+         tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
     """
     Masked perplexity (pseudo-perplexity). Same boundary conditions as causal perplexity apply, except the task is not to
     predict the next token but to predict the token under a mask. This is fundamentally different to causal PPL, because
@@ -100,4 +125,4 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
         total_tokens += n
 
     averaged_nll = (torch.cat(nlls).sum() / total_tokens).item()
-    return averaged_nll, exp(averaged_nll)
+    return exp(averaged_nll), averaged_nll, total_tokens

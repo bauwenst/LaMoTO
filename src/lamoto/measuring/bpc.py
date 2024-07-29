@@ -40,11 +40,24 @@ You can express NPC in terms of PPL as
 """
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from datasets import Dataset
-from typing import Tuple
+from typing import Tuple, Dict
 
 from math import log as ln
 
-from .ppl import ppl
+from ._core import AutonomousMetric
+from .ppl import ppl, PPL_Parameters
+
+
+class BitsPerCharacter(AutonomousMetric):
+
+    def computeFromEnvironment(self) -> Dict[str, float]:
+        params = PPL_Parameters.extractFromTask(self.environment.hyperparameters)
+        b, c = bpc(self.environment.model, self.environment.tokeniser, self.environment.validation_dataset,
+                   stride_fraction=params.stride_fraction)
+        return {
+            "bpc": b,
+            "total_chars": c
+        }
 
 
 def bpc(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset, stride_fraction: float,

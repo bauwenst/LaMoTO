@@ -1,12 +1,13 @@
 from supar.utils.metric import AttachmentMetric
 from typing import Any, Dict
 
-from ._core import Metric
+from ._core import LogitLabelMetric
 
 
-class DependencyParsingMetrics(Metric):
+class DependencyParsingMetrics(LogitLabelMetric):
 
     def __init__(self):
+        super().__init__(None)
         self.content = AttachmentMetric()
 
     def add(self, other: AttachmentMetric):
