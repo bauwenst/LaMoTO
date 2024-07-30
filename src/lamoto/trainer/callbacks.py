@@ -1,3 +1,5 @@
+from enum import Enum
+
 import time
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
 
@@ -11,31 +13,57 @@ class EvaluateBeforeTrainingCallback(TrainerCallback):
     It should be noted that although on_train_begin() exists, there is a bunch of stuff that comes after it. Hence,
     we use on_step_begin(), which is called after the dataloader's first batch is consumed but right before the model is
     referenced for the first time in the training loop.
+
+    FIXME: This does still run 1 full gradient descent pass first... In CLM, it shows that half a million tokens (512 examples of 1024 tokens)
+           are processed BEFORE entering the eval loop for the first time.
     """
     def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if state.global_step == 0:
             control.should_evaluate = True
 
 
-class CheckpointAtTimeInterval(TrainerCallback):
+class CallbackType(Enum):
+    EVALUATE   = 1
+    CHECKPOINT = 2
+    STOP       = 3
+
+
+class CallbackAtTimeInterval(TrainerCallback):
     """
-    Rather than saving based on the amount of STEPS trained, save best on the amount of TIME trained.
+    Rather than saving/evaluating/stopping based on the amount of STEPS trained, do it based on the amount of TIME trained.
     """
 
-    def __init__(self, minutes: float):
-        self.seconds_between_saves = minutes*60
-        self.last_save_was_at = 0
+    def __init__(self, minutes: float, event: CallbackType):
+        self.seconds_between_events = minutes * 60
+        self.last_event_was_at = 0
+        self.event_type = event
 
     def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        self.last_save_was_at = time.perf_counter()
+        self.last_event_was_at = time.perf_counter()
 
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        seconds_since_last_save = time.perf_counter() - self.last_save_was_at
-        if seconds_since_last_save >= self.seconds_between_saves:
-            control.should_save = True
+        seconds_since_last_event = time.perf_counter() - self.last_event_was_at
+        if seconds_since_last_event >= self.seconds_between_events:
+            if self.event_type == CallbackType.CHECKPOINT:
+                control.should_save = True
+            elif self.event_type == CallbackType.EVALUATE:
+                control.should_evaluate = True
+            elif self.event_type == CallbackType.STOP:
+                control.should_training_stop = True
+            else:
+                raise RuntimeError()
 
     def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        self.last_save_was_at = time.perf_counter()
+        if self.event_type == CallbackType.CHECKPOINT:
+            self.last_event_was_at = time.perf_counter()
+
+    def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if self.event_type == CallbackType.EVALUATE:
+            self.last_event_was_at = time.perf_counter()
+
+    def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if self.event_type == CallbackType.STOP:
+            self.last_event_was_at = time.perf_counter()
 
 
 class CheckpointLastModel(TrainerCallback):
@@ -46,7 +74,7 @@ class CheckpointLastModel(TrainerCallback):
 
     In the within-epoch loop:
         - on_step_end(): sets control.should_training_stop if global_step >= max_steps.
-        - break if control.should_training_stop
+        - break if control.should_training_stop  (the loop will also exit naturally at the end of the epoch)
 
     In the across-epoch loop:
         - on_epoch_end()
