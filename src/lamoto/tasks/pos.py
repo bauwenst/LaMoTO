@@ -32,7 +32,7 @@ class POS(Task):
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             enc = self.tokenizer(example["tokens"], is_split_into_words=True,
-                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self.config.max_position_embeddings)
+                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
             word_labels  = example["upos"]  # Note: this is already a list of integers.
             token_labels = []
 
@@ -51,7 +51,7 @@ class POS(Task):
         return dataset
 
     def getCollator(self) -> DataCollator:
-        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.config.max_position_embeddings)
+        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.

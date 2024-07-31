@@ -21,6 +21,7 @@ This is pretty much limited to the CANINE model. According to J.H. Clark via per
 #       This way, the model will better learn compound boundaries.
 
 import re
+from copy import deepcopy
 from typing import Iterable
 
 from datasets import Dataset, DatasetDict
@@ -30,20 +31,15 @@ from bpe_knockout.project.config import morphologyGenerator, setupEnglish, Knock
 
 from ._core import *
 
+
+
 ##################################
-CANINE_DEFAULT_HYPERPARAMETERS = TaskHyperparameters(
-    MAX_TRAINING_EPOCHS=20,
-    BATCH_SIZE=32,
-    EVALS_PER_EPOCH=9,
-    EVALS_OF_PATIENCE=9,
+SUGGESTED_HYPERPARAMETERS_MBR = deepcopy(SUGGESTED_HYPERPARAMETERS)
+SUGGESTED_HYPERPARAMETERS_MBR.CHECKPOINT_OR_CONFIG = "google/canine-c"
+SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER_CHECKPOINT = "google/canine-c"
+SUGGESTED_HYPERPARAMETERS_MBR.EFFECTIVE_BATCHES_WARMUP = 1000
+SUGGESTED_HYPERPARAMETERS_MBR.EVAL_VS_SAVE_INTERVALS.evaluation = NEveryEpoch(per_epoch=9, effective_batch_size=SUGGESTED_HYPERPARAMETERS_MBR.EXAMPLES_PER_EFFECTIVE_BATCH)
 
-    BATCHES_WARMUP=1000,
-    LEARNING_RATE=2e-5,
-    L2_REGULARISATION=0.01,
-
-    CHECKPOINT="google/canine-c",
-    MAX_INPUT_LENGTH=2048
-)
 DATASET_CONFIG = setupEnglish()
 ##################################
 
@@ -108,7 +104,7 @@ class MBR(Task):
         def preprocess(example):
             output = self.tokenizer(example["text"], add_special_tokens=False,
                                     # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
-                                    truncation=True, max_length=self.config.max_position_embeddings)
+                                    truncation=True, max_length=self._getMaxInputLength())
             output["labels"] = example["labels"]
             return output
 
@@ -123,7 +119,7 @@ class MBR(Task):
         #       ValueError: Unable to create tensor, you should probably activate truncation and/or padding with
         #       'padding=True' 'truncation=True' to have batched tensors with the same length.
         # The other reason is the too-deeply-nested tensors due to return_tensors="pt".
-        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.config.max_position_embeddings)
+        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.

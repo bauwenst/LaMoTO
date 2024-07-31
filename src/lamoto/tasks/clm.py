@@ -1,45 +1,53 @@
-"""
-Inspired by Edwin Rijgersberg's script to train GEITje.
-    https://github.com/Rijgersberg/GEITje
-"""
 # Types
 from dataclasses import dataclass
 from typing import Iterable, Tuple, Any
 
 # ML libs
 import datasets
-from datasets import DatasetDict
+from datasets import DatasetDict, IterableDatasetDict
 from transformers import \
     DataCollatorForLanguageModeling, \
     AutoModelForCausalLM, \
     PreTrainedTokenizerBase, DataCollator, EvalPrediction
 
 # Relative
-from ._core import Task, MetricSetup, TaskHyperparameters
+from ._core import *
 from ..measuring.ppl import PPL_Parameters
+from ..trainer.hyperparameters import Intervals
 
 
 @dataclass
 class ClmHyperparameters(TaskHyperparameters):
-    TOTAL_TOKEN_BUDGET: int  # Could've been batches like in the BPE-knockout paper, but for CLMs this metric is more popular. In any case, we're just going to train some CLMs until our wall time runs out.
-    METRIC_CONFIG: PPL_Parameters  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
+    PPL: PPL_Parameters  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
 
 
-DEFAULT_CLM_HYPERPARAMETERS = ClmHyperparameters(
-    #####
+SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
+    SAVE_AS=None,
+    WANDB_PROJECT=None,
+
     EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
     EXAMPLES_PER_DEVICEBATCH = 64,
+    EFFECTIVE_BATCHES_WARMUP=0.1,
+    HARD_STOPPING_CONDITION=AfterNTokens(10_000_000_000, tokens_per_packed_example=1024, effective_batch_size=512),  # From GEITje.
 
-    MINUTES_BETWEEN_CHECKPOINTS = 30,
-    EFFECTIVE_BATCHES_BETWEEN_EVALUATIONS = 128,
     EXAMPLES_PER_EVALUATION = 2**14,
-    #####
+
+    TRACK_BEST_MODEL=False,
+    EVALS_OF_PATIENCE=None,
+    EVAL_VS_SAVE_INTERVALS=Intervals(
+        evaluation=EveryNDescents(descents=128),
+        checkpointing=EveryNMinutes(minutes=30)
+    ),
+
+    ADD_SPECIAL_TOKENS=False,
+    INIT_WEIGHTS=False,
+    CHECKPOINT_OR_CONFIG="openai-community/gpt2",
+    TOKENISER_CHECKPOINT="openai-community/gpt2",
 
     LEARNING_RATE = 2e-5,
     L2_REGULARISATION = 0.01,
 
-    METRIC_CONFIG = PPL_Parameters(stride_fraction=1/8),
-    TOTAL_TOKEN_BUDGET = 10_000_000_000  # From GEITje.
+    PPL = PPL_Parameters(stride_fraction=1/8)
 )
 
 # Timeout configuration (I tested this and it works, but it sure is a weird use of Python imports... https://github.com/huggingface/datasets/issues/6172#issuecomment-1794876229)
@@ -58,6 +66,8 @@ def packedDatasetGenerator(dataset: Iterable, tokenizer: PreTrainedTokenizerBase
     HuggingFace Transformers.
 
     The incomplete final chunk at the end of the dataset is discarded.
+
+    Source: Edwin Rijgersberg's script to train GEITje (https://github.com/Rijgersberg/GEITje)
 
     :param dataset: Dataset of samples (iterable of dict-like, e.g. Hugging Face dataset)
     :param tokenizer: Callable that tokenizes the samples (e.g. Hugging Face tokenizer)
@@ -99,15 +109,12 @@ class CLM(Task):
             automodel_class=AutoModelForCausalLM
         )
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        dataset["train"] = dataset["train"].shuffle(seed=42, buffer_size=10_000)  # https://huggingface.co/docs/datasets/stream#shuffle
+    def prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
         dataset["train"] = datasets.IterableDataset.from_generator(
             generator=packedDatasetGenerator,
             gen_kwargs={"dataset": dataset["train"],
                         "tokenizer": self.tokenizer,
-                        "context_length": self.config.max_position_embeddings})
-
-        dataset["validation"] = dataset["validation"].shuffle(seed=42, buffer_size=10_000).take(self.hyperparameters.EXAMPLES_PER_EVALUATION)
+                        "context_length": self._getMaxInputLength()})
         # dataset["validation"] = datasets.IterableDataset.from_generator(
         #     generator=packedDatasetGenerator,
         #     gen_kwargs={"dataset": dataset["validation"],
@@ -124,5 +131,5 @@ class CLM(Task):
 
 class PretrainingC4(CLM):
 
-    def loadDataset(self):
+    def loadDataset(self) -> IterableDatasetDict:
         return datasets.load_dataset("allenai/c4", "en", streaming=True)

@@ -28,15 +28,15 @@ class CoLA(Task):
 
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
-            return self.tokenizer(example["sentence"], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
-                                  truncation=True, max_length=self.config.max_position_embeddings)
+            return self.tokenizer(example["sentence"], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,  # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
+                                  truncation=True, max_length=self._getMaxInputLength())
 
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["sentence", "idx"])
         return dataset
 
     def getCollator(self) -> DataCollator:
-        return DataCollatorWithPadding(self.tokenizer, padding="longest", max_length=self.config.max_position_embeddings)
+        return DataCollatorWithPadding(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.

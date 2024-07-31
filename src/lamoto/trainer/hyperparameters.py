@@ -4,13 +4,21 @@ from dataclasses import dataclass
 from datasets.arrow_dataset import DatasetInfoMixin
 from transformers import PretrainedConfig
 
-from lamoto.util.datasets import getDatasetSize
+from lamoto.util.datasets import getDatasetSize, totalBatches
 
 
-class LamotoIntervalStrategy(ABC):
+class HowManySteps(ABC):
+    """
+    A "step" is one gradient descent, or equivalently, one effective batch.
+    You can use this as a time axis in the training process.
+    """
     @abstractmethod
-    def getSteps(self, *args):
+    def getSteps(self, *args) -> int:
         pass
+
+
+class LamotoIntervalStrategy(HowManySteps):
+    pass
 
 
 class NoStrategy(LamotoIntervalStrategy):
@@ -50,6 +58,54 @@ class EveryNMinutes(LamotoIntervalStrategy):
         raise NotImplementedError("Time-based intervals aren't enforced with step arguments, but a custom callback.")
 
 
+class LamotoStoppingStrategy(HowManySteps):
+    pass
+
+
+class NeverStop(LamotoStoppingStrategy):
+    def getSteps(self, *args):
+        raise NotImplementedError("No maximum amount of steps defined when the rule is to never stop.")
+
+
+class AfterNDescents(LamotoStoppingStrategy):
+    def __init__(self, descents: int):
+        self.steps_to_end = descents
+
+    def getSteps(self, *args):
+        return self.steps_to_end
+
+
+class AfterNEpochs(LamotoStoppingStrategy):
+    def __init__(self, epochs: int, effective_batch_size: int):
+        self.epochs_to_end = epochs
+        self.examples_per_batch = effective_batch_size
+
+    def getSteps(self, train_dataset: DatasetInfoMixin) -> int:
+        examples_per_epoch = getDatasetSize(train_dataset, split="train")
+        steps_per_epoch    = totalBatches(examples_per_epoch, self.examples_per_batch)
+        return steps_per_epoch*self.epochs_to_end
+
+
+class AfterNTokens(LamotoStoppingStrategy):
+    def __init__(self, total_tokens: int, tokens_per_packed_example: int, effective_batch_size: int):  # NOTE: This only works for packed datasets. Otherwise, you need to use a TrainerCallback that uses state.num_input_tokens_seen
+        self.total_tokens = total_tokens
+        self.tokens_per_example = tokens_per_packed_example
+        self.examples_per_batch = effective_batch_size
+
+    def getSteps(self, *args) -> int:
+        total_examples = totalBatches(self.total_tokens, self.tokens_per_example)
+        total_steps    = totalBatches(total_examples, self.examples_per_batch)
+        return total_steps
+
+
+class AfterNMinutes(LamotoStoppingStrategy):
+    def __init__(self, minutes: int):
+        self.minutes = minutes
+
+    def getSteps(self, *args):
+        raise NotImplementedError("Time-based stopping isn't enforced with a step argument, but a custom callback.")
+
+
 @dataclass
 class Intervals:
     evaluation: LamotoIntervalStrategy
@@ -58,10 +114,11 @@ class Intervals:
 
 @dataclass
 class TaskHyperparameters:
-    WANDB_PROJECT: str
+    SAVE_AS: Optional[str]  # Not necessary if a checkpoint name is given.
+    WANDB_PROJECT: Optional[str]
 
     # Sizes
-    # - An "effective batch" is all the examples used to compute the gradient of one gradient descent step.
+    # - An "effective batch" is all the examples used to compute the gradient of one step of gradient descent.
     #   Classically, the loss function looks like sum_{i=1}^N loss(x_i, y_i). You compute that sum by splitting the effort
     #   across devices and, per device, splitting the work into several runs because of memory limitations.
     # - Training:
@@ -69,10 +126,10 @@ class TaskHyperparameters:
     EXAMPLES_PER_DEVICEBATCH: int  # A devicebatch is just whatever fits on the GPU, not N.
 
     EFFECTIVE_BATCHES_WARMUP: Union[int, float]  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-    MAX_TRAINING_EPOCHS: int
+    HARD_STOPPING_CONDITION: LamotoStoppingStrategy
 
     # - Evaluating:
-    EXAMPLES_PER_EVALUATION: int
+    EXAMPLES_PER_EVALUATION: Optional[int]  # If None, use the entire validation set.
     EVALS_OF_PATIENCE: Optional[int]  # Don't necessary need early stopping. You never know what's around the corner!
 
     TRACK_BEST_MODEL: bool
@@ -82,6 +139,7 @@ class TaskHyperparameters:
     # - Initialising:
     INIT_WEIGHTS: bool
     CHECKPOINT_OR_CONFIG: Union[str, PretrainedConfig]
+    TOKENISER_CHECKPOINT: Optional[str]  # Must be given if the above checkpoint isn't.
 
     # - Gradients:
     LEARNING_RATE: float
@@ -89,3 +147,8 @@ class TaskHyperparameters:
 
     # Tokeniser
     ADD_SPECIAL_TOKENS: bool
+
+
+__all__ = ["TaskHyperparameters", "Intervals",
+           "NoStrategy", "EveryNDescents", "NEveryEpoch", "EveryNMinutes",
+           "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes"]

@@ -1,9 +1,12 @@
+import warnings
 from enum import Enum
 
 import time
+from pathlib import Path
 from typing import Set, Union
 
-from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
+from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl, PreTrainedTokenizerBase
+from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 
 class EvaluateBeforeTrainingCallback(TrainerCallback):
@@ -66,6 +69,24 @@ class CallbackAtTimeInterval(TrainerCallback):
             self.last_event_was_at = time.perf_counter()
 
 
+class SaveTokeniserWithCheckpoints(TrainerCallback):
+    """
+    Every time a model is saved, add the tokeniser in the same folder, so that you can load both from the
+    same checkpoint even if the Trainer is unaware of the tokeniser.
+    """
+
+    def __init__(self, tokenizer: PreTrainedTokenizerBase):
+        self.tokenizer = tokenizer
+
+    def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        output_dir = Path(args.output_dir) / f"{PREFIX_CHECKPOINT_DIR}-{state.global_step}"  # NOTE: There is one case where this will use the wrong folder, which is when you run trainer.save_model manually since it will save to the parent folder without creating a folder and hence without using global_step.
+        if not output_dir.is_dir():
+            warnings.warn(f"Tokeniser wasn't saved; tried predicting folder path for the latest checkpoint, but {output_dir.as_posix()} apparently doesn't exist.")
+            return
+
+        self.tokenizer.save_pretrained(output_dir)
+
+
 class CheckpointLastModel(TrainerCallback):
     """
     In the context of checkpoints (which include model, Adam momenta, learning schedule state, ...), "last" is used to
@@ -91,3 +112,6 @@ class CheckpointLastModel(TrainerCallback):
     def on_epoch_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if control.should_training_stop:  # Training is being exited as we speak.
             control.should_save = True
+
+
+__all__ = ["EvaluateBeforeTrainingCallback", "EventType", "CallbackAtTimeInterval", "SaveTokeniserWithCheckpoints", "CheckpointLastModel"]

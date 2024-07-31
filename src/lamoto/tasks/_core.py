@@ -2,29 +2,26 @@
 Core fine-tuning script for any task.
 
 TODO:
-    - The name of the model currently comes from the checkpoint name, but that doesn't exist yet when training from config.
-      The tokeniser *always* comes from a pretrained checkpoint.
-    - Stopping condition can be either never, a time (which we have a callback for!), a total amount of steps, a total amount of epochs,
-      or a total amount of tokens. Tokens is mostly for CLM and only allows simple arithmetic if you use packing.
     - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
-    - Not using EXAMPLES_PER_EVALUATION right now. Is it .take() for both normal and streamed datasets? (If not, put the truncation in util.datasets)
     - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
 
-# TODO: In the old code I was using for MBR, I was also saving the tokeniser at the end of training. This is still done
-#       in the CLM script, but not here. The reason you want to save it is that you otherwise can't use checkpoints
-#       without loading the tokeniser from the hub, so you need to pass in two checkpoints.
-#       The reason why you want to be careful saving the tokeniser by giving it to Trainer is that Trainer then also uses
-#       it for a variety of purposes that you might not intend (like padding etc.).
-#       The call you basically just want to insert into Trainer somehow is tokenizer.save_pretrained(save_directory=current_checkpoint.as_posix()).
-#       Maybe a callback will work, but you need the path of the latest checkpoint.
+TODO: In the old code I was using for MBR, I was also saving the tokeniser at the end of training.
+      - The reason you want to save it is that you otherwise can't use checkpoints without loading the tokeniser from the
+        hub, so you need to pass in two checkpoints.
+      - The reason why you want to be careful saving the tokeniser by giving it to Trainer is that Trainer then also uses
+        it for a variety of purposes that you might not intend (like padding etc.).
+      The call you basically just want to insert into Trainer somehow is tokenizer.save_pretrained(save_directory=current_checkpoint.as_posix()).
+      Maybe a callback will work, but you need the path of the latest checkpoint.
 """
 from typing import Any, Dict, Type, List, Tuple
 from pathlib import Path
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 import wandb
 import torch
 from datasets import DatasetDict, Dataset
-from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, RobertaTokenizer, PreTrainedModel, \
+from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, PreTrainedModel, \
     PreTrainedTokenizerBase, PretrainedConfig, AutoConfig, IntervalStrategy, EarlyStoppingCallback
 import transformers.optimization
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
@@ -36,25 +33,39 @@ from tktkt.util.timing import datetimeDashed
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric, EvaluationEnvironment, LamotoMetric
 from ..measuring import METRICS
-from ..trainer.callbacks import EvaluateBeforeTrainingCallback, CheckpointLastModel, CallbackAtTimeInterval, EventType
+from ..trainer.callbacks import *
 from ..trainer.hyperparameters import *
 from ..trainer.trainers import TrainerWithoutEvaluationLoop
+from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.strings import getSubstringAfterLastSlash
 
 
 #################################################
-DEFAULT_HYPERPARAMETERS = TaskHyperparameters(
-    MAX_TRAINING_EPOCHS=10,
-    BATCH_SIZE=32,
-    BATCHES_WARMUP=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-    EVALS_PER_EPOCH=9,
+SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
+    SAVE_AS=None,
+    WANDB_PROJECT=None,
+
+    EXAMPLES_PER_EFFECTIVE_BATCH=32,
+    EXAMPLES_PER_DEVICEBATCH=32,
+    EFFECTIVE_BATCHES_WARMUP=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
+
+    HARD_STOPPING_CONDITION=AfterNEpochs(epochs=10, effective_batch_size=32),
+    EXAMPLES_PER_EVALUATION=None,
     EVALS_OF_PATIENCE=9,
+
+    TRACK_BEST_MODEL=True,
+    EVAL_VS_SAVE_INTERVALS=Intervals(
+        evaluation=NEveryEpoch(per_epoch=1, effective_batch_size=32),
+        checkpointing=None
+    ),
+
+    INIT_WEIGHTS=True,
+    CHECKPOINT_OR_CONFIG="roberta-base",
+    TOKENISER_CHECKPOINT="roberta-base",
 
     LEARNING_RATE=2e-5,
     L2_REGULARISATION=0.01,
-    MAX_INPUT_LENGTH=514,
 
-    CHECKPOINT="roberta-base",
     ADD_SPECIAL_TOKENS=True
 )
 #################################################
@@ -78,7 +89,7 @@ class Task(ABC):
         # avoid loading heavy objects that would be duplicated by the super() call of a task wrapper.
         self.hyperparameters: TaskHyperparameters = None
         self.tokenizer: PreTrainedTokenizerBase = None
-        self.config: PretrainedConfig = None
+        self.model_config: PretrainedConfig = None
         self.metrics: Dict[str, Metric] = None
 
     @abstractmethod
@@ -109,30 +120,71 @@ class Task(ABC):
     def sneakyLogitTransform(self, logits, labels):
         return logits
 
-    def train(self, hyperparameters: TaskHyperparameters=DEFAULT_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
-        model_name = getSubstringAfterLastSlash(hyperparameters.CHECKPOINT)
+    def _getMaxInputLength(self) -> int:
+        """
+        Helper function to find the amount of tokens the model can accept at most.
+        """
+        # First try the tokeniser itself. For CANINE, this is the only place where you find the correct number (2048).
+        try:
+            n = self.tokenizer.model_max_length
+            if n < 1e12:  # Due to very persistent issue where the model config is right and the tokeniser is wrong: https://github.com/huggingface/transformers/issues/14561
+                return n
+        except:
+            pass
+
+        # Alternatively try the model config. This name was standardised late, so it is possible that you can't find it.
+        try:
+            n = self.model_config.max_position_embeddings
+            if n:
+                return n
+        except:
+            if "max_position_embeddings" in self.model_config.attribute_map:
+                return self.model_config.__dict__[self.model_config.attribute_map["max_position_embeddings"]]
+            else:
+                raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
+
+    def train(self, hyperparameters: TaskHyperparameters=SUGGESTED_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+        transformers.set_seed(seed=69420)
+
+        # Metadata
+        self.hyperparameters = hyperparameters
+        self.model_config = AutoConfig.from_pretrained(hyperparameters.CHECKPOINT_OR_CONFIG) if isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str) else hyperparameters.CHECKPOINT_OR_CONFIG
+
+        if hyperparameters.SAVE_AS:
+            model_name = hyperparameters.SAVE_AS
+        elif isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str):
+            model_name = getSubstringAfterLastSlash(hyperparameters.CHECKPOINT_OR_CONFIG)
+        else:  # We don't use the tokeniser name because it isn't directly related to the model.
+            raise RuntimeError("Cannot deduce name to save model as from a config.")
+
         global_model_identifier = model_name \
                                 + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
                                 + f"_{self.task_name}_{datetimeDashed()}"
 
-        # Set up paths for checkpointing
         PATH_CHECKPOINTS = DataPaths.pathToCheckpoints() / global_model_identifier
         PATH_CHECKPOINTS.mkdir(exist_ok=True, parents=True)
 
-        # Set up the three most important missing fields for use in subsequent method calls.
-        self.hyperparameters = hyperparameters
-        self.tokenizer    = AutoTokenizer.from_pretrained(hyperparameters.CHECKPOINT, add_prefix_space=True)
-        self.model_config = AutoConfig.from_pretrained(hyperparameters.CHECKPOINT_OR_CONFIG) if isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str) else hyperparameters.CHECKPOINT_OR_CONFIG
+        # Set up tokeniser
+        if hyperparameters.TOKENISER_CHECKPOINT:
+            tokeniser_checkpoint = hyperparameters.TOKENISER_CHECKPOINT
+        elif isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str):
+            tokeniser_checkpoint = hyperparameters.CHECKPOINT_OR_CONFIG
+        else:
+            raise RuntimeError("Cannot deduce tokeniser checkpoint from config.")
 
-        # For the tokeniser: old models like GPT-2 have no pad token, but this doesn't really matter because it's
-        # actually the attention mask that determines if a token is processed, so you can replace it by any token you want.
-        #   https://github.com/stanford-crfm/BioMedLM/issues/4
+        self.tokenizer = AutoTokenizer.from_pretrained(tokeniser_checkpoint, add_prefix_space=True)
+
+        # - Old models like GPT-2 have no pad token, but this doesn't really matter because it's actually the attention
+        #   mask that determines if a token is processed, so you can replace it by any token you want. https://github.com/stanford-crfm/BioMedLM/issues/4
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.config.pad_token_id = self.config.eos_token_id
+            self.model_config.pad_token_id = self.model_config.eos_token_id
 
         # Now that you have the tokeniser, tokenise the dataset.
-        datasetdict = self.prepareDataset(self.loadDataset())
+        datasetdict = self.loadDataset()
+        datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"])
+        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], truncate_to=hyperparameters.EXAMPLES_PER_EVALUATION)
+        datasetdict = self.prepareDataset(datasetdict)
 
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
         collator = self.getCollator()
@@ -145,14 +197,14 @@ class Task(ABC):
             model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.CHECKPOINT_OR_CONFIG, **self.automodel_args)
         else:
             model: PreTrainedModel = self.automodel_class.from_config(self.model_config, **self.automodel_args)
-        model.config.pad_token_id = self.config.pad_token_id
+        model.config.pad_token_id = self.model_config.pad_token_id
 
         # ...and augment it (possibly with the tokeniser).
         if model_augmentation:
             model = model_augmentation.augment(model, self.tokenizer)
         model.to("cuda")
 
-        # Now that the dataset and model are known, build the metrics.
+        # Now that we have a reference to the dataset and model, build the metrics.
         env = EvaluationEnvironment(
             model=model,
             tokeniser=self.tokenizer,
@@ -173,10 +225,20 @@ class Task(ABC):
 
         # Training arguments
         # - Sizes
-        n_examples_to_observe = hyperparameters.TOTAL_TOKEN_BUDGET // model.config.max_position_embeddings
-        n_gradient_descents = n_examples_to_observe // hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
+        stopping_condition = hyperparameters.HARD_STOPPING_CONDITION
+        n_gradient_descents = stopping_condition.getSteps(datasetdict["train"]) if not isinstance(stopping_condition, (NeverStop, AfterNMinutes)) else None
         n_accumulations     = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // (torch.cuda.device_count() * hyperparameters.EXAMPLES_PER_DEVICEBATCH)  # The amount of times, to get to one effective batch, you have to push a device batch through all devices in parallel.
-        n_descents_of_warmup = int(n_gradient_descents * hyperparameters.EFFECTIVE_BATCHES_WARMUP) if isinstance(hyperparameters.EFFECTIVE_BATCHES_WARMUP, float) else hyperparameters.EFFECTIVE_BATCHES_WARMUP
+        wu = hyperparameters.EFFECTIVE_BATCHES_WARMUP  # Alias to shorten this long name.
+        if isinstance(wu, int):
+            if wu < 0:
+                raise ValueError("The amount of warmup batches has to be a positive integer or a float in [0,1].")
+            n_descents_of_warmup = wu
+        else:  # Fractional warmup in [0,1]
+            if wu < 0 or wu > 1:
+                raise ValueError("The amount of warmup batches has to be a positive integer or a float in [0,1].")
+            if not n_gradient_descents:
+                raise ValueError(f"Amount of warmup batches was given as a fraction of the total amount of training batches, but we don't know what that is for stopping condition {hyperparameters.HARD_STOPPING_CONDITION.__class__.__name__}")
+            n_descents_of_warmup = int(n_gradient_descents*wu)
 
         # - Intervals
         eval_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.evaluation
@@ -187,13 +249,12 @@ class Task(ABC):
                 raise ValueError("You indicated that you want to track the best model, but specified no interval strategy!")
             save_interval = eval_interval
 
-        eval_steps = eval_interval.getSteps(datasetdict["train"]) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
-        save_steps = save_interval.getSteps(datasetdict["train"]) if isinstance(save_interval, (EveryNDescents, NEveryEpoch)) else None
+        batches_between_evals = eval_interval.getSteps(datasetdict["train"]) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
+        batches_between_saves = save_interval.getSteps(datasetdict["train"]) if isinstance(save_interval, (EveryNDescents, NEveryEpoch)) else None
 
         # - Finally get args
         training_args = TrainingArguments(
-            num_train_epochs=hyperparameters.MAX_TRAINING_EPOCHS,
-            max_steps=n_gradient_descents,  # Overrides `num_train_epochs`.
+            max_steps=n_gradient_descents,  # Can be None.
 
             # Optimisation (adding all of this in the TrainingArguments because apparently Trainer knows how to use HuggingFace `accelerate` whereas I only know the old optimisers)
             # optim=OptimizerNames.ADAMW_TORCH,
@@ -212,20 +273,20 @@ class Task(ABC):
             bf16=torch.cuda.is_bf16_supported(),
 
             # Evaluation
-            evaluation_strategy=IntervalStrategy.STEPS if eval_steps else IntervalStrategy.NO,
-            eval_steps=eval_steps,
+            evaluation_strategy=IntervalStrategy.STEPS if batches_between_evals else IntervalStrategy.NO,
+            eval_steps=batches_between_evals,
             per_device_eval_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,
             eval_accumulation_steps=n_accumulations,  # "Number of predictions steps to accumulate the output tensors for, before moving the results to the CPU."
 
             # Saving
-            save_strategy=IntervalStrategy.STEPS if save_steps else IntervalStrategy.NO,
-            save_steps=save_steps,
+            save_strategy=IntervalStrategy.STEPS if batches_between_saves else IntervalStrategy.NO,
+            save_steps=batches_between_saves,
 
             output_dir=PATH_CHECKPOINTS.as_posix(),
 
             load_best_model_at_end=hyperparameters.TRACK_BEST_MODEL,  # Will take the best model out of its checkpoint directory and load it into self.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
-            metric_for_best_model="eval_loss" if hyperparameters.TRACK_BEST_MODEL else None,  # TODO: Can become an issue if you don't have eval loss.
-            save_total_limit=1,  # This will keep the last model stored plus the best model if those aren't the same. https://stackoverflow.com/a/67615225/9352077
+            metric_for_best_model="eval_loss" if hyperparameters.TRACK_BEST_MODEL else None,  # TODO: Can become an issue if you don't want to select based on eval loss but e.g. downstream F1.
+            save_total_limit=1,  # This will keep the last model stored plus the best model if those aren't the same, allowing you to have the best model and continue training from last if you need to. https://stackoverflow.com/a/67615225/9352077
 
             # Logging
             report_to=["wandb"],  # Can be turned off below.
@@ -245,18 +306,20 @@ class Task(ABC):
         scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=n_descents_of_warmup)  # Not using a linear decay because that's the whole point of having Adam.
 
         # - Build callbacks
-        callbacks = [EvaluateBeforeTrainingCallback(), CheckpointLastModel()]
+        callbacks = [EvaluateBeforeTrainingCallback(), CheckpointLastModel(), SaveTokeniserWithCheckpoints()]
         if hyperparameters.TRACK_BEST_MODEL and hyperparameters.EVALS_OF_PATIENCE is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.EVALS_OF_PATIENCE))  # Patience is the amount of eval calls you can tolerate worsening loss.
 
-        if isinstance(eval_interval, EveryNMinutes) and isinstance(save_interval, EveryNMinutes) and eval_interval.minutes == save_interval.minutes:
-            # They are completely tied. This means you need a fully synchronised callback to prevent race conditions.
+        if isinstance(stopping_condition, AfterNMinutes):
+            callbacks.append(CallbackAtTimeInterval(minutes=stopping_condition.minutes, events=EventType.STOP))
+
+        if isinstance(eval_interval, EveryNMinutes) and isinstance(save_interval, EveryNMinutes) and eval_interval.minutes == save_interval.minutes:  # They are completely tied. This means you need a fully synchronised callback to prevent race conditions.
             callbacks.append(CallbackAtTimeInterval(minutes=eval_interval.minutes, events={EventType.EVALUATE, EventType.CHECKPOINT}))
         else:  # Can be neither, one, or both but with disparate minutes. Either way, you'll need a separate callback per type.
             if isinstance(eval_interval, EveryNMinutes):
-                callbacks.append(CallbackAtTimeInterval(minutes=eval_interval.minutes, events={EventType.EVALUATE}))
+                callbacks.append(CallbackAtTimeInterval(minutes=eval_interval.minutes, events=EventType.EVALUATE))
             if isinstance(save_interval, EveryNMinutes):
-                callbacks.append(CallbackAtTimeInterval(minutes=save_interval.minutes, events={EventType.CHECKPOINT}))
+                callbacks.append(CallbackAtTimeInterval(minutes=save_interval.minutes, events=EventType.CHECKPOINT))
 
         if not hyperparameters.WANDB_PROJECT:
             callbacks.append(FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=4))
@@ -296,20 +359,21 @@ class Task(ABC):
         bs = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
         e = getDatasetSize(datasetdict["train"], "train")
         ev = getDatasetSize(datasetdict["validation"], "validation")
-        batches_per_epoch = 1 + (e - 1) // bs  # Final batch might be smaller than bs.
-        batches_per_eval  = 1 + (ev - 1) // bs
+        batches_per_epoch = totalBatches(e, bs)
+        batches_per_eval  = totalBatches(ev, bs)
         print("Batch size:", bs)
         print("Training set:")
         print("\t", e, "examples per epoch")
         print("\t", batches_per_epoch, "batches per epoch")
-        print("\t", hyperparameters.MAX_TRAINING_EPOCHS, "epochs")
-        print("\t", hyperparameters.MAX_TRAINING_EPOCHS*batches_per_epoch, "batches in total")
+        if n_gradient_descents:
+            print("\t", round(n_gradient_descents / batches_per_epoch, 1), "epochs")
+            print("\t", n_gradient_descents, "batches in total")
         print("Evaluation set:")
         print("\t", ev, "examples per evaluation")
         print("\t", batches_per_eval, "batches per evaluation")
-        if eval_steps:
-            print("\t", eval_steps, "training batches between evals")
-            print("\t", batches_per_epoch // eval_steps, "evals per training epoch")
+        if batches_between_evals:
+            print("\t", batches_between_evals, "training batches between evals")
+            print("\t", batches_per_epoch // batches_between_evals, "evals per training epoch")
         print("======================")
 
         # Train, and evaluate afterwards.

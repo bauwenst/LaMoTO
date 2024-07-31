@@ -85,9 +85,12 @@ class DP(Task):
                     - Compress the B x L x L logits into B x L x 1 class argmaxes, rather than letting the metric do this.
                     - Let computeMetrics finish the process with UAS/LAS.
 
-        This sneakyLogitTransform() method is used to perform the first approach, except more elegantly, we capture `self`
+        This sneakyLogitTransform() method is used to perform the third approach, except more elegantly, we capture `self`
         (the only time Python allows currying is in expressions `self.method`) and then we access the metric instance
         that is already present in `self` anyway.
+
+        The first two approaches have their place too, namely when you want metrics that aren't logit-based, like strided
+        PPL in causal LM. That's not the case for DP though.
         """
         self.metrics["attachment"].add(SuparWithLoss.logitsAndLabelsToMetric(logits, labels))
         return torch.tensor([[1]], device=logits[0].device)
@@ -121,7 +124,7 @@ class DP(Task):
 
             # We need to do truncation manually because we made many tokenizer() calls without concatenating.
             # The way you compute how much to truncate is by computing how much room you have minus how much is reserved by specials.
-            max_tokens = self.config.max_position_embeddings - self.tokenizer.num_special_tokens_to_add(pair=False) - 1
+            max_tokens = self._getMaxInputLength() - self.tokenizer.num_special_tokens_to_add(pair=False) - 1
             tokens_so_far = 0
             for word_idx in range(len(subword_ids_per_word)):
                 subwords = subword_ids_per_word[word_idx]

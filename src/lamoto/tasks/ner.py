@@ -31,7 +31,7 @@ class NER(Task):
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             enc = self.tokenizer(example["tokens"], is_split_into_words=True,
-                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self.config.max_position_embeddings)
+                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
             word_labels  = example["ner_tags"]
             token_labels = []
 
@@ -50,7 +50,7 @@ class NER(Task):
         return dataset
 
     def getCollator(self) -> DataCollator:
-        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.config.max_position_embeddings)
+        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         # print(eval.predictions.shape, eval.predictions[-1,:,:])
