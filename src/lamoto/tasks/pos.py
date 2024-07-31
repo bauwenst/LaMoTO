@@ -4,7 +4,7 @@ from transformers import AutoModelForTokenClassification, DataCollatorForTokenCl
 from ._core import *
 
 
-class POS(FinetuningTask):
+class POS(Task):
 
     def __init__(self):
         self.tagset = ["B-" + tag for tag in self.loadDataset()["train"].features["upos"].feature.names]
@@ -32,7 +32,7 @@ class POS(FinetuningTask):
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             enc = self.tokenizer(example["tokens"], is_split_into_words=True,
-                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self.hyperparameters.MAX_INPUT_LENGTH)
+                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self.config.max_position_embeddings)
             word_labels  = example["upos"]  # Note: this is already a list of integers.
             token_labels = []
 
@@ -51,7 +51,7 @@ class POS(FinetuningTask):
         return dataset
 
     def getCollator(self) -> DataCollator:
-        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.hyperparameters.MAX_INPUT_LENGTH)
+        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.config.max_position_embeddings)
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.

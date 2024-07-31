@@ -48,7 +48,7 @@ DATASET_CONFIG = setupEnglish()
 ##################################
 
 
-class MBR(FinetuningTask):
+class MBR(Task):
 
     def __init__(self, dataset_out_of_context: bool=True):
         super().__init__(
@@ -108,7 +108,7 @@ class MBR(FinetuningTask):
         def preprocess(example):
             output = self.tokenizer(example["text"], add_special_tokens=False,
                                     # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
-                                    truncation=True, max_length=self.hyperparameters.MAX_INPUT_LENGTH)
+                                    truncation=True, max_length=self.config.max_position_embeddings)
             output["labels"] = example["labels"]
             return output
 
@@ -123,7 +123,7 @@ class MBR(FinetuningTask):
         #       ValueError: Unable to create tensor, you should probably activate truncation and/or padding with
         #       'padding=True' 'truncation=True' to have batched tensors with the same length.
         # The other reason is the too-deeply-nested tensors due to return_tensors="pt".
-        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.hyperparameters.MAX_INPUT_LENGTH)
+        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.config.max_position_embeddings)
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.

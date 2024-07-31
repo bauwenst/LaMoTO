@@ -1,6 +1,8 @@
 from enum import Enum
 
 import time
+from typing import Set, Union
+
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl
 
 
@@ -22,7 +24,7 @@ class EvaluateBeforeTrainingCallback(TrainerCallback):
             control.should_evaluate = True
 
 
-class CallbackType(Enum):
+class EventType(Enum):
     EVALUATE   = 1
     CHECKPOINT = 2
     STOP       = 3
@@ -33,10 +35,10 @@ class CallbackAtTimeInterval(TrainerCallback):
     Rather than saving/evaluating/stopping based on the amount of STEPS trained, do it based on the amount of TIME trained.
     """
 
-    def __init__(self, minutes: float, event: CallbackType):
+    def __init__(self, minutes: float, events: Union[EventType, Set[EventType]]):
         self.seconds_between_events = minutes * 60
         self.last_event_was_at = 0
-        self.event_type = event
+        self.event_types = events if isinstance(events, set) else {events}
 
     def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         self.last_event_was_at = time.perf_counter()
@@ -44,25 +46,23 @@ class CallbackAtTimeInterval(TrainerCallback):
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         seconds_since_last_event = time.perf_counter() - self.last_event_was_at
         if seconds_since_last_event >= self.seconds_between_events:
-            if self.event_type == CallbackType.CHECKPOINT:
+            if EventType.CHECKPOINT in self.event_types:
                 control.should_save = True
-            elif self.event_type == CallbackType.EVALUATE:
+            if EventType.EVALUATE in self.event_types:
                 control.should_evaluate = True
-            elif self.event_type == CallbackType.STOP:
+            if EventType.STOP in self.event_types:
                 control.should_training_stop = True
-            else:
-                raise RuntimeError()
 
     def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if self.event_type == CallbackType.CHECKPOINT:
+        if EventType.CHECKPOINT in self.event_types:
             self.last_event_was_at = time.perf_counter()
 
     def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if self.event_type == CallbackType.EVALUATE:
+        if EventType.EVALUATE in self.event_types:
             self.last_event_was_at = time.perf_counter()
 
     def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if self.event_type == CallbackType.STOP:
+        if EventType.STOP in self.event_types:
             self.last_event_was_at = time.perf_counter()
 
 

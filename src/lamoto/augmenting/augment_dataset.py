@@ -4,7 +4,7 @@ from ..tasks._core import *
 
 
 @dataclass
-class PerturbDataset(FinetuningTask):
+class PerturbDataset(Task):
     """
     Wrapper around a fine-tuning task that corrupts the text field of that task's dataset.
     Used for verifying how stable a model is against corrupted input.
@@ -13,7 +13,7 @@ class PerturbDataset(FinetuningTask):
           training set, only the testing set, and so on.
     """
 
-    def __init__(self, task: FinetuningTask, perturbation: TextMapper, text_field_name: str):
+    def __init__(self, task: Task, perturbation: TextMapper, text_field_name: str):
         super().__init__(
             task_name=task.task_name,
             metric_config=task.metric_config,

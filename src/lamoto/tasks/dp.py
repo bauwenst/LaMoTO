@@ -4,10 +4,10 @@ from datasets import load_dataset
 from tktkt.util.printing import gridify
 
 from ._core import *
-from ..modeling.dependency_parsing import AutoModelForDependencyParsing, DataCollatorForDependencyParsing, SuparWithLoss
+from ..modelling.dependency_parsing import AutoModelForDependencyParsing, DataCollatorForDependencyParsing, SuparWithLoss
 
 
-class DP(FinetuningTask):
+class DP(Task):
     """
     Dependency parsing measured by UAS and LAS.
     """
@@ -121,7 +121,7 @@ class DP(FinetuningTask):
 
             # We need to do truncation manually because we made many tokenizer() calls without concatenating.
             # The way you compute how much to truncate is by computing how much room you have minus how much is reserved by specials.
-            max_tokens = self.hyperparameters.MAX_INPUT_LENGTH - self.tokenizer.num_special_tokens_to_add(pair=False) - 1
+            max_tokens = self.config.max_position_embeddings - self.tokenizer.num_special_tokens_to_add(pair=False) - 1
             tokens_so_far = 0
             for word_idx in range(len(subword_ids_per_word)):
                 subwords = subword_ids_per_word[word_idx]

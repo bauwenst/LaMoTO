@@ -4,7 +4,7 @@ from transformers import AutoModelForTokenClassification, DataCollatorForTokenCl
 from ._core import *
 
 
-class NER(FinetuningTask):
+class NER(Task):
     """
     Named entity recognition using the SeqEval-IOB2 metrics (which automatically exclude the "O" tag when computing F1,
     otherwise it would just be accuracy).
@@ -31,7 +31,7 @@ class NER(FinetuningTask):
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             enc = self.tokenizer(example["tokens"], is_split_into_words=True,
-                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self.hyperparameters.MAX_INPUT_LENGTH)
+                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self.config.max_position_embeddings)
             word_labels  = example["ner_tags"]
             token_labels = []
 
@@ -50,7 +50,7 @@ class NER(FinetuningTask):
         return dataset
 
     def getCollator(self) -> DataCollator:
-        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.hyperparameters.MAX_INPUT_LENGTH)
+        return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self.config.max_position_embeddings)
 
     def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
         # print(eval.predictions.shape, eval.predictions[-1,:,:])
