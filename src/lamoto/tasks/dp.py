@@ -1,6 +1,8 @@
 from collections import Counter
 from datasets import load_dataset
 
+import torch
+
 from tktkt.util.printing import gridify
 
 from ._core import *
@@ -193,5 +195,5 @@ class DP(Task):
     def getCollator(self) -> DataCollator:
         return DataCollatorForDependencyParsing(self.tokenizer)
 
-    def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         return [], []

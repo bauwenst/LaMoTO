@@ -24,8 +24,9 @@ import re
 from copy import deepcopy
 from typing import Iterable
 
-from datasets import Dataset, DatasetDict
+from datasets import Dataset
 from transformers import DataCollatorForTokenClassification, AutoModelForTokenClassification
+import torch
 
 from bpe_knockout.project.config import morphologyGenerator, setupEnglish, KnockoutDataConfiguration
 
@@ -121,12 +122,12 @@ class MBR(Task):
         # The other reason is the too-deeply-nested tensors due to return_tensors="pt".
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.
         predictions, labels = predictions.flatten(), labels.flatten()  # Both are EXAMPLES x TOKENS
         mask = labels != -100  # Only select results where the label isn't padding.
 
         return predictions[mask].tolist(), labels[mask].tolist()
 
-    def train(self, hyperparameters: TaskHyperparameters=CANINE_DEFAULT_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None):
-        return super().train(hyperparameters, model_augmentation)
+    def train(self, hyperparameters: TaskHyperparameters=SUGGESTED_HYPERPARAMETERS_MBR, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+        return super().train(hyperparameters, model_augmentation=model_augmentation, resume_from_folder=resume_from_folder)

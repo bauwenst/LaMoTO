@@ -43,5 +43,5 @@ class PerturbDataset(Task):
     def getCollator(self) -> DataCollator:
         return self.method_implementations.getCollator()
 
-    def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         return self.method_implementations.getPredictionsAndReferences(eval)

@@ -2,27 +2,21 @@
 Core fine-tuning script for any task.
 
 TODO:
+    - Should have a way to load custom models beyond using from_pretrained, e.g. NILF with partial init.
     - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
     - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
-
-TODO: In the old code I was using for MBR, I was also saving the tokeniser at the end of training.
-      - The reason you want to save it is that you otherwise can't use checkpoints without loading the tokeniser from the
-        hub, so you need to pass in two checkpoints.
-      - The reason why you want to be careful saving the tokeniser by giving it to Trainer is that Trainer then also uses
-        it for a variety of purposes that you might not intend (like padding etc.).
-      The call you basically just want to insert into Trainer somehow is tokenizer.save_pretrained(save_directory=current_checkpoint.as_posix()).
-      Maybe a callback will work, but you need the path of the latest checkpoint.
 """
 from typing import Any, Dict, Type, List, Tuple
 from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import traceback
 import wandb
 import torch
 from datasets import DatasetDict, Dataset
 from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, PreTrainedModel, \
-    PreTrainedTokenizerBase, PretrainedConfig, AutoConfig, IntervalStrategy, EarlyStoppingCallback
+    PreTrainedTokenizerBase, PretrainedConfig, AutoConfig, IntervalStrategy, EarlyStoppingCallback, EvalPrediction
 import transformers.optimization
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
@@ -31,7 +25,7 @@ from tktkt.files.paths import DataPaths
 from tktkt.util.timing import datetimeDashed
 
 from ..augmenting.augment_model import ModelAugmentation
-from ..measuring._core import Metric, EvaluationEnvironment, LamotoMetric
+from ..measuring._core import Metric, LamotoMetric
 from ..measuring import METRICS
 from ..trainer.callbacks import *
 from ..trainer.hyperparameters import *
@@ -105,10 +99,10 @@ class Task(ABC):
         pass
 
     @abstractmethod
-    def getPredictionsAndReferences(self, eval: transformers.EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         pass
 
-    def computeMetrics(self, eval: transformers.EvalPrediction) -> dict:
+    def computeMetrics(self, eval: EvalPrediction) -> dict:
         predictions, references = self.getPredictionsAndReferences(eval)
         results = dict()
         for metric_name, metric in self.metrics.items():
@@ -306,7 +300,7 @@ class Task(ABC):
         scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=n_descents_of_warmup)  # Not using a linear decay because that's the whole point of having Adam.
 
         # - Build callbacks
-        callbacks = [EvaluateBeforeTrainingCallback(), CheckpointLastModel(), SaveTokeniserWithCheckpoints()]
+        callbacks = [EvaluateBeforeTrainingCallback(), CheckpointLastModel(), SaveTokeniserWithCheckpoints(self.tokenizer)]
         if hyperparameters.TRACK_BEST_MODEL and hyperparameters.EVALS_OF_PATIENCE is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.EVALS_OF_PATIENCE))  # Patience is the amount of eval calls you can tolerate worsening loss.
 
@@ -334,7 +328,7 @@ class Task(ABC):
 
         # At last, the Trainer object.
         no_traditional_metrics = all(isinstance(m, LamotoMetric) and m.isAutonomous() for m in self.metrics.values())
-        TrainerClass = TrainerWithoutEvaluationLoop if no_traditional_metrics else Trainer
+        TrainerClass = TrainerWithoutEvaluationLoop if no_traditional_metrics and not hyperparameters.TRACK_BEST_MODEL else Trainer
         trainer = TrainerClass(
             model=model,
             # tokenizer=self.tokenizer,  # Don't pass it if you don't want to save it and have other wacky shit extracted from it to influence training.
@@ -346,7 +340,7 @@ class Task(ABC):
 
             # Data
             train_dataset=datasetdict["train"],
-            eval_dataset=[] if no_traditional_metrics else datasetdict["validation"],
+            eval_dataset=[] if no_traditional_metrics and not hyperparameters.TRACK_BEST_MODEL else datasetdict["validation"],
             data_collator=collator,
 
             # Evaluation
@@ -384,10 +378,10 @@ class Task(ABC):
             # trainer.push_to_hub()
             print("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model:")
             print(trainer.evaluate())
-        except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
+        except Exception:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
             print("Caught exception while training:")
             print("="*32)
-            print(e)
+            print(traceback.format_exc())
             print("="*32)
             print("A final checkpoint will be saved.")
 
@@ -395,3 +389,8 @@ class Task(ABC):
             trainer.control.should_evaluate = False
             trainer.control.should_log      = False
             trainer._maybe_log_save_evaluate(tr_loss=None, grad_norm=None, model=None, trial=None, epoch=None, ignore_keys_for_eval=None)  # These arguments are imputed anyway.
+
+
+__all__ = ["Task", "MetricSetup", "TaskHyperparameters", "SUGGESTED_HYPERPARAMETERS",
+           "Intervals", "NoStrategy", "EveryNDescents", "NEveryEpoch", "EveryNMinutes", "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
+           "DatasetDict", "DataCollator", "Any", "Tuple", "Path", "ModelAugmentation", "EvalPrediction"]

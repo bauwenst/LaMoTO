@@ -26,7 +26,7 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     WANDB_PROJECT=None,
 
     EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
-    EXAMPLES_PER_DEVICEBATCH = 64,
+    EXAMPLES_PER_DEVICEBATCH = 64,  # Used to fit on an A100, but recently got an error saying 80 GiB got filled
     EFFECTIVE_BATCHES_WARMUP=0.1,
     HARD_STOPPING_CONDITION=AfterNTokens(10_000_000_000, tokens_per_packed_example=1024, effective_batch_size=512),  # From GEITje.
 

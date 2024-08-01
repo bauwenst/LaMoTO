@@ -1,22 +1,12 @@
-from typing import Protocol, Any, Dict, Type, Union, Optional, Self
-from dataclasses import dataclass
+from typing import Protocol, Any, Dict, Type, Union, Optional
+from typing_extensions import Self  # https://stackoverflow.com/a/77247460/9352077
 from abc import ABC, abstractmethod
 from torch import Tensor
 
 import evaluate
 from evaluate import Metric as HuggingfaceMetric
-from datasets import Dataset
-from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
-from ..tasks._core import TaskHyperparameters
-
-
-@dataclass
-class EvaluationEnvironment:
-    model: PreTrainedModel
-    tokeniser: PreTrainedTokenizerBase
-    validation_dataset: Dataset
-    hyperparameters: TaskHyperparameters
+from ..trainer.hyperparameters import TaskHyperparameters, EvaluationEnvironment
 
 
 class MetricHyperparameters:

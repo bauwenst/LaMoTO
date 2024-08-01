@@ -1,10 +1,11 @@
 from typing import Optional, Union
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedConfig
+from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
-from transformers import PretrainedConfig
 
-from lamoto.util.datasets import getDatasetSize, totalBatches
+from ..util.datasets import getDatasetSize, totalBatches
 
 
 class HowManySteps(ABC):
@@ -149,6 +150,14 @@ class TaskHyperparameters:
     ADD_SPECIAL_TOKENS: bool
 
 
-__all__ = ["TaskHyperparameters", "Intervals",
+@dataclass
+class EvaluationEnvironment:
+    model: PreTrainedModel
+    tokeniser: PreTrainedTokenizerBase
+    validation_dataset: Dataset
+    hyperparameters: TaskHyperparameters
+
+
+__all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",
            "NoStrategy", "EveryNDescents", "NEveryEpoch", "EveryNMinutes",
            "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes"]
