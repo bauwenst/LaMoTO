@@ -177,7 +177,7 @@ class Task(ABC):
         # Now that you have the tokeniser, tokenise the dataset.
         datasetdict = self.loadDataset()
         datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"])
-        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], truncate_to=hyperparameters.EXAMPLES_PER_EVALUATION)
+        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], truncate_to=min(hyperparameters.EXAMPLES_PER_EVALUATION, getDatasetSize(datasetdict["validation"], split="validation")))
         datasetdict = self.prepareDataset(datasetdict)
 
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
@@ -352,7 +352,7 @@ class Task(ABC):
         print("=== TRAINING SIZES ===")
         bs = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
         e = getDatasetSize(datasetdict["train"], "train")
-        ev = getDatasetSize(datasetdict["validation"], "validation")
+        ev = hyperparameters.EXAMPLES_PER_EVALUATION
         batches_per_epoch = totalBatches(e, bs)
         batches_per_eval  = totalBatches(ev, bs)
         print("Batch size:", bs)

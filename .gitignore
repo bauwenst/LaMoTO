@@ -1,3 +1,7 @@
+data/
+wandb/
+draft/
+
 .idea
 
 # Byte-compiled / optimized / DLL files
