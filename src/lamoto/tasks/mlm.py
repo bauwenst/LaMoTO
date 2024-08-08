@@ -4,12 +4,14 @@ import datasets
 from datasets import IterableDatasetDict
 from transformers import AutoModelForMaskedLM, DataCollatorForLanguageModeling
 
+from ..measuring.pppl import PPPL_Parameters
 from ._core import *
 
 
 @dataclass
 class MlmHyperparameters(TaskHyperparameters):
     MLM_PROBABILITY: float
+    PPPL_PARAMETERS: PPPL_Parameters
 
 
 SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa's hyperparameters.
@@ -37,7 +39,8 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     LEARNING_RATE = 6e-4,
     L2_REGULARISATION = 0.01,
 
-    MLM_PROBABILITY=0.15
+    MLM_PROBABILITY=0.15,
+    PPPL_PARAMETERS=PPPL_Parameters(right_fraction=0.5)
 )
 
 
@@ -47,8 +50,10 @@ class MLM(Task):  # TODO: Should you use packing for MLM?
         super().__init__(
             task_name="MLM",
             metric_config=MetricSetup(
-                to_compute=[],
-                to_track=dict()
+                to_compute=["pppl"],
+                to_track={
+                    "pppl": {"pppl": "PPPL", "nll": "NLL"}
+                }
             ),
             automodel_class=AutoModelForMaskedLM
         )

@@ -138,7 +138,8 @@ class Task(ABC):
                 raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
 
     def train(self, hyperparameters: TaskHyperparameters=SUGGESTED_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
-        transformers.set_seed(seed=69420)
+        SEED = 69420
+        transformers.set_seed(seed=SEED)
 
         # Metadata
         self.hyperparameters = hyperparameters
@@ -155,8 +156,8 @@ class Task(ABC):
                                 + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
                                 + f"_{self.task_name}_{datetimeDashed()}"
 
-        PATH_CHECKPOINTS = DataPaths.pathToCheckpoints() / global_model_identifier
-        PATH_CHECKPOINTS.mkdir(exist_ok=True, parents=True)
+        folder_to_this_models_checkpoints = DataPaths.pathToCheckpoints() / global_model_identifier
+        folder_to_this_models_checkpoints.mkdir(exist_ok=True, parents=True)
 
         # Set up tokeniser
         if hyperparameters.TOKENISER_CHECKPOINT:
@@ -176,8 +177,8 @@ class Task(ABC):
 
         # Now that you have the tokeniser, tokenise the dataset.
         datasetdict = self.loadDataset()
-        datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"])
-        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], truncate_to=min(hyperparameters.EXAMPLES_PER_EVALUATION, getDatasetSize(datasetdict["validation"], split="validation")))
+        datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"], seed=SEED)
+        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=SEED, truncate_to=min(hyperparameters.EXAMPLES_PER_EVALUATION, getDatasetSize(datasetdict["validation"], split="validation")))
         datasetdict = self.prepareDataset(datasetdict)
 
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
@@ -208,13 +209,17 @@ class Task(ABC):
         self.metrics: Dict[str, Metric] = {name: METRICS.load(name,env) for name in self.metric_config.to_compute}
 
         # Set up reporting too
+        folder_wandb = folder_to_this_models_checkpoints / "wandb"
+        folder_wandb.mkdir(exist_ok=True)
         wandb.init(
             mode="disabled" if not hyperparameters.WANDB_PROJECT else "online",
 
             project=hyperparameters.WANDB_PROJECT,
             group=model_name,
             name=global_model_identifier,
-            tags=[self.task_name] + ([model_augmentation.name] if model_augmentation else [])
+            tags=[self.task_name] + ([model_augmentation.name] if model_augmentation else []),
+
+            dir=folder_wandb.as_posix()
         )
 
         # Training arguments
@@ -239,8 +244,8 @@ class Task(ABC):
         if not hyperparameters.TRACK_BEST_MODEL:
             save_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.checkpointing
         else:  # Ignore it and sync with eval interval.
-            if isinstance(eval_interval, NoStrategy):
-                raise ValueError("You indicated that you want to track the best model, but specified no interval strategy!")
+            if isinstance(eval_interval, NeverInterval):
+                raise ValueError("You indicated that you want to track the best model, but specified no evaluation interval!")
             save_interval = eval_interval
 
         batches_between_evals = eval_interval.getSteps(datasetdict["train"]) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
@@ -276,7 +281,7 @@ class Task(ABC):
             save_strategy=IntervalStrategy.STEPS if batches_between_saves else IntervalStrategy.NO,
             save_steps=batches_between_saves,
 
-            output_dir=PATH_CHECKPOINTS.as_posix(),
+            output_dir=folder_to_this_models_checkpoints.as_posix(),
 
             load_best_model_at_end=hyperparameters.TRACK_BEST_MODEL,  # Will take the best model out of its checkpoint directory and load it into self.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
             metric_for_best_model="eval_loss" if hyperparameters.TRACK_BEST_MODEL else None,  # TODO: Can become an issue if you don't want to select based on eval loss but e.g. downstream F1.
@@ -300,9 +305,12 @@ class Task(ABC):
         scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=n_descents_of_warmup)  # Not using a linear decay because that's the whole point of having Adam.
 
         # - Build callbacks
-        callbacks = [EvaluateBeforeTrainingCallback(), CheckpointLastModel(), SaveTokeniserWithCheckpoints(self.tokenizer)]
+        callbacks = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(self.tokenizer)]
         if hyperparameters.TRACK_BEST_MODEL and hyperparameters.EVALS_OF_PATIENCE is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.EVALS_OF_PATIENCE))  # Patience is the amount of eval calls you can tolerate worsening loss.
+
+        if not isinstance(eval_interval, NeverInterval):
+            callbacks.append(EvaluateBeforeTrainingCallback())
 
         if isinstance(stopping_condition, AfterNMinutes):
             callbacks.append(CallbackAtTimeInterval(minutes=stopping_condition.minutes, events=EventType.STOP))
@@ -316,7 +324,8 @@ class Task(ABC):
                 callbacks.append(CallbackAtTimeInterval(minutes=save_interval.minutes, events=EventType.CHECKPOINT))
 
         if not hyperparameters.WANDB_PROJECT:
-            callbacks.append(FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=4))
+            if hyperparameters.TRACK_BEST_MODEL:
+                callbacks.append(FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
             callbacks.append(
                 FijectCallback(global_model_identifier + "_eval_task",
                                evals_between_commits=4,
@@ -392,5 +401,5 @@ class Task(ABC):
 
 
 __all__ = ["Task", "MetricSetup", "TaskHyperparameters", "SUGGESTED_HYPERPARAMETERS",
-           "Intervals", "NoStrategy", "EveryNDescents", "NEveryEpoch", "EveryNMinutes", "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
+           "Intervals", "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes", "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
            "DatasetDict", "DataCollator", "Any", "Tuple", "Path", "ModelAugmentation", "EvalPrediction"]

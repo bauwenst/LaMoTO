@@ -1,6 +1,9 @@
 TODO: Implement QA. I wonder if you need a logit transform for this too. The Trainer tutorial
        for QA sidesteps this question: https://huggingface.co/docs/transformers/tasks/question_answering#evaluate
 
+TODO: I'm not happy with how metrics are set up. It really makes zero sense to embed constructor arguments inside
+      the task config to then parse them implicitly (if you didn't forget them) or error (because you did forget them).
+
 FIXME:
   - It seems to me that the EvaluateBeforeTrainingCallback actually evaluates after one iteration.
     The only hypothesis I have is that the gradients are computed first, THEN you evaluate, and THEN you apply the gradients.

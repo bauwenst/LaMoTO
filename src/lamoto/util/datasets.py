@@ -25,16 +25,16 @@ def totalBatches(total_examples: int, batch_size: int):
     return 1 + (total_examples-1)//batch_size  # For example: if you have batch size 8 and 15 examples, you have 2 batches.
 
 
-def shuffleAndTruncate(dataset: DatasetInfoMixin, truncate_to: int=None):
+def shuffleAndTruncate(dataset: DatasetInfoMixin, truncate_to: int=None, seed: int=None):
     """
     French software engineering: .select() for one, .take() for the other.
     """
     if isinstance(dataset, Dataset):
-        dataset = dataset.shuffle()
+        dataset = dataset.shuffle(seed=seed)
         if truncate_to:
             dataset = dataset.select(range(truncate_to))
     elif isinstance(dataset, IterableDataset):
-        dataset = dataset.shuffle(buffer_size=10_000)  # https://huggingface.co/docs/datasets/stream#shuffle
+        dataset = dataset.shuffle(seed=seed, buffer_size=10_000)  # https://huggingface.co/docs/datasets/stream#shuffle
         if truncate_to:
             dataset = dataset.take(truncate_to)
     else:

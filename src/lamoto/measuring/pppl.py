@@ -61,13 +61,21 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
     The implementation below supports any special token format, and any context length. The latter can be done naively
     by having equal context on the left and right, or parameterised by the proportion of left/right context. This is the
     most general version of the algorithm and I have implemented that below.
+    
+    FIXME: This function crashes for long examples, because the batch we send to the model for an example of N
+          tokens with a context length of L tokens is N x min(N,L) which could e.g. be a batch of 1024 examples, sent
+          straight to the device. Normally one device handles at most 64 examples in a batch...
     """
     # Iterate over examples and keep non-averaged NLLs for each.
     nlls = []
     total_tokens = 0
     for example in tqdm(validation_dataset, total=tqdm_dataset_size):
-        encodings = tokenizer(example["text"], return_tensors="pt")  # This is a 1 x n_tokens batch.
-        tokens = encodings.input_ids.squeeze()
+        if "input_ids" in example:
+            encodings = torch.tensor(example["input_ids"])
+        else:
+            encodings = tokenizer(example["text"], return_tensors="pt").input_ids  # This is a 1 x n_tokens batch.
+        tokens = encodings.squeeze()
+        assert tokens.dim() == 1  # The .squeeze() will remove the batch dimension only if there is 1 example in the batch. PPPL makes a batch out of 1 example, so can't take batches itself.
         n = tokens.size(0)
 
         # Sizes (reset every iteration because we alter them for sentences shorter than the model context's length)
@@ -120,7 +128,8 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
                 attention_mask=attention_mask.to(model.device),
                 labels=labels.to(model.device)
             )
-            nlls.append(n*outputs.loss)  # n is adjusted at this point to the amount of predicted tokens.
+            loss = outputs[0] if isinstance(outputs, tuple) else outputs.loss
+            nlls.append(n*loss)  # n is adjusted at this point to the amount of predicted tokens.
 
         total_tokens += n
 

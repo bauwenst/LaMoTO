@@ -22,7 +22,7 @@ class LamotoIntervalStrategy(HowManySteps):
     pass
 
 
-class NoStrategy(LamotoIntervalStrategy):
+class NeverInterval(LamotoIntervalStrategy):
     def getSteps(self, *args):
         raise NotImplementedError("No strategy for getting this interval.")
 
@@ -159,5 +159,5 @@ class EvaluationEnvironment:
 
 
 __all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",
-           "NoStrategy", "EveryNDescents", "NEveryEpoch", "EveryNMinutes",
+           "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes",
            "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes"]
