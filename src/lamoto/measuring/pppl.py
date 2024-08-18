@@ -23,7 +23,8 @@ class PseudoPerplexity(AutonomousMetric):
             model=self.environment.model,
             tokenizer=self.environment.tokeniser,
             validation_dataset=self.environment.validation_dataset,
-            rightward_fraction=params.right_fraction
+            rightward_fraction=params.right_fraction,
+            device_batch_size=self.environment.hyperparameters.EXAMPLES_PER_DEVICEBATCH
         )
         return {
             "pppl": p,
@@ -32,8 +33,8 @@ class PseudoPerplexity(AutonomousMetric):
         }
 
 
-def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset, rightward_fraction: float=0.5,
-         tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
+def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset, device_batch_size: int,
+         rightward_fraction: float=0.5, tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
     """
     Masked perplexity (pseudo-perplexity). Same boundary conditions as causal perplexity apply, except the task is not to
     predict the next token but to predict the token under a mask. This is fundamentally different to causal PPL, because
@@ -61,7 +62,7 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
     The implementation below supports any special token format, and any context length. The latter can be done naively
     by having equal context on the left and right, or parameterised by the proportion of left/right context. This is the
     most general version of the algorithm and I have implemented that below.
-    
+
     FIXME: This function crashes for long examples, because the batch we send to the model for an example of N
           tokens with a context length of L tokens is N x min(N,L) which could e.g. be a batch of 1024 examples, sent
           straight to the device. Normally one device handles at most 64 examples in a batch...
@@ -100,7 +101,7 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
         middle = tokens.unfold(dimension=0, size=L, step=1) if L_middle else torch.zeros(size=(0,L), dtype=torch.int64)  # Window shifting with step 1 of the same size as that available window.
         bottom = tokens[n-L:].repeat(L_right, 1)  # Tolerates L_right == 0. Also, n-L can never be negative since L <= n by the above.
 
-        # Masks
+        # Masks (where to put the [MASK] token)
         mask_top    = torch.eye(L_left, L)
         mask_middle = torch.zeros(n-L_left-L_right, L)
         if L_middle:
@@ -123,15 +124,17 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
         attention_mask = torch.ones_like(input_ids)
 
         with torch.inference_mode():
-            outputs = model(
-                input_ids=input_ids.to(model.device),
-                attention_mask=attention_mask.to(model.device),
-                labels=labels.to(model.device)
-            )
-            loss = outputs[0] if isinstance(outputs, tuple) else outputs.loss
-            nlls.append(n*loss)  # n is adjusted at this point to the amount of predicted tokens.
+            # Split the above tensors into appropriate batches to feed to the model.
+            for input_ids_part, attention_mask_part, labels_part in zip(torch.split(input_ids, device_batch_size), torch.split(attention_mask, device_batch_size), torch.split(labels_part, device_batch_size)):
+                outputs = model(
+                    input_ids=input_ids.to(model.device),
+                    attention_mask=attention_mask.to(model.device),
+                    labels=labels.to(model.device)
+                )
+                loss = outputs[0] if isinstance(outputs, tuple) else outputs.loss
+                nlls.append(input_ids_part.size(0)*loss)  # We are sure that every row contains exactly 1 label to predict.
 
-        total_tokens += n
+        total_tokens += n  # We are also sure that n == input_ids.size(0) because we adjusted it after filtering special tokens.
 
     averaged_nll = (torch.cat(nlls).sum() / total_tokens).item()
     return exp(averaged_nll), averaged_nll, total_tokens

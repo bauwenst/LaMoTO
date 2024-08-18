@@ -27,7 +27,7 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     TRACK_BEST_MODEL=False,
     EVALS_OF_PATIENCE=None,
     EVAL_VS_SAVE_INTERVALS=Intervals(
-        evaluation=EveryNDescents(descents=128),
+        evaluation=EveryNDescents(descents=128),  # 128 batches doesn't seem like a lot, but with that massive batch size it means you only evaluate once every 128 ba * 8192 ex/ba * 512 tk/ex = 0.5 billion tokens seen.
         checkpointing=EveryNMinutes(minutes=30)
     ),
 

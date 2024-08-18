@@ -21,7 +21,7 @@ import transformers.optimization
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
 from fiject.hooks.transformers import FijectCallback
-from tktkt.files.paths import DataPaths
+from tktkt.files.paths import PathManager
 from tktkt.util.timing import datetimeDashed
 
 from ..augmenting.augment_model import ModelAugmentation
@@ -32,6 +32,8 @@ from ..trainer.hyperparameters import *
 from ..trainer.trainers import TrainerWithoutEvaluationLoop
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.strings import getSubstringAfterLastSlash
+
+DataPaths = PathManager("lamoto")
 
 
 #################################################
