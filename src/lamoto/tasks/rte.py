@@ -1,10 +1,13 @@
 from datasets import load_dataset
 from transformers import DataCollatorWithPadding, AutoModelForSequenceClassification
 
+from archit.instantiation.heads import SequenceClassificationHeadConfig
+from archit.instantiation.tasks import ForSingleLabelSequenceClassification
+
 from ._core import *
 
 
-class RTE(Task):
+class RTE(Task[SequenceClassificationHeadConfig]):
 
     def __init__(self):
         super().__init__(
@@ -18,6 +21,7 @@ class RTE(Task):
                     "accuracy": {"accuracy": "Acc"}
                 }
             ),
+            archit_class=ForSingleLabelSequenceClassification,
             automodel_class=AutoModelForSequenceClassification,
 
             num_labels=2
@@ -34,6 +38,9 @@ class RTE(Task):
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["sentence1", "sentence2", "idx"])
         return dataset
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[SequenceClassificationHeadConfig]):
+        hp.HEAD_CONFIG.num_labels = 2
 
     def getCollator(self) -> DataCollator:
         return DataCollatorWithPadding(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())

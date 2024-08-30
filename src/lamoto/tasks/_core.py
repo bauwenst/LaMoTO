@@ -2,11 +2,10 @@
 Core fine-tuning script for any task.
 
 TODO:
-    - Should have a way to load custom models beyond using from_pretrained, e.g. NILF with partial init.
     - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
     - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
 """
-from typing import Any, Dict, Type, List, Tuple
+from typing import Any, Dict, Type, List, Tuple, Generic
 from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -22,7 +21,11 @@ from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
 from fiject.hooks.transformers import FijectCallback
 from tktkt.files.paths import PathManager
+from tktkt.interfaces.huggingface import TktktToHuggingFace
+from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from tktkt.util.timing import datetimeDashed
+from tktkt.util.printing import pluralise
+from archit.instantiation.abstracts import ModelWithHead
 
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric, LamotoMetric
@@ -37,6 +40,8 @@ DataPaths = PathManager("lamoto")
 
 
 #################################################
+from archit.instantiation.basemodels import RobertaBaseModel
+
 SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     SAVE_AS=None,
     WANDB_PROJECT=None,
@@ -55,13 +60,17 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
         checkpointing=None
     ),
 
+    SEED=69420,
     INIT_WEIGHTS=True,
-    CHECKPOINT_OR_CONFIG="roberta-base",
-    TOKENISER_CHECKPOINT="roberta-base",
+    ALWAYS_RESET_HEAD=True,
+    MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
+    MODEL_CLASS=RobertaBaseModel,
+    HEAD_CONFIG=None,
 
     LEARNING_RATE=2e-5,
     L2_REGULARISATION=0.01,
 
+    TOKENISER="roberta-base",
     ADD_SPECIAL_TOKENS=True
 )
 #################################################
@@ -73,17 +82,19 @@ class MetricSetup:
     to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
 
 
-class Task(ABC):
+class Task(ABC, Generic[HC]):
 
-    def __init__(self, task_name: str, metric_config: MetricSetup, automodel_class: Type[_BaseAutoModelClass], **automodel_args):
+    def __init__(self, task_name: str, metric_config: MetricSetup,
+                 archit_class: Type[ModelWithHead[PC,HC]], automodel_class: Type[_BaseAutoModelClass], **automodel_args):
         self.task_name       = task_name
         self.metric_config   = metric_config
+        self.archit_class    = archit_class
         self.automodel_class = automodel_class
         self.automodel_args  = automodel_args
 
         # Fields that can be used by method implementations, but are only instantiated once .train() is called, to
         # avoid loading heavy objects that would be duplicated by the super() call of a task wrapper.
-        self.hyperparameters: TaskHyperparameters = None
+        self.hyperparameters: TaskHyperparameters[HC] = None
         self.tokenizer: PreTrainedTokenizerBase = None
         self.model_config: PretrainedConfig = None
         self.metrics: Dict[str, Metric] = None
@@ -98,6 +109,10 @@ class Task(ABC):
 
     @abstractmethod
     def getCollator(self) -> DataCollator:
+        pass
+
+    @abstractmethod
+    def adjustHyperparameters(self, hp: TaskHyperparameters[HC]):
         pass
 
     @abstractmethod
@@ -139,18 +154,22 @@ class Task(ABC):
             else:
                 raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
 
-    def train(self, hyperparameters: TaskHyperparameters=SUGGESTED_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
-        SEED = 69420
-        transformers.set_seed(seed=SEED)
+    def train(self, hyperparameters: TaskHyperparameters[HC]=SUGGESTED_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+        transformers.set_seed(seed=hyperparameters.SEED)
+
+        # Sanity check(s)
+        if hyperparameters.INIT_WEIGHTS and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
+            raise ValueError("To initialise model weights, you should give a checkpoint path, not a config object.")
 
         # Metadata
+        self.adjustHyperparameters(hyperparameters)
         self.hyperparameters = hyperparameters
-        self.model_config = AutoConfig.from_pretrained(hyperparameters.CHECKPOINT_OR_CONFIG) if isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str) else hyperparameters.CHECKPOINT_OR_CONFIG
+        self.model_config = AutoConfig.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT) if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str) else hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
 
         if hyperparameters.SAVE_AS:
             model_name = hyperparameters.SAVE_AS
-        elif isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str):
-            model_name = getSubstringAfterLastSlash(hyperparameters.CHECKPOINT_OR_CONFIG)
+        elif isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
+            model_name = getSubstringAfterLastSlash(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT)
         else:  # We don't use the tokeniser name because it isn't directly related to the model.
             raise RuntimeError("Cannot deduce name to save model as from a config.")
 
@@ -162,14 +181,17 @@ class Task(ABC):
         folder_to_this_models_checkpoints.mkdir(exist_ok=True, parents=True)
 
         # Set up tokeniser
-        if hyperparameters.TOKENISER_CHECKPOINT:
-            tokeniser_checkpoint = hyperparameters.TOKENISER_CHECKPOINT
-        elif isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str):
-            tokeniser_checkpoint = hyperparameters.CHECKPOINT_OR_CONFIG
+        if hyperparameters.TOKENISER:
+            if isinstance(hyperparameters.TOKENISER, str):
+                self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.TOKENISER, add_prefix_space=True)
+            elif isinstance(hyperparameters.TOKENISER, TokeniserWithFiniteTypeDomain):
+                self.tokenizer = TktktToHuggingFace(hyperparameters.TOKENISER)
+            else:
+                self.tokenizer = hyperparameters.TOKENISER
+        elif isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
+            self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, add_prefix_space=True)
         else:
             raise RuntimeError("Cannot deduce tokeniser checkpoint from config.")
-
-        self.tokenizer = AutoTokenizer.from_pretrained(tokeniser_checkpoint, add_prefix_space=True)
 
         # - Old models like GPT-2 have no pad token, but this doesn't really matter because it's actually the attention
         #   mask that determines if a token is processed, so you can replace it by any token you want. https://github.com/stanford-crfm/BioMedLM/issues/4
@@ -179,8 +201,10 @@ class Task(ABC):
 
         # Now that you have the tokeniser, tokenise the dataset.
         datasetdict = self.loadDataset()
-        datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"], seed=SEED)
-        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=SEED, truncate_to=min(hyperparameters.EXAMPLES_PER_EVALUATION, getDatasetSize(datasetdict["validation"], split="validation")))
+        n_examples_validation = getDatasetSize(datasetdict["validation"], split="validation")
+        hyperparameters.EXAMPLES_PER_EVALUATION = n_examples_validation if not hyperparameters.EXAMPLES_PER_EVALUATION else min(n_examples_validation, hyperparameters.EXAMPLES_PER_EVALUATION)
+        datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"], seed=hyperparameters.SEED)
+        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=hyperparameters.SEED, truncate_to=hyperparameters.EXAMPLES_PER_EVALUATION)
         datasetdict = self.prepareDataset(datasetdict)
 
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
@@ -188,13 +212,21 @@ class Task(ABC):
 
         # Get the model...
         self.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32
-        if hyperparameters.INIT_WEIGHTS:
-            if not isinstance(hyperparameters.CHECKPOINT_OR_CONFIG, str):
-                raise ValueError("To initialise model weights, you should give a checkpoint path, not a config object.")
-            model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.CHECKPOINT_OR_CONFIG, **self.automodel_args)
+
+        checkpoint_classname = self.model_config.architectures[0]
+        if not hyperparameters.ALWAYS_RESET_HEAD and \
+                self.archit_class.head_class.hfEquivalentSuffix() in checkpoint_classname and \
+                self.archit_class.head_class.hfEquivalentSuffix() != checkpoint_classname:  # Checkpoint has exactly the head we're looking for.
+            if hyperparameters.INIT_WEIGHTS:
+                model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
+            else:
+                model: PreTrainedModel = self.automodel_class.from_config(self.model_config, **self.automodel_args)
         else:
-            model: PreTrainedModel = self.automodel_class.from_config(self.model_config, **self.automodel_args)
-        model.config.pad_token_id = self.model_config.pad_token_id
+            if hyperparameters.INIT_WEIGHTS:
+                model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.MODEL_CLASS, hyperparameters.HEAD_CONFIG)
+            else:
+                model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.MODEL_CLASS(self.model_config), hyperparameters.HEAD_CONFIG)
+        model.config.pad_token_id = self.model_config.pad_token_id  # self.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
 
         # ...and augment it (possibly with the tokeniser).
         if model_augmentation:
@@ -270,7 +302,7 @@ class Task(ABC):
             gradient_accumulation_steps=n_accumulations,
 
             # Style of computations
-            gradient_checkpointing=True,  # Only if you have the VRAM though. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
+            gradient_checkpointing=model.supports_gradient_checkpointing,  # Only if you have the VRAM though. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
             bf16=torch.cuda.is_bf16_supported(),
 
             # Evaluation
@@ -300,6 +332,9 @@ class Task(ABC):
             # hub_private_repo=True,
             # push_to_hub=True,
             # hub_strategy='all_checkpoints',
+
+            # Data
+            remove_unused_columns=False  # Otherwise, only those keys that match input arguments of the model are allowed to survive the preprocessor. Very weird system. They are already gone before the DataCollator gets to see anything. You'll get an "IndexError: is out of bounds for size 0" because the dataset looks like it has no columns.
         )
 
         # - Build optimiser
@@ -368,22 +403,22 @@ class Task(ABC):
         batches_per_eval  = totalBatches(ev, bs)
         print("Batch size:", bs)
         print("Training set:")
-        print("\t", e, "examples per epoch")
-        print("\t", batches_per_epoch, "batches per epoch")
+        print("\t", pluralise(e, "example"), "per epoch")
+        print("\t", pluralise(batches_per_epoch, "batch", "es"), "per epoch")
         if n_gradient_descents:
             print("\t", round(n_gradient_descents / batches_per_epoch, 1), "epochs")
-            print("\t", n_gradient_descents, "batches in total")
+            print("\t", pluralise(n_gradient_descents, "batch", "es"), "in total")
         print("Evaluation set:")
-        print("\t", ev, "examples per evaluation")
-        print("\t", batches_per_eval, "batches per evaluation")
+        print("\t", pluralise(ev, "example"), "per evaluation")
+        print("\t", pluralise(batches_per_eval, "batch", "es"), "per evaluation")
         if batches_between_evals:
-            print("\t", batches_between_evals, "training batches between evals")
-            print("\t", batches_per_epoch // batches_between_evals, "evals per training epoch")
+            print("\t", pluralise(batches_between_evals, "training batch", "es"), "between evals")
+            print("\t", pluralise(batches_per_epoch // batches_between_evals, "eval"), "per training epoch")
         print("======================")
 
         # Train, and evaluate afterwards.
         try:
-            print("Training:")
+            print(f"Training {model.__class__.__name__}:")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()

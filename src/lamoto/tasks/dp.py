@@ -4,12 +4,13 @@ from datasets import load_dataset
 import torch
 
 from tktkt.util.printing import gridify
+from archit.instantiation.tasks import ForDependencyParsing, DependencyParsingHeadConfig
 
 from ._core import *
 from ..modelling.dependency_parsing import AutoModelForDependencyParsing, DataCollatorForDependencyParsing, SuparWithLoss
 
 
-class DP(Task):
+class DP(Task[DependencyParsingHeadConfig]):
     """
     Dependency parsing measured by UAS and LAS.
     """
@@ -33,13 +34,14 @@ class DP(Task):
                     }
                 }
             ),
-            automodel_class=AutoModelForDependencyParsing,
+            archit_class=ForDependencyParsing,
+            automodel_class=None,  # Technically there is no HuggingFace-compatible AutoModelForDP. Best we have is supar, but it can only load from a base model checkpoint, not from a supar checkpoint!
 
             num_labels=len(self.tagset)
         )
 
     def loadDataset(self) -> DatasetDict:
-        return load_dataset("universal_dependencies", "en_ewt")
+        return load_dataset("universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def getTagset(self) -> Counter:
         print("Generating tagset manually...")
@@ -50,6 +52,9 @@ class DP(Task):
                 counter.update(label_sequence)
         print("Finished generating tagset.")
         return counter
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):
+        hp.HEAD_CONFIG.num_labels = len(self.tagset)
 
     def sneakyLogitTransform(self, logits, labels):
         """
@@ -121,7 +126,7 @@ class DP(Task):
                     heads.append(             int(example["head"  ][i]))
                     deprels.append(self.tag_to_id[example["deprel"][i]])
 
-            # Tokenise all remaining words.
+            # Tokenise all words that were kept.
             subword_ids_per_word = [self.tokenizer(word, add_special_tokens=False)["input_ids"] for word in words]
 
             # We need to do truncation manually because we made many tokenizer() calls without concatenating.
@@ -145,6 +150,7 @@ class DP(Task):
             #       overflow with a stride. Otherwise you're just losing too much interesting dependency data.
             #       This means the above code should split instead of cut, and all the below code would be repeated per
             #       "chunk" of the example, not just once.
+            #       Actually, Supar supports super long sentences. Just don't truncate at all and you're good.
 
             # Make the 1-based heads (with 0 the root) actually correspond to indices. This dummy has no head and no relation itself.
             subword_ids_per_word.insert(0, [self.tokenizer.unk_token_id])
@@ -186,6 +192,7 @@ class DP(Task):
             enc["words"]       = with_special_tokens_added
             enc["labels_arcs"] = word_head_labels
             enc["labels_rels"] = word_deprel_labels
+            enc["attention_mask"] = [1]*len(with_special_tokens_added)  # word-level attention mask for the head
             return enc
 
         dataset = dataset.map(preprocess, batched=False)

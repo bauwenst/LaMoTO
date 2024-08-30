@@ -61,12 +61,18 @@ class DataCollatorForDependencyParsing(DataCollatorMixin):
         # (Because we assume that for all examples, len(example["words"]) == len(example["labels_arcs"]) == len(example["labels_rels"])).
         labels_arcs = pad([torch.tensor(example["labels_arcs"], dtype=torch.long) for example in examples], self.label_pad_value)
         labels_rels = pad([torch.tensor(example["labels_rels"], dtype=torch.long) for example in examples], self.label_pad_value)
-        assert ids_tensor.size(1) == labels_arcs.size(1) == labels_rels.size(1)
+
+        # Attention mask is at the word level and should hence work the same as the labels.
+        attention_mask = pad([torch.tensor(example["attention_mask"], dtype=torch.long) for example in examples], self.label_pad_value)
+        assert ids_tensor.size(1) == labels_arcs.size(1) == labels_rels.size(1) == attention_mask.size(1)  # == the amount of words.
 
         return {
-            "words": ids_tensor,
-            "labels_arcs": labels_arcs,
-            "labels_rels": labels_rels
+            # "words": ids_tensor,
+            # "labels_arcs": labels_arcs,
+            # "labels_rels": labels_rels
+            "input_ids": ids_tensor,
+            "attention_mask": attention_mask,
+            "labels": (labels_arcs, labels_rels)
         }
 
 
@@ -130,6 +136,9 @@ class SuparWithLoss(torch.nn.Module):
                 return_dict: bool=False,
                 **kwargs) -> DependencyParsingOutput:
         """
+        Reimplementation of BiaffineDependencyParser.train_step(), which does inference to get logits, then creates a
+        mask, and then computes loss.
+
         As seen here: https://github.com/yzhangcs/parser/blob/bebdd350e034c517cd5b71185e056503290164fa/supar/utils/field.py#L279
         the `words` tensor is not like input_ids since it has 3 dimensions: the batch dimension, the words dimension, and
         the subwords dimension. Separating those two allows subword pooling.
@@ -145,7 +154,8 @@ class SuparWithLoss(torch.nn.Module):
             # mask[:, 0] = 0  # ignore the first token of each sentence  TODO: Why? --> My guess: they're assuming BoS tokens EoS format, and using the EoS as dummy for the root head.
             loss = self.model.loss(arc_scores, rel_scores, labels_arcs, labels_rels, mask, partial=True)  # The "partial" lets supar generate the mask using -100 labels.
 
-        if not return_dict:  # It makes more sense to use dataclasses, but Trainer assumes the tuple output convention instead.
+        # It makes more sense to use dataclasses, but Trainer assumes the tuple output convention instead.
+        if not return_dict:
             if loss is None:
                 return (arc_scores, rel_scores)
             else:
@@ -162,7 +172,7 @@ class SuparWithLoss(torch.nn.Module):
                                 # criterion=torch.nn.CrossEntropyLoss(),
                                 enforce_projective=False, enforce_tree=True) -> AttachmentMetric:
         """
-        Static version of BiaffineDependencyModel's eval_step(), which is possible since it relies on loss() and decode()
+        Static version of BiaffineDependencyParser's eval_step(), which is possible since it relies on loss() and decode()
         which are both technically static apart from needing self.criterion, which is a constant anyway.
 
         Actually, you can skip the loss. We're already tracking that since we have logits already.
@@ -205,6 +215,8 @@ class SuparWithLoss(torch.nn.Module):
         # This metric class only registers its constructor arguments when a loss is provided. Weird, but okay.
         return AttachmentMetric(0.0, (arc_preds, rel_preds), (arc_labels, rel_labels), mask)
 
+    ####################################################################################################################
+
     def eval_step(self, words: torch.LongTensor,
                   labels_arcs: torch.LongTensor, labels_rels: torch.LongTensor) -> AttachmentMetric:
         """
@@ -217,6 +229,9 @@ class SuparWithLoss(torch.nn.Module):
         return AttachmentMetric(loss, (arc_preds, rel_preds), (labels_arcs, labels_rels), mask)
 
     def evaluation(self, preprocessed_dataset):
+        """
+        Another method that is used nowhere but it would be so nice if anything did use it.
+        """
         # TODO: It really could be this easy... The way you'd use this is to give the Trainer an empty DataLoader as
         #       evaluation set, yet somehow still trigger this on evaluation -- perhaps with a callback or something,
         #       but that callback would need access to the model.

@@ -28,7 +28,11 @@ from datasets import Dataset
 from transformers import DataCollatorForTokenClassification, AutoModelForTokenClassification
 import torch
 
-from bpe_knockout.project.config import morphologyGenerator, setupEnglish, KnockoutDataConfiguration
+from modest.interfaces.morphologies import WordSegmentation
+from modest.interfaces.datasets import ModestDataset
+from modest.languages.english import English_Celex
+from archit.instantiation.heads import TokenClassificationHeadConfig
+from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
 
@@ -37,19 +41,19 @@ from ._core import *
 ##################################
 SUGGESTED_HYPERPARAMETERS_MBR = deepcopy(SUGGESTED_HYPERPARAMETERS)
 SUGGESTED_HYPERPARAMETERS_MBR.CHECKPOINT_OR_CONFIG = "google/canine-c"
-SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER_CHECKPOINT = "google/canine-c"
+SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER = "google/canine-c"
 SUGGESTED_HYPERPARAMETERS_MBR.EFFECTIVE_BATCHES_WARMUP = 1000
 SUGGESTED_HYPERPARAMETERS_MBR.EVAL_VS_SAVE_INTERVALS.evaluation = NEveryEpoch(per_epoch=9, effective_batch_size=SUGGESTED_HYPERPARAMETERS_MBR.EXAMPLES_PER_EFFECTIVE_BATCH)
 
-DATASET_CONFIG = setupEnglish()
+DATASET: ModestDataset[WordSegmentation] = English_Celex()
 ##################################
 
 
-class MBR(Task):
+class MBR(Task[TokenClassificationHeadConfig]):
 
     def __init__(self, dataset_out_of_context: bool=True):
         super().__init__(
-            task_name="MBR" + "-" + DATASET_CONFIG.langTag(),
+            task_name="MBR" + "-" + DATASET._language.to_tag(),
             metric_config=MetricSetup(
                 to_compute=["accuracy", "precision", "recall", "f1"],
                 to_track={
@@ -59,7 +63,9 @@ class MBR(Task):
                     "f1": {"f1": "$F_1$"}
                 }
             ),
+            archit_class=ForSingleLabelTokenClassification,
             automodel_class=AutoModelForTokenClassification,
+
             num_labels=2
         )
         # self.tokenizer: CanineTokenizer = AutoTokenizer.from_pretrained(CHECKPOINT)  # There is no unk_token because any Unicode codepoint is mapped via a hash table to an ID (which is better than UTF-8 byte tokenisation although not reversible).
@@ -72,16 +78,15 @@ class MBR(Task):
         BAR = "|"
         FIND_BAR = re.compile(re.escape(BAR))
 
-        with KnockoutDataConfiguration(DATASET_CONFIG):
-            for obj in morphologyGenerator():
-                splitstring = obj.morphSplit()
-                split_indices = [match.start() // 2 for match in
-                                 FIND_BAR.finditer(" ".join(splitstring).replace("   ", BAR))]
+        for obj in DATASET.generate():
+            splitstring = obj.segment()
+            split_indices = [match.start() // 2 for match in
+                             FIND_BAR.finditer(" ".join(splitstring).replace("   ", BAR))]
 
-                text = obj.lemma()
-                labels = torch.zeros(len(text), dtype=torch.int8)
-                labels[split_indices] = 1
-                yield {"text": text, "labels": labels}
+            text = obj.word
+            labels = torch.zeros(len(text), dtype=torch.int8)
+            labels[split_indices] = 1
+            yield {"text": text, "labels": labels}
 
     def _datasetInContext(self) -> Iterable[dict]:
         raise RuntimeError("No in-context dataset exists currently.")
@@ -112,6 +117,9 @@ class MBR(Task):
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["text"])
         return dataset
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
+        hp.HEAD_CONFIG.num_labels = 2
 
     def getCollator(self) -> DataCollator:
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).

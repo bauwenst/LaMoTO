@@ -1,9 +1,13 @@
-from typing import Optional, Union
+from typing import Optional, Union, Generic, Type
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedConfig
 from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
+
+from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
+from archit.instantiation.abstracts import PC, HC, BaseModel
 
 from ..util.datasets import getDatasetSize, totalBatches
 
@@ -42,7 +46,7 @@ class NEveryEpoch(LamotoIntervalStrategy):
 
     def getSteps(self, train_dataset: DatasetInfoMixin) -> int:  # DatasetInfoMixin is the parent class for Dataset and IterableDataset.
         examples_per_epoch = getDatasetSize(train_dataset, split="train")
-        steps_per_epoch = examples_per_epoch // self.examples_per_step
+        steps_per_epoch    = totalBatches(examples_per_epoch, self.examples_per_step)
         steps_between_events = steps_per_epoch // self.events_per_epoch
 
         if steps_between_events == 0:
@@ -114,7 +118,7 @@ class Intervals:
 
 
 @dataclass
-class TaskHyperparameters:
+class TaskHyperparameters(Generic[HC]):
     SAVE_AS: Optional[str]  # Not necessary if a checkpoint name is given.
     WANDB_PROJECT: Optional[str]
 
@@ -138,15 +142,19 @@ class TaskHyperparameters:
 
     # Model configuration
     # - Initialising:
-    INIT_WEIGHTS: bool
-    CHECKPOINT_OR_CONFIG: Union[str, PretrainedConfig]
-    TOKENISER_CHECKPOINT: Optional[str]  # Must be given if the above checkpoint isn't.
+    SEED: int
+    INIT_WEIGHTS: bool  # Whether to initialise any weights at all.
+    ALWAYS_RESET_HEAD: bool  # You want this to be false for doing inference, e.g. in CLM after training. When you load a checkpoint for token classification in the context of a task that classifies tokens, by default the old head weights will be reused even if that means num_labels is wrong. This is intentional, because too many task-specific checks would otherwise need to be run.
+    MODEL_CONFIG_OR_CHECKPOINT: Union[str, PretrainedConfig]
+    MODEL_CLASS: Type[BaseModel]
+    HEAD_CONFIG: HC
 
     # - Gradients:
     LEARNING_RATE: float
     L2_REGULARISATION: float
 
     # Tokeniser
+    TOKENISER: Optional[Union[TokeniserWithFiniteTypeDomain, str]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
     ADD_SPECIAL_TOKENS: bool
 
 
@@ -160,4 +168,5 @@ class EvaluationEnvironment:
 
 __all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",
            "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes",
-           "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes"]
+           "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
+           "PC", "HC"]

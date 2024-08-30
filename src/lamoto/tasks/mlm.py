@@ -4,12 +4,16 @@ import datasets
 from datasets import IterableDatasetDict
 from transformers import AutoModelForMaskedLM, DataCollatorForLanguageModeling
 
+from archit.instantiation.basemodels import RobertaBaseModel
+from archit.instantiation.heads import MaskedLMHeadConfig
+from archit.instantiation.tasks import ForMaskedLM
+
 from ..measuring.pppl import PPPL_Parameters
 from ._core import *
 
 
 @dataclass
-class MlmHyperparameters(TaskHyperparameters):
+class MlmHyperparameters(TaskHyperparameters[MaskedLMHeadConfig]):
     MLM_PROBABILITY: float
     PPPL_PARAMETERS: PPPL_Parameters
 
@@ -31,20 +35,25 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
         checkpointing=EveryNMinutes(minutes=30)
     ),
 
-    ADD_SPECIAL_TOKENS=True,
+    SEED=69420,
     INIT_WEIGHTS=False,
-    CHECKPOINT_OR_CONFIG="roberta-base",
-    TOKENISER_CHECKPOINT="roberta-base",
+    ALWAYS_RESET_HEAD=True,
+    MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
+    MODEL_CLASS=RobertaBaseModel,
+    HEAD_CONFIG=MaskedLMHeadConfig(),
 
-    LEARNING_RATE = 6e-4,
-    L2_REGULARISATION = 0.01,
+    TOKENISER="roberta-base",
+    ADD_SPECIAL_TOKENS=True,
+
+    LEARNING_RATE=6e-4,
+    L2_REGULARISATION=0.01,
 
     MLM_PROBABILITY=0.15,
     PPPL_PARAMETERS=PPPL_Parameters(right_fraction=0.5)
 )
 
 
-class MLM(Task):  # TODO: Should you use packing for MLM?
+class MLM(Task[MaskedLMHeadConfig]):  # TODO: Should you use packing for MLM?
 
     def __init__(self):
         super().__init__(
@@ -55,6 +64,7 @@ class MLM(Task):  # TODO: Should you use packing for MLM?
                     "pppl": {"pppl": "PPPL", "nll": "NLL"}
                 }
             ),
+            archit_class=ForMaskedLM,
             automodel_class=AutoModelForMaskedLM
         )
         self.hyperparameters: MlmHyperparameters = None
@@ -66,6 +76,9 @@ class MLM(Task):  # TODO: Should you use packing for MLM?
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["text"])
         return dataset
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[MaskedLMHeadConfig]):
+        pass
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=True, mlm_probability=self.hyperparameters.MLM_PROBABILITY)

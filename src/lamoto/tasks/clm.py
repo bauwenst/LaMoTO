@@ -10,6 +10,10 @@ from transformers import \
     AutoModelForCausalLM, \
     PreTrainedTokenizerBase, DataCollator, EvalPrediction
 
+from archit.instantiation.heads import CausalLMHeadConfig
+from archit.instantiation.tasks import ForCausalLM
+from archit.instantiation.basemodels import GPT2BaseModel
+
 # Relative
 from ._core import *
 from ..measuring.ppl import PPL_Parameters
@@ -17,7 +21,7 @@ from ..trainer.hyperparameters import Intervals
 
 
 @dataclass
-class ClmHyperparameters(TaskHyperparameters):
+class ClmHyperparameters(TaskHyperparameters[CausalLMHeadConfig]):
     PPL: PPL_Parameters  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
 
 
@@ -39,10 +43,15 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
         checkpointing=EveryNMinutes(minutes=30)
     ),
 
-    ADD_SPECIAL_TOKENS=False,
+    SEED=69420,
     INIT_WEIGHTS=False,
-    CHECKPOINT_OR_CONFIG="openai-community/gpt2",
-    TOKENISER_CHECKPOINT="openai-community/gpt2",
+    ALWAYS_RESET_HEAD=True,
+    MODEL_CONFIG_OR_CHECKPOINT="openai-community/gpt2",
+    MODEL_CLASS=GPT2BaseModel,
+    HEAD_CONFIG=CausalLMHeadConfig(),
+
+    TOKENISER="openai-community/gpt2",
+    ADD_SPECIAL_TOKENS=False,
 
     LEARNING_RATE = 2e-5,
     L2_REGULARISATION = 0.01,
@@ -95,7 +104,7 @@ def packedDatasetGenerator(dataset: Iterable, tokenizer: PreTrainedTokenizerBase
             cache = cache[context_length:]
 
 
-class CLM(Task):
+class CLM(Task[CausalLMHeadConfig]):
 
     def __init__(self):
         super().__init__(
@@ -106,6 +115,7 @@ class CLM(Task):
                     "ppl": {"ppl": "PPL", "nll": "NLL"}
                 }
             ),
+            archit_class=ForCausalLM,
             automodel_class=AutoModelForCausalLM
         )
 
@@ -121,6 +131,9 @@ class CLM(Task):
         #                 "tokenizer": tokenizer,
         #                 "context_length": model.config.max_position_embeddings})
         return dataset
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[CausalLMHeadConfig]):
+        pass
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=False)

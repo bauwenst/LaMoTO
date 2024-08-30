@@ -1,10 +1,14 @@
 from datasets import load_dataset
 from transformers import AutoModelForTokenClassification, DataCollatorForTokenClassification
 
+from archit.instantiation.heads import TokenClassificationHeadConfig
+from archit.instantiation.tasks import ForSingleLabelTokenClassification
+
+
 from ._core import *
 
 
-class NER(Task):
+class NER(Task[TokenClassificationHeadConfig]):
     """
     Named entity recognition using the SeqEval-IOB2 metrics (which automatically exclude the "O" tag when computing F1,
     otherwise it would just be accuracy).
@@ -20,6 +24,7 @@ class NER(Task):
                     "seqeval": {"overall_precision": "Pr", "overall_recall": "Re", "overall_f1": "$F_1$"}
                 }
             ),
+            archit_class=ForSingleLabelTokenClassification,
             automodel_class=AutoModelForTokenClassification,
 
             num_labels=len(self.tagset)  # == 9 == len(['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC'])
@@ -48,6 +53,9 @@ class NER(Task):
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["tokens", "id", "chunk_tags", "pos_tags", "ner_tags"])
         return dataset
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
+        hp.HEAD_CONFIG.num_labels = len(self.tagset)
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())

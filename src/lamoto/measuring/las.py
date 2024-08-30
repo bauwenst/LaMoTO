@@ -6,7 +6,7 @@ from ._core import LogitLabelMetric
 
 class DependencyParsingMetrics(LogitLabelMetric):
 
-    def __init__(self):
+    def __init__(self, _):
         super().__init__(None)
         self.content = AttachmentMetric()
 
@@ -15,7 +15,7 @@ class DependencyParsingMetrics(LogitLabelMetric):
 
     def compute(self, predictions: Any, references: Any) -> Dict[str,Any]:
         """
-        Ignore the input and output your own internal metrics.
+        Ignore the input (because we know it's empty) and output your own internal metrics.
         """
         summary = {
             "uas": self.content.uas,

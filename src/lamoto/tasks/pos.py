@@ -1,10 +1,13 @@
 from datasets import load_dataset
 from transformers import AutoModelForTokenClassification, DataCollatorForTokenClassification
 
+from archit.instantiation.heads import TokenClassificationHeadConfig
+from archit.instantiation.tasks import ForSingleLabelTokenClassification
+
 from ._core import *
 
 
-class POS(Task):
+class POS(Task[TokenClassificationHeadConfig]):
 
     def __init__(self):
         self.tagset = ["B-" + tag for tag in self.loadDataset()["train"].features["upos"].feature.names]
@@ -16,6 +19,7 @@ class POS(Task):
                     "seqeval": {"overall_accuracy": "Accuracy"}  # Note that Pr = Re = F1 = Acc without a negative class (BIO's O class which POS doesn't have but NER does).
                 }
             ),
+            archit_class=ForSingleLabelTokenClassification,
             automodel_class=AutoModelForTokenClassification,
 
             num_labels=len(self.tagset)
@@ -27,7 +31,7 @@ class POS(Task):
         For example, you can actually reuse the entirety of the NER task and just replace "ner_tags" by "pos_tags" since
         CoNLL-2003 also has those (although they're not in BIO format).
         """
-        return load_dataset("universal_dependencies", "en_ewt")
+        return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
@@ -49,6 +53,9 @@ class POS(Task):
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["tokens", "idx", "text", "lemmas", "upos", "xpos", "feats", "head", "deprel", "deps", "misc"])
         return dataset
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
+        hp.HEAD_CONFIG.num_labels = len(self.tagset)
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
