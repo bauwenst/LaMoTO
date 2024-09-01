@@ -2,6 +2,7 @@ from typing import Optional, Union, Generic, Type
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from copy import deepcopy
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedConfig
 from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
@@ -166,7 +167,46 @@ class EvaluationEnvironment:
     hyperparameters: TaskHyperparameters
 
 
+from archit.instantiation.basemodels import RobertaBaseModel
+
+SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
+    SAVE_AS=None,
+    WANDB_PROJECT=None,
+
+    EXAMPLES_PER_EFFECTIVE_BATCH=32,
+    EXAMPLES_PER_DEVICEBATCH=32,
+    EFFECTIVE_BATCHES_WARMUP=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
+
+    HARD_STOPPING_CONDITION=AfterNEpochs(epochs=10, effective_batch_size=32),
+    EXAMPLES_PER_EVALUATION=None,
+    EVALS_OF_PATIENCE=9,
+
+    TRACK_BEST_MODEL=True,
+    EVAL_VS_SAVE_INTERVALS=Intervals(
+        evaluation=NEveryEpoch(per_epoch=1, effective_batch_size=32),
+        checkpointing=None
+    ),
+
+    SEED=69420,
+    INIT_WEIGHTS=True,
+    ALWAYS_RESET_HEAD=True,
+    MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
+    MODEL_CLASS=RobertaBaseModel,
+    HEAD_CONFIG=None,
+
+    LEARNING_RATE=2e-5,
+    L2_REGULARISATION=0.01,
+
+    TOKENISER=None,
+    ADD_SPECIAL_TOKENS=True
+)
+
+
+def getDefaultHyperparameters() -> TaskHyperparameters:
+    return deepcopy(SUGGESTED_HYPERPARAMETERS)
+
+
 __all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",
            "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes",
            "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
-           "PC", "HC"]
+           "PC", "HC", "getDefaultHyperparameters"]

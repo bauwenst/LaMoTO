@@ -1,13 +1,82 @@
+from dataclasses import dataclass
 from collections import Counter
-from datasets import load_dataset
+from typing import List
 
+from datasets import load_dataset
+from transformers import PreTrainedTokenizerBase
+from transformers.data.data_collator import DataCollatorMixin
 import torch
+from supar.utils.fn import pad
 
 from tktkt.util.printing import gridify
 from archit.instantiation.tasks import ForDependencyParsing, DependencyParsingHeadConfig
 
 from ._core import *
-from ..modelling.dependency_parsing import AutoModelForDependencyParsing, DataCollatorForDependencyParsing, SuparWithLoss
+from ..measuring import DependencyParsingMetrics
+
+
+def relu(x):
+    return max(0,x)
+
+
+@dataclass
+class DataCollatorForDependencyParsing(DataCollatorMixin):
+    """
+    Takes care of two preprocessing responsibilities:
+        - Since dependency parsing has two label sequences instead of one, it pads both of them, not just one.
+        - Handles 3D padding instead of 2D padding. Since the supar dependency parser uses token-to-word pooling, it
+          expects not a 2D (batch x subwords) input_ids tensor but a 3D one (batch x words x subwords).
+          This also includes truncating token sequences for one word that are too long. Truncation is normally handled
+          by the tokeniser, but it makes more sense to do truncation and padding in the same place.
+
+    What is expected of the incoming examples:
+        - They should individually already be ready to be fed to a transformer. That means a tokeniser must have already
+          converted strings to integer IDs.
+        - Special tokens have to be added already and the labels must reflect this by having a -100 for those words.
+
+    Why have this collator if supar already works, so it has some kind of built-in collator?
+        - supar doesn't allow choosing the special token template, it does it for the user, no matter the tokeniser.
+        - supar pads its labels somewhere deep inside obscure classes. The labels are padded when a list of sentences
+          is converted to a batch, since Batch.compose calls Field.compose which is just a redirect to the pad() function.
+          Batch.compose is called inside the "PrefetchGenerator" that underlies supar's DataLoader
+          (https://github.com/yzhangcs/parser/blob/bebdd350e034c517cd5b71185e056503290164fa/supar/utils/data.py#L343).
+          So in short: yeah there is some kind of collation happening, but holy fuck is it hidden deep.
+    """
+
+    tokenizer: PreTrainedTokenizerBase
+    max_subwords_per_word: int=None
+    label_pad_value: int = -100
+    return_tensors: str = "pt"
+
+    def torch_call(self, examples: List[dict]):
+        # First handle the tokens.
+        #   - Truncate words with many tokens, and pad those with few tokens.
+        for example in examples:
+            subword_dim = min(self.max_subwords_per_word or 1e99, max(map(len, example["words"])))  # Keep the per-example tensors as small as possible.
+            example["words"] = [subwords[:subword_dim] + relu(subword_dim - len(subwords))*[self.tokenizer.pad_token_id]
+                                for subwords in example["words"]]
+
+        #   - Take tensors of size words_1 x max(tokens_1), ..., words_n x max(tokens_n) and turn them into a single tensor
+        #     n x max(words_i) x max(max(tokens_i)_i)
+        ids_tensor = pad([torch.tensor(example["words"], dtype=torch.long) for example in examples], self.tokenizer.pad_token_id)
+
+        # For the labels, we assume there is going to be at least one sequence that has as many labels as ids_tensor.size(1).
+        # (Because we assume that for all examples, len(example["words"]) == len(example["labels_arcs"]) == len(example["labels_rels"])).
+        labels_arcs = pad([torch.tensor(example["labels_arcs"], dtype=torch.long) for example in examples], self.label_pad_value)
+        labels_rels = pad([torch.tensor(example["labels_rels"], dtype=torch.long) for example in examples], self.label_pad_value)
+
+        # Attention mask is at the word level and should hence work the same as the labels.
+        attention_mask = pad([torch.tensor(example["attention_mask"], dtype=torch.long) for example in examples], self.label_pad_value)
+        assert ids_tensor.size(1) == labels_arcs.size(1) == labels_rels.size(1) == attention_mask.size(1)  # == the amount of words.
+
+        return {
+            # "words": ids_tensor,
+            # "labels_arcs": labels_arcs,
+            # "labels_rels": labels_rels
+            "input_ids": ids_tensor,
+            "attention_mask": attention_mask,
+            "labels": (labels_arcs, labels_rels)
+        }
 
 
 class DP(Task[DependencyParsingHeadConfig]):
@@ -99,7 +168,7 @@ class DP(Task[DependencyParsingHeadConfig]):
         The first two approaches have their place too, namely when you want metrics that aren't logit-based, like strided
         PPL in causal LM. That's not the case for DP though.
         """
-        self.metrics["attachment"].add(SuparWithLoss.logitsAndLabelsToMetric(logits, labels))
+        self.metrics["attachment"].add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
         return torch.tensor([[1]], device=logits[0].device)
 
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:

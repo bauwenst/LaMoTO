@@ -32,7 +32,7 @@ class MetricHyperparameters:
                 return field_value
 
 
-class Metric(Protocol):  # Protocol so that HuggingFace's evaluate.Metric is made part of the hierarchy and hence its .compute() actually counts as THE SAME method as this one, which isn't possible with a Union[LamotoMetric, HugginfaceMetric].
+class Metric(Protocol):  # Protocol so that HuggingFace's evaluate.Metric is made part of the hierarchy and hence its .compute() actually counts as THE SAME method as this one, which isn't possible with a Union[LamotoMetric, HuggingfaceMetric].
     def compute(self, predictions: Any, references: Any) -> Dict[str, Any]:
         pass
 

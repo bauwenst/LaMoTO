@@ -25,7 +25,7 @@ from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from tktkt.util.timing import datetimeDashed
 from tktkt.util.printing import pluralise
-from archit.instantiation.abstracts import ModelWithHead
+from archit.instantiation.abstracts import ModelWithHead, CombinedConfig
 
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric, LamotoMetric
@@ -37,43 +37,6 @@ from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.strings import getSubstringAfterLastSlash
 
 DataPaths = PathManager("lamoto")
-
-
-#################################################
-from archit.instantiation.basemodels import RobertaBaseModel
-
-SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
-    SAVE_AS=None,
-    WANDB_PROJECT=None,
-
-    EXAMPLES_PER_EFFECTIVE_BATCH=32,
-    EXAMPLES_PER_DEVICEBATCH=32,
-    EFFECTIVE_BATCHES_WARMUP=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-
-    HARD_STOPPING_CONDITION=AfterNEpochs(epochs=10, effective_batch_size=32),
-    EXAMPLES_PER_EVALUATION=None,
-    EVALS_OF_PATIENCE=9,
-
-    TRACK_BEST_MODEL=True,
-    EVAL_VS_SAVE_INTERVALS=Intervals(
-        evaluation=NEveryEpoch(per_epoch=1, effective_batch_size=32),
-        checkpointing=None
-    ),
-
-    SEED=69420,
-    INIT_WEIGHTS=True,
-    ALWAYS_RESET_HEAD=True,
-    MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
-    MODEL_CLASS=RobertaBaseModel,
-    HEAD_CONFIG=None,
-
-    LEARNING_RATE=2e-5,
-    L2_REGULARISATION=0.01,
-
-    TOKENISER="roberta-base",
-    ADD_SPECIAL_TOKENS=True
-)
-#################################################
 
 
 @dataclass
@@ -149,22 +112,35 @@ class Task(ABC, Generic[HC]):
             if n:
                 return n
         except:
-            if "max_position_embeddings" in self.model_config.attribute_map:
+            if "max_position_embeddings" in self.model_config.attribute_map:  # All PretrainedConfig classes have an attribute map.
                 return self.model_config.__dict__[self.model_config.attribute_map["max_position_embeddings"]]
             else:
                 raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
 
-    def train(self, hyperparameters: TaskHyperparameters[HC]=SUGGESTED_HYPERPARAMETERS, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+    def train(self, hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(), model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
         transformers.set_seed(seed=hyperparameters.SEED)
 
         # Sanity check(s)
+        if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, Path):
+            hyperparameters.MODEL_CONFIG_OR_CHECKPOINT = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT.as_posix()  # FIXME: Possibly have to make it a relative path.
         if hyperparameters.INIT_WEIGHTS and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
-            raise ValueError("To initialise model weights, you should give a checkpoint path, not a config object.")
+            raise ValueError("You said you wanted to initialise model weights from the checkpoint, but didn't give a checkpoint path!")
 
         # Metadata
         self.adjustHyperparameters(hyperparameters)
         self.hyperparameters = hyperparameters
-        self.model_config = AutoConfig.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT) if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str) else hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
+
+        config_or_str = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
+        if not isinstance(config_or_str, str):  # It's an object.
+            if isinstance(config_or_str, CombinedConfig):
+                raise ValueError("When instantiating a new model from a config, it must only parameterise the base model, without a head.")
+            self.model_config = CombinedConfig(base_model_config=config_or_str,
+                                               head_config=hyperparameters.HEAD_CONFIG,
+                                               base_model_config_class=hyperparameters.MODEL_CLASS.config_class)
+        else:  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
+            self.model_config = CombinedConfig.from_pretrained(config_or_str,
+                                                               head_config=hyperparameters.HEAD_CONFIG,
+                                                               base_model_config_class=hyperparameters.MODEL_CLASS.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
 
         if hyperparameters.SAVE_AS:
             model_name = hyperparameters.SAVE_AS
@@ -196,8 +172,8 @@ class Task(ABC, Generic[HC]):
         # - Old models like GPT-2 have no pad token, but this doesn't really matter because it's actually the attention
         #   mask that determines if a token is processed, so you can replace it by any token you want. https://github.com/stanford-crfm/BioMedLM/issues/4
         if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-            self.model_config.pad_token_id = self.model_config.eos_token_id
+            self.tokenizer.pad_token                         = self.tokenizer.eos_token
+            self.model_config.base_model_config.pad_token_id = self.tokenizer.eos_token_id
 
         # Now that you have the tokeniser, tokenise the dataset.
         datasetdict = self.loadDataset()
@@ -213,20 +189,22 @@ class Task(ABC, Generic[HC]):
         # Get the model...
         self.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32
 
-        checkpoint_classname = self.model_config.architectures[0]
+        hf_checkpoint_classname = self.model_config.architectures[0] if self.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
         if not hyperparameters.ALWAYS_RESET_HEAD and \
-                self.archit_class.head_class.hfEquivalentSuffix() in checkpoint_classname and \
-                self.archit_class.head_class.hfEquivalentSuffix() != checkpoint_classname:  # Checkpoint has exactly the head we're looking for.
-            if hyperparameters.INIT_WEIGHTS:
+                self.archit_class.head_class.hfEquivalentSuffix() in hf_checkpoint_classname and \
+                self.archit_class.head_class.hfEquivalentSuffix() != hf_checkpoint_classname:  # Checkpoint has exactly the head we're looking for.
+            if hyperparameters.INIT_WEIGHTS:  # We've already asserted that this means we definitely got a checkpoint string.
                 model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
             else:
-                model: PreTrainedModel = self.automodel_class.from_config(self.model_config, **self.automodel_args)
+                model: PreTrainedModel = self.automodel_class.from_config(self.model_config.base_model_config, **self.automodel_args)
         else:
             if hyperparameters.INIT_WEIGHTS:
+                # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
+                # FIXME: Somehow this branch is also broken for DP because of a lack of pad_token_id, tefuck.
                 model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.MODEL_CLASS, hyperparameters.HEAD_CONFIG)
             else:
-                model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.MODEL_CLASS(self.model_config), hyperparameters.HEAD_CONFIG)
-        model.config.pad_token_id = self.model_config.pad_token_id  # self.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
+                model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.MODEL_CLASS.from_config(self.model_config), hyperparameters.HEAD_CONFIG)
+        model.config.pad_token_id = self.model_config.base_model_config.pad_token_id  # self.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
 
         # ...and augment it (possibly with the tokeniser).
         if model_augmentation:
@@ -418,7 +396,7 @@ class Task(ABC, Generic[HC]):
 
         # Train, and evaluate afterwards.
         try:
-            print(f"Training {model.__class__.__name__}:")
+            print(f"Training {model.__class__.__name__} on {model.device}:")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
@@ -437,6 +415,6 @@ class Task(ABC, Generic[HC]):
             trainer._maybe_log_save_evaluate(tr_loss=None, grad_norm=None, model=None, trial=None, epoch=None, ignore_keys_for_eval=None)  # These arguments are imputed anyway.
 
 
-__all__ = ["Task", "MetricSetup", "TaskHyperparameters", "SUGGESTED_HYPERPARAMETERS",
+__all__ = ["Task", "MetricSetup", "TaskHyperparameters", "getDefaultHyperparameters",
            "Intervals", "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes", "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
            "DatasetDict", "DataCollator", "Any", "Tuple", "Path", "ModelAugmentation", "EvalPrediction"]
