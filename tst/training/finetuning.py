@@ -9,14 +9,14 @@ hp.SEED = 0
 
 
 def test_pos():
-    hp.HEAD_CONFIG = TokenClassificationHeadConfig(num_labels=0)  # Filled in automatically.
+    hp.HEAD_CONFIG = TokenClassificationHeadConfig()  # Filled in automatically.
 
     task = POS()
     task.train(hp)
 
 
 def test_ner():
-    hp.HEAD_CONFIG = TokenClassificationHeadConfig(num_labels=0)
+    hp.HEAD_CONFIG = TokenClassificationHeadConfig()
 
     task = NER()
     task.train(hp)
@@ -29,7 +29,7 @@ def test_dp():
 
 
 def test_cola():
-    hp.HEAD_CONFIG = SequenceClassificationHeadConfig(num_labels=0)
+    hp.HEAD_CONFIG = SequenceClassificationHeadConfig()
 
     task = CoLA()
     task.train(hp)

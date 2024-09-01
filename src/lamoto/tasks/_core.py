@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import traceback
+import time
 import wandb
 import torch
 from datasets import DatasetDict, Dataset
@@ -35,8 +36,9 @@ from ..trainer.hyperparameters import *
 from ..trainer.trainers import TrainerWithoutEvaluationLoop
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.strings import getSubstringAfterLastSlash
+from ..util.visuals import printLamotoWelcome
 
-DataPaths = PathManager("lamoto")
+LamotoPaths = PathManager("lamoto")
 
 
 @dataclass
@@ -118,6 +120,7 @@ class Task(ABC, Generic[HC]):
                 raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
 
     def train(self, hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(), model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+        printLamotoWelcome()
         transformers.set_seed(seed=hyperparameters.SEED)
 
         # Sanity check(s)
@@ -153,7 +156,7 @@ class Task(ABC, Generic[HC]):
                                 + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
                                 + f"_{self.task_name}_{datetimeDashed()}"
 
-        folder_to_this_models_checkpoints = DataPaths.pathToCheckpoints() / global_model_identifier
+        folder_to_this_models_checkpoints = LamotoPaths.pathToCheckpoints() / global_model_identifier
         folder_to_this_models_checkpoints.mkdir(exist_ok=True, parents=True)
 
         # Set up tokeniser
@@ -200,7 +203,6 @@ class Task(ABC, Generic[HC]):
         else:
             if hyperparameters.INIT_WEIGHTS:
                 # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
-                # FIXME: Somehow this branch is also broken for DP because of a lack of pad_token_id, tefuck.
                 model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.MODEL_CLASS, hyperparameters.HEAD_CONFIG)
             else:
                 model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.MODEL_CLASS.from_config(self.model_config), hyperparameters.HEAD_CONFIG)
@@ -402,17 +404,20 @@ class Task(ABC, Generic[HC]):
             # trainer.push_to_hub()
             print("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model:")
             print(trainer.evaluate())
-        except Exception:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
-            print("Caught exception while training:")
-            print("="*32)
-            print(traceback.format_exc())
-            print("="*32)
-            print("A final checkpoint will be saved.")
-
+            wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
+        except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
+            print("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.\n...")
             trainer.control.should_save     = True
             trainer.control.should_evaluate = False
             trainer.control.should_log      = False
             trainer._maybe_log_save_evaluate(tr_loss=None, grad_norm=None, model=None, trial=None, epoch=None, ignore_keys_for_eval=None)  # These arguments are imputed anyway.
+            wandb.finish(exit_code=1)
+
+            print("Save successful. Now raising the exception. Bye bye!")
+            print("="*32)
+            time.sleep(1)  # First let all the prints happen, so that the traceback doesn't race it to the output.
+            # print(traceback.format_exc())
+            raise e  # Automatically prints the traceback.
 
 
 __all__ = ["Task", "MetricSetup", "TaskHyperparameters", "getDefaultHyperparameters",
