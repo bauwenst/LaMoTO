@@ -55,7 +55,7 @@ class POS(Task[TokenClassificationHeadConfig]):
         return dataset
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
-        hp.HEAD_CONFIG.num_labels = len(self.tagset)
+        hp.archit_head_config.num_labels = len(self.tagset)
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())

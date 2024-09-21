@@ -123,7 +123,7 @@ class DP(Task[DependencyParsingHeadConfig]):
         return counter
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):
-        hp.HEAD_CONFIG.num_labels = len(self.tagset)
+        hp.archit_head_config.num_labels = len(self.tagset)
 
     def sneakyLogitTransform(self, logits, labels):
         """

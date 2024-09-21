@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from tktkt.preparation.mappers import TextMapper
 
 from ..tasks._core import *

@@ -9,27 +9,27 @@ hp.SEED = 0
 
 
 def test_pos():
-    hp.HEAD_CONFIG = TokenClassificationHeadConfig()  # Filled in automatically.
+    hp.archit_head_config = TokenClassificationHeadConfig()  # Filled in automatically.
 
     task = POS()
     task.train(hp)
 
 
 def test_ner():
-    hp.HEAD_CONFIG = TokenClassificationHeadConfig()
+    hp.archit_head_config = TokenClassificationHeadConfig()
 
     task = NER()
     task.train(hp)
 
 
 def test_dp():
-    hp.HEAD_CONFIG = DependencyParsingHeadConfig(extended_model_config=BaseModelExtendedConfig())  # Filled in automatically.
+    hp.archit_head_config = DependencyParsingHeadConfig(extended_model_config=BaseModelExtendedConfig())  # Filled in automatically.
     task = DP()
     task.train(hp)
 
 
 def test_cola():
-    hp.HEAD_CONFIG = SequenceClassificationHeadConfig()
+    hp.archit_head_config = SequenceClassificationHeadConfig()
 
     task = CoLA()
     task.train(hp)

@@ -4,6 +4,7 @@ Language Modelling Tasks as Objects (LaMoTO) provides a framework for language m
 ## Usage
 Let's say you want to train a RoBERTa-base model for dependency parsing (for which, by the way, there is no HuggingFace
 class). This is how you would do that in LaMoTO, supported by the magic of [ArchIt](https://github.com/bauwenst/ArchIt):
+
 ```python
 from archit.instantiation.basemodels import RobertaBaseModel
 from archit.instantiation.heads import DependencyParsingHeadConfig, BaseModelExtendedConfig
@@ -12,8 +13,8 @@ from lamoto.tasks import DP, getDefaultHyperparameters
 # Define task hyperparameters.
 hp = getDefaultHyperparameters()
 hp.MODEL_CONFIG_OR_CHECKPOINT = "roberta-base"
-hp.MODEL_CLASS = RobertaBaseModel
-hp.HEAD_CONFIG = DependencyParsingHeadConfig(
+hp.archit_basemodel_class = RobertaBaseModel
+hp.archit_head_config = DependencyParsingHeadConfig(
     head_dropout=0.33,
     extended_model_config=BaseModelExtendedConfig(
         layer_pooling=1

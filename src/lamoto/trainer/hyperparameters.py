@@ -144,11 +144,13 @@ class TaskHyperparameters(Generic[HC]):
     # Model configuration
     # - Initialising:
     SEED: int
-    INIT_WEIGHTS: bool  # Whether to initialise any weights at all.
-    ALWAYS_RESET_HEAD: bool  # You want this to be false for doing inference, e.g. in CLM after training. When you load a checkpoint for token classification in the context of a task that classifies tokens, by default the old head weights will be reused even if that means num_labels is wrong. This is intentional, because too many task-specific checks would otherwise need to be run.
     MODEL_CONFIG_OR_CHECKPOINT: Union[str, PretrainedConfig]
-    MODEL_CLASS: Type[BaseModel]
-    HEAD_CONFIG: HC
+    archit_basemodel_class: Type[BaseModel]
+    archit_head_config: HC
+
+    init_weights: bool  # Whether to initialise any weights at all. Doesn't apply to the cases where HuggingFace is used.
+    load_hf_automodel_if_hf_checkpoint_and_matches_task: bool  # You want this to be false for doing inference, e.g. in CLM after training. When you load a checkpoint for token classification in the context of a task that classifies tokens, by default the old head weights will be reused even if that means num_labels is wrong. This is intentional, because too many task-specific checks would otherwise need to be run.
+    custom_hf_class: Optional[Type[PreTrainedModel]]  # If set, will be used instead of ArchIt or AutoModel.
 
     # - Gradients:
     LEARNING_RATE: float
@@ -188,11 +190,12 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     ),
 
     SEED=69420,
-    INIT_WEIGHTS=True,
-    ALWAYS_RESET_HEAD=True,
+    init_weights=True,
+    load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
     MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
-    MODEL_CLASS=RobertaBaseModel,
-    HEAD_CONFIG=None,
+    archit_basemodel_class=RobertaBaseModel,
+    archit_head_config=None,
+    custom_hf_class=None,
 
     LEARNING_RATE=2e-5,
     L2_REGULARISATION=0.01,

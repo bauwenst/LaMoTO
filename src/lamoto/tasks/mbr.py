@@ -37,9 +37,8 @@ from archit.instantiation.tasks import ForSingleLabelTokenClassification
 from ._core import *
 
 
-
 ##################################
-SUGGESTED_HYPERPARAMETERS_MBR = deepcopy(SUGGESTED_HYPERPARAMETERS)
+SUGGESTED_HYPERPARAMETERS_MBR = getDefaultHyperparameters()
 SUGGESTED_HYPERPARAMETERS_MBR.CHECKPOINT_OR_CONFIG = "google/canine-c"
 SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER = "google/canine-c"
 SUGGESTED_HYPERPARAMETERS_MBR.EFFECTIVE_BATCHES_WARMUP = 1000
@@ -119,7 +118,7 @@ class MBR(Task[TokenClassificationHeadConfig]):
         return dataset
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
-        hp.HEAD_CONFIG.num_labels = 2
+        hp.archit_head_config.num_labels = 2
 
     def getCollator(self) -> DataCollator:
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).

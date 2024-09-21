@@ -40,7 +40,7 @@ class CoLA(Task[SequenceClassificationHeadConfig]):
         return dataset
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[SequenceClassificationHeadConfig]):
-        hp.HEAD_CONFIG.num_labels = 2
+        hp.archit_head_config.num_labels = 2
 
     def getCollator(self) -> DataCollator:
         return DataCollatorWithPadding(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())

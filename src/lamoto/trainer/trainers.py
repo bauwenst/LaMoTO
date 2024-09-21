@@ -1,9 +1,24 @@
 from typing import Optional, List
 import torch
-from transformers.trainer import Trainer, DataLoader, EvalLoopOutput, EvalPrediction, denumpify_detensorize, deepspeed_init, logger, has_length
+from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, denumpify_detensorize, deepspeed_init, logger, has_length
+
+from hf_mtask_trainer import HfMultiTaskTrainer
 
 
-class TrainerWithoutEvaluationLoop(Trainer):
+class LamotoTrainer(HfMultiTaskTrainer):
+    """
+    By using this as the parent class (a subclass of Trainer), models are equipped with a self.report_metrics() method
+    before training that is linked back to the Trainer. This allows it to collect extra metrics inside its modules. To
+    make use of this, your architecture would contain something like
+    ```
+        if hasattr(self, "report_metrics"):
+            self.report_metrics(key1=val1, key2=val2, ...)
+    ```
+    """
+    pass
+
+
+class LamotoTrainerWithoutEvaluationLoop(LamotoTrainer):
     """
     Has a version of the evaluation loop where, rather than looping over a dataloader, we call compute_metrics on Nones.
     The reason for not altering evaluate() or get_eval_dataloader() is that we now still have the benefits of

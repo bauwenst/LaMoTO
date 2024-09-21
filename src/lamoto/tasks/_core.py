@@ -33,7 +33,7 @@ from ..measuring._core import Metric, LamotoMetric
 from ..measuring import METRICS
 from ..trainer.callbacks import *
 from ..trainer.hyperparameters import *
-from ..trainer.trainers import TrainerWithoutEvaluationLoop
+from ..trainer.trainers import LamotoTrainer, LamotoTrainerWithoutEvaluationLoop
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import printLamotoWelcome
@@ -119,15 +119,31 @@ class Task(ABC, Generic[HC]):
             else:
                 raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
 
+    def _isHfCheckpointForThisTask(self, architecture_name: str):
+        """
+        HuggingFace architectures look like "[Base]For[Task]" while ArchIt architectures can in principle be anything,
+        although they conventionally look like "For[Task]".
+        ArchIt architectures define which HuggingFace [Task] string is equivalent for them. If an architecture hence
+        contains that string (but isn't equal to it, because in that case it is not HuggingFace and hence must be ArchIt)
+        it comes from HuggingFace and is tailored to this task.
+        """
+        return self.archit_class.head_class.hfEquivalentSuffix() in architecture_name and \
+               self.archit_class.head_class.hfEquivalentSuffix() != architecture_name
+
     def train(self, hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(), model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+        """
+        Encapsulation of everything you need to do to get a Trainer running.
+        """
         printLamotoWelcome()
         transformers.set_seed(seed=hyperparameters.SEED)
 
         # Sanity check(s)
         if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, Path):
-            hyperparameters.MODEL_CONFIG_OR_CHECKPOINT = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT.as_posix()  # FIXME: Possibly have to make it a relative path.
-        if hyperparameters.INIT_WEIGHTS and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
+            hyperparameters.MODEL_CONFIG_OR_CHECKPOINT = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT.as_posix()  # FIXME: Possibly have to make it a relative path due to HF restrictions.
+        if hyperparameters.init_weights and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
             raise ValueError("You said you wanted to initialise model weights from the checkpoint, but didn't give a checkpoint path!")
+        if hyperparameters.archit_basemodel_class is None:
+            raise ValueError("In order to parse model configs, the archit_basemodel_class hyperparameter cannot be None.")
 
         # Metadata
         self.adjustHyperparameters(hyperparameters)
@@ -138,12 +154,12 @@ class Task(ABC, Generic[HC]):
             if isinstance(config_or_str, CombinedConfig):
                 raise ValueError("When instantiating a new model from a config, it must only parameterise the base model, without a head.")
             self.model_config = CombinedConfig(base_model_config=config_or_str,
-                                               head_config=hyperparameters.HEAD_CONFIG,
-                                               base_model_config_class=hyperparameters.MODEL_CLASS.config_class)
+                                               head_config=hyperparameters.archit_head_config,
+                                               base_model_config_class=hyperparameters.archit_basemodel_class.config_class)
         else:  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
             self.model_config = CombinedConfig.from_pretrained(config_or_str,
-                                                               head_config=hyperparameters.HEAD_CONFIG,
-                                                               base_model_config_class=hyperparameters.MODEL_CLASS.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
+                                                               head_config=hyperparameters.archit_head_config,
+                                                               base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
 
         if hyperparameters.SAVE_AS:
             model_name = hyperparameters.SAVE_AS
@@ -193,24 +209,30 @@ class Task(ABC, Generic[HC]):
         self.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32
 
         hf_checkpoint_classname = self.model_config.architectures[0] if self.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
-        if not hyperparameters.ALWAYS_RESET_HEAD and \
-                self.archit_class.head_class.hfEquivalentSuffix() in hf_checkpoint_classname and \
-                self.archit_class.head_class.hfEquivalentSuffix() != hf_checkpoint_classname:  # Checkpoint has exactly the head we're looking for.
-            if hyperparameters.INIT_WEIGHTS:  # We've already asserted that this means we definitely got a checkpoint string.
+        is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and self._isHfCheckpointForThisTask(hf_checkpoint_classname)
+        is_custom_hf_architecture = hyperparameters.custom_hf_class is not None
+        if not is_exact_hf_checkpoint and not is_custom_hf_architecture:  # Use ArchIt. This is the usual case.
+            if hyperparameters.init_weights:
+                # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
+                model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
+            else:
+                model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.archit_basemodel_class.from_config(self.model_config), hyperparameters.archit_head_config)
+        else:  # Edge cases.
+            if is_custom_hf_architecture:
+                if hyperparameters.init_weights:  # model_config_or_checkpoint is a string
+                    model: PreTrainedModel = hyperparameters.custom_hf_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
+                else:
+                    model: PreTrainedModel = hyperparameters.custom_hf_class.from_config(self.model_config.base_model_config, **self.automodel_args)
+            elif is_exact_hf_checkpoint:  # model_config_or_checkpoint is a string
+                print(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({self.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({self.automodel_class.__name__}) instead of ArchIt.")
                 model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
             else:
-                model: PreTrainedModel = self.automodel_class.from_config(self.model_config.base_model_config, **self.automodel_args)
-        else:
-            if hyperparameters.INIT_WEIGHTS:
-                # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
-                model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.MODEL_CLASS, hyperparameters.HEAD_CONFIG)
-            else:
-                model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.MODEL_CLASS.from_config(self.model_config), hyperparameters.HEAD_CONFIG)
+                raise RuntimeError("Impossible.")
         model.config.pad_token_id = self.model_config.base_model_config.pad_token_id  # self.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
 
-        # ...and augment it (possibly with the tokeniser).
+        # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.
         if model_augmentation:
-            model = model_augmentation.augment(model, self.tokenizer)
+            model_augmentation.augment(model, self.tokenizer)
         model.to("cuda")
 
         # Now that we have a reference to the dataset and model, build the metrics.
@@ -354,7 +376,7 @@ class Task(ABC, Generic[HC]):
 
         # At last, the Trainer object.
         no_traditional_metrics = all(isinstance(m, LamotoMetric) and m.isAutonomous() for m in self.metrics.values())
-        TrainerClass = TrainerWithoutEvaluationLoop if no_traditional_metrics and not hyperparameters.TRACK_BEST_MODEL else Trainer
+        TrainerClass = LamotoTrainerWithoutEvaluationLoop if no_traditional_metrics and not hyperparameters.TRACK_BEST_MODEL else LamotoTrainer
         trainer = TrainerClass(
             model=model,
             # tokenizer=self.tokenizer,  # Don't pass it if you don't want to save it and have other wacky shit extracted from it to influence training.

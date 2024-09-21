@@ -26,7 +26,8 @@ dependencies = [
     "evaluate >= 0.4.1",
     "pyfiglet >= 1.0.2",
 
-    "supar @ git+https://github.com/yzhangcs/parser"
+    "supar            @ git+https://github.com/yzhangcs/parser",
+    "hf_mtask_trainer @ git+https://github.com/zipzou/hf-multitask-trainer"
 ]
 
 # These GitHub dependencies aren't optional, but if you already have them installed as editable, pip will override
