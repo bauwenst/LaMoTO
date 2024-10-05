@@ -36,11 +36,12 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     ),
 
     SEED=69420,
-    INIT_WEIGHTS=False,
-    ALWAYS_RESET_HEAD=True,
+    init_weights=False,
     MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
-    MODEL_CLASS=RobertaBaseModel,
-    HEAD_CONFIG=MaskedLMHeadConfig(),
+    archit_basemodel_class=RobertaBaseModel,
+    archit_head_config=MaskedLMHeadConfig(),
+    load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
+    custom_hf_class=None,
 
     TOKENISER="roberta-base",
     ADD_SPECIAL_TOKENS=True,
@@ -95,7 +96,12 @@ class MLM(Task[MaskedLMHeadConfig]):  # TODO: Should you use packing for MLM?
 
 
 class MLM_C4(MLM):
-
     def loadDataset(self) -> IterableDatasetDict:
         dataset: datasets.IterableDatasetDict = datasets.load_dataset("allenai/c4", "en", streaming=True)
         return dataset.remove_columns(["timestamp", "url"])
+
+
+class MLM_SlimPajama(MLM):
+    def loadDataset(self) -> IterableDatasetDict:
+        dataset: datasets.IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True, trust_remote_code=True)
+        return dataset.remove_columns(["meta"])

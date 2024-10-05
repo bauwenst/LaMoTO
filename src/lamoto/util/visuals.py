@@ -3,6 +3,10 @@ from .. import __version__
 import pyfiglet
 
 
+def log(*args, **kwargs):
+    print("[LaMoTO]", *args, **kwargs)
+
+
 def printLamotoWelcome():
     # Render text
     text = pyfiglet.figlet_format("LaMoTO", font="banner3-D")  # The decent fonts are: "banner3-D", "doh", "basic", "big", "colossal", "isometric1", "larry3d", "lean", "roman", "rowancap", "standard", "starwars", "univers"

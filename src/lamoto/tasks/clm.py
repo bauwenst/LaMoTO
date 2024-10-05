@@ -44,11 +44,12 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     ),
 
     SEED=69420,
-    INIT_WEIGHTS=False,
-    ALWAYS_RESET_HEAD=True,
+    init_weights=False,
     MODEL_CONFIG_OR_CHECKPOINT="openai-community/gpt2",
-    MODEL_CLASS=GPT2BaseModel,
-    HEAD_CONFIG=CausalLMHeadConfig(),
+    archit_basemodel_class=GPT2BaseModel,
+    archit_head_config=CausalLMHeadConfig(),
+    load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
+    custom_hf_class=None,
 
     TOKENISER="openai-community/gpt2",
     ADD_SPECIAL_TOKENS=False,

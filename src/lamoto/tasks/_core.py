@@ -36,7 +36,7 @@ from ..trainer.hyperparameters import *
 from ..trainer.trainers import LamotoTrainer, LamotoTrainerWithoutEvaluationLoop
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.strings import getSubstringAfterLastSlash
-from ..util.visuals import printLamotoWelcome
+from ..util.visuals import printLamotoWelcome, log
 
 LamotoPaths = PathManager("lamoto")
 
@@ -212,6 +212,7 @@ class Task(ABC, Generic[HC]):
         is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and self._isHfCheckpointForThisTask(hf_checkpoint_classname)
         is_custom_hf_architecture = hyperparameters.custom_hf_class is not None
         if not is_exact_hf_checkpoint and not is_custom_hf_architecture:  # Use ArchIt. This is the usual case.
+            log("Instantiating an ArchIt model.")
             if hyperparameters.init_weights:
                 # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
                 model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
@@ -219,12 +220,13 @@ class Task(ABC, Generic[HC]):
                 model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.archit_basemodel_class.from_config(self.model_config), hyperparameters.archit_head_config)
         else:  # Edge cases.
             if is_custom_hf_architecture:
+                log("Instantiating a custom HuggingFace class.")
                 if hyperparameters.init_weights:  # model_config_or_checkpoint is a string
                     model: PreTrainedModel = hyperparameters.custom_hf_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
                 else:
                     model: PreTrainedModel = hyperparameters.custom_hf_class.from_config(self.model_config.base_model_config, **self.automodel_args)
             elif is_exact_hf_checkpoint:  # model_config_or_checkpoint is a string
-                print(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({self.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({self.automodel_class.__name__}) instead of ArchIt.")
+                log(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({self.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({self.automodel_class.__name__}) instead of ArchIt.")
                 model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
             else:
                 raise RuntimeError("Impossible.")

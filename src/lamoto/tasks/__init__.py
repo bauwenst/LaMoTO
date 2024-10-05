@@ -4,5 +4,5 @@ from .pos import POS
 from .rte import RTE
 from .cola import CoLA
 from .clm import CLM, ClmHyperparameters, SUGGESTED_HYPERPARAMETERS_CLM
-from .mlm import MLM_C4, MlmHyperparameters, SUGGESTED_HYPERPARAMETERS_MLM
+from .mlm import MLM_C4, MLM_SlimPajama, MlmHyperparameters, SUGGESTED_HYPERPARAMETERS_MLM
 from ._core import getDefaultHyperparameters
