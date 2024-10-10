@@ -10,6 +10,7 @@ from archit.instantiation.tasks import ForMaskedLM
 
 from ..measuring.pppl import PPPL_Parameters
 from ._core import *
+from ..util.datasets import PackedDataset
 
 
 @dataclass
@@ -54,9 +55,9 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
 )
 
 
-class MLM(Task[MaskedLMHeadConfig]):  # TODO: Should you use packing for MLM?
+class MLM(Task[MaskedLMHeadConfig]):
 
-    def __init__(self):
+    def __init__(self, packing: bool=False):
         super().__init__(
             task_name="MLM",
             metric_config=MetricSetup(
@@ -69,13 +70,18 @@ class MLM(Task[MaskedLMHeadConfig]):  # TODO: Should you use packing for MLM?
             automodel_class=AutoModelForMaskedLM
         )
         self.hyperparameters: MlmHyperparameters = None
+        self._use_packing = packing
 
     def prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
-        def preprocess(example):
-            return self.tokenizer(example["text"], is_split_into_words=False, add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
+        if self._use_packing:
+            dataset["train"] = PackedDataset(dataset["train"], self.tokenizer, context_length=self._getMaxInputLength())
+            # The other splits aren't packed nor preprocessed, because the only metric computed is PPPL which does its own tokenisation.
+        else:
+            def preprocess(example):
+                return self.tokenizer(example["text"], is_split_into_words=False, add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
 
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns(["text"])
+            dataset = dataset.map(preprocess, batched=False)
+            dataset = dataset.remove_columns(["text"])
         return dataset
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[MaskedLMHeadConfig]):

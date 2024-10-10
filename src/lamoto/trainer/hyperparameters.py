@@ -157,7 +157,7 @@ class TaskHyperparameters(Generic[HC]):
     L2_REGULARISATION: float
 
     # Tokeniser
-    TOKENISER: Optional[Union[TokeniserWithFiniteTypeDomain, str]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
+    TOKENISER: Optional[Union[PreTrainedTokenizerBase, TokeniserWithFiniteTypeDomain, str]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
     ADD_SPECIAL_TOKENS: bool
 
 
