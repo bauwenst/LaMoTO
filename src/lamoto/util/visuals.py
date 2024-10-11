@@ -1,10 +1,11 @@
 from .. import __version__
 
 import pyfiglet
+import time
 
 
 def log(*args, **kwargs):
-    print("[LaMoTO]", *args, **kwargs)
+    print(f"[LaMoTO | {time.strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
 
 
 def printLamotoWelcome():

@@ -1,4 +1,4 @@
-from typing import Set, Union
+from typing import Set, TypeVar
 from abc import abstractmethod, ABC
 
 from datasets.arrow_dataset import IterableDataset, Dataset
@@ -6,15 +6,15 @@ from tktkt.preparation.mappers import TextMapper
 
 from ..tasks._core import *
 from ..tasks._core import HC
+from ..util.datasets import HuggingfaceDataset
 
-
-HuggingfaceDataset = Union[Dataset, IterableDataset]
+DS = TypeVar("DS", bound=HuggingfaceDataset)
 
 
 class DatasetAugmentation(ABC):
 
     @abstractmethod
-    def augment(self, dataset: HuggingfaceDataset) -> HuggingfaceDataset:
+    def augment(self, dataset: DS) -> DS:
         """
         Transform a given dataset split.
         """
@@ -27,7 +27,7 @@ class MappingDatasetAugmentation(DatasetAugmentation):
     def mapDatasetExample(self, example: dict) -> dict:
         pass
 
-    def augment(self, dataset: HuggingfaceDataset) -> HuggingfaceDataset:
+    def augment(self, dataset: DS) -> DS:
         return dataset.map(self.mapDatasetExample, batched=False)
 
 
@@ -53,7 +53,7 @@ class Truncate(DatasetAugmentation):
     def __init__(self, max_examples: int):
         self._amount = max_examples
 
-    def augment(self, dataset: HuggingfaceDataset) -> HuggingfaceDataset:
+    def augment(self, dataset: DS) -> DS:
         if isinstance(dataset, Dataset):
             return dataset.select(range(self._amount))
         elif isinstance(dataset, IterableDataset):

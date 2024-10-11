@@ -27,6 +27,7 @@ from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from tktkt.util.timing import datetimeDashed
 from tktkt.util.printing import pluralise
 from archit.instantiation.abstracts import ModelWithHead, CombinedConfig
+from archit.util import torchPrint
 
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric, LamotoMetric
@@ -195,9 +196,12 @@ class Task(ABC, Generic[HC]):
             self.model_config.base_model_config.pad_token_id = self.tokenizer.eos_token_id
 
         # Now that you have the tokeniser, tokenise the dataset.
+        log("Loading dataset...")
         datasetdict = self.loadDataset()
         n_examples_validation = getDatasetSize(datasetdict["validation"], split="validation")
         hyperparameters.EXAMPLES_PER_EVALUATION = n_examples_validation if not hyperparameters.EXAMPLES_PER_EVALUATION else min(n_examples_validation, hyperparameters.EXAMPLES_PER_EVALUATION)
+
+        log("Preparing dataset...")
         datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"], seed=hyperparameters.SEED)
         datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=hyperparameters.SEED, truncate_to=hyperparameters.EXAMPLES_PER_EVALUATION)
         datasetdict = self.prepareDataset(datasetdict)
@@ -213,6 +217,7 @@ class Task(ABC, Generic[HC]):
         is_custom_hf_architecture = hyperparameters.custom_hf_class is not None
         if not is_exact_hf_checkpoint and not is_custom_hf_architecture:  # Use ArchIt. This is the usual case.
             log("Instantiating an ArchIt model.")
+            torch.set_default_dtype(self.automodel_args["torch_dtype"])
             if hyperparameters.init_weights:
                 # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
                 model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
@@ -224,7 +229,7 @@ class Task(ABC, Generic[HC]):
                 if hyperparameters.init_weights:  # model_config_or_checkpoint is a string
                     model: PreTrainedModel = hyperparameters.custom_hf_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
                 else:
-                    model: PreTrainedModel = hyperparameters.custom_hf_class.from_config(self.model_config.base_model_config, **self.automodel_args)
+                    model: PreTrainedModel = hyperparameters.custom_hf_class._from_config(self.model_config.base_model_config, **self.automodel_args)
             elif is_exact_hf_checkpoint:  # model_config_or_checkpoint is a string
                 log(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({self.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({self.automodel_class.__name__}) instead of ArchIt.")
                 model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
@@ -236,6 +241,7 @@ class Task(ABC, Generic[HC]):
         if model_augmentation:
             model_augmentation.augment(model, self.tokenizer)
         model.to("cuda")
+        torchPrint(model)
 
         # Now that we have a reference to the dataset and model, build the metrics.
         env = EvaluationEnvironment(
@@ -399,8 +405,8 @@ class Task(ABC, Generic[HC]):
             preprocess_logits_for_metrics=self.sneakyLogitTransform
         )
 
-        # Lastly, do some prints.
-        print("=== TRAINING SIZES ===")
+        # Lastly, do some prints (not logs).
+        print("="*17 + " TRAINING SIZES " + "="*17)
         bs = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
         e = getDatasetSize(datasetdict["train"], "train")
         ev = hyperparameters.EXAMPLES_PER_EVALUATION
@@ -419,27 +425,27 @@ class Task(ABC, Generic[HC]):
         if batches_between_evals:
             print("\t", pluralise(batches_between_evals, "training batch", "es"), "between evals")
             print("\t", pluralise(batches_per_epoch // batches_between_evals, "eval"), "per training epoch")
-        print("======================")
+        print("="*50)
 
         # Train, and evaluate afterwards.
         try:
-            print(f"Training {model.__class__.__name__} on {model.device}:")
+            log(f"Training {model.__class__.__name__} on {model.device}:")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
-            print("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model:")
-            print(trainer.evaluate())
+            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model:")
+            log(trainer.evaluate())
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
         except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
-            print("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.\n...")
+            log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.\n...")
             trainer.control.should_save     = True
             trainer.control.should_evaluate = False
             trainer.control.should_log      = False
             trainer._maybe_log_save_evaluate(tr_loss=None, grad_norm=None, model=None, trial=None, epoch=None, ignore_keys_for_eval=None)  # These arguments are imputed anyway.
             wandb.finish(exit_code=1)
 
-            print("Save successful. Now raising the exception. Bye bye!")
-            print("="*32)
+            log("Save successful. Now raising the exception. Bye bye!")
+            log("="*50)
             time.sleep(1)  # First let all the prints happen, so that the traceback doesn't race it to the output.
             # print(traceback.format_exc())
             raise e  # Automatically prints the traceback.

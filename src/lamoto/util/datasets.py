@@ -1,9 +1,12 @@
-from typing import Iterable
+from typing import Iterable, Union
 from transformers import PreTrainedTokenizerBase
 
 import datasets
 from datasets import Dataset, IterableDataset
 from datasets.arrow_dataset import DatasetInfoMixin
+
+
+HuggingfaceDataset = Union[Dataset, IterableDataset]
 
 
 def getDatasetSize(dataset: DatasetInfoMixin, split: str="train"):  # DatasetInfoMixin is the parent class for Dataset and IterableDataset.
@@ -91,9 +94,16 @@ def packedDatasetGenerator(dataset: Iterable[dict], tokenizer: PreTrainedTokeniz
 
 
 def PackedDataset(dataset: Iterable[str], tokenizer: PreTrainedTokenizerBase, context_length: int) -> IterableDataset:
-    return IterableDataset.from_generator(
+    iterable_dataset = IterableDataset.from_generator(
         generator=packedDatasetGenerator,
         gen_kwargs={"dataset": dataset,
                     "tokenizer": tokenizer,
                     "context_length": context_length}
     )
+    if isinstance(dataset, HuggingfaceDataset):  # Set the DatasetInfoMixin fields.
+        info = dataset._info.copy()
+        info.features = None  # Otherwise the IterableDataset will ignore the generated dictionaries and instead give {"text": None} for all examples.
+        iterable_dataset._info  = info
+        iterable_dataset._split = dataset._split
+
+    return iterable_dataset
