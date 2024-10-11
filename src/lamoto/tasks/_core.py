@@ -17,8 +17,9 @@ import torch
 from datasets import DatasetDict, Dataset
 from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, PreTrainedModel, \
     PreTrainedTokenizerBase, PretrainedConfig, AutoConfig, IntervalStrategy, EarlyStoppingCallback, EvalPrediction
-import transformers.optimization
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
+from transformers.trainer_utils import has_length
+import transformers.optimization
 
 from fiject.hooks.transformers import FijectCallback
 from tktkt.files.paths import PathManager
@@ -47,6 +48,7 @@ LamotoPaths = PathManager("lamoto")
 class MetricSetup:
     to_compute: List[str]               # Names of all the HuggingFace evaluate metrics to load and compute in the end.
     to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
+    to_judge: Tuple[str,str,bool] = ("", "loss", False)  # (metric name, result name, higher is better) to use for finding the best model with the validation set.
 
 
 class Task(ABC, Generic[HC]):
@@ -86,6 +88,8 @@ class Task(ABC, Generic[HC]):
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         pass
 
+    ####################################################################################################################
+
     def computeMetrics(self, eval: EvalPrediction) -> dict:
         predictions, references = self.getPredictionsAndReferences(eval)
         results = dict()
@@ -97,6 +101,15 @@ class Task(ABC, Generic[HC]):
 
     def sneakyLogitTransform(self, logits, labels):
         return logits
+
+    def _setHyperparameters(self, hp: TaskHyperparameters[HC]):
+        self.hyperparameters = hp
+    def _setModelConfig(self, mc: PretrainedConfig):
+        self.model_config = mc
+    def _setMetrics(self, m: Dict[str, Metric]):
+        self.metrics = m
+    def _setTokenizer(self, tk: PreTrainedTokenizerBase):
+        self.tokenizer = tk
 
     def _getMaxInputLength(self) -> int:
         """
@@ -149,19 +162,20 @@ class Task(ABC, Generic[HC]):
 
         # Metadata
         self.adjustHyperparameters(hyperparameters)
-        self.hyperparameters = hyperparameters
+        self._setHyperparameters(hyperparameters)
 
         config_or_str = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
         if not isinstance(config_or_str, str):  # It's an object.
             if isinstance(config_or_str, CombinedConfig):
                 raise ValueError("When instantiating a new model from a config, it must only parameterise the base model, without a head.")
-            self.model_config = CombinedConfig(base_model_config=config_or_str,
-                                               head_config=hyperparameters.archit_head_config,
-                                               base_model_config_class=hyperparameters.archit_basemodel_class.config_class)
+            model_config = CombinedConfig(base_model_config=config_or_str,
+                                          head_config=hyperparameters.archit_head_config,
+                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)
         else:  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
-            self.model_config = CombinedConfig.from_pretrained(config_or_str,
-                                                               head_config=hyperparameters.archit_head_config,
-                                                               base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
+            model_config = CombinedConfig.from_pretrained(config_or_str,
+                                                          head_config=hyperparameters.archit_head_config,
+                                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
+        self._setModelConfig(model_config)
 
         if hyperparameters.SAVE_AS:
             model_name = hyperparameters.SAVE_AS
@@ -180,15 +194,16 @@ class Task(ABC, Generic[HC]):
         # Set up tokeniser
         if hyperparameters.TOKENISER:
             if isinstance(hyperparameters.TOKENISER, str):
-                self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.TOKENISER, add_prefix_space=True)
+                tokenizer = AutoTokenizer.from_pretrained(hyperparameters.TOKENISER, add_prefix_space=True)
             elif isinstance(hyperparameters.TOKENISER, TokeniserWithFiniteTypeDomain):
-                self.tokenizer = TktktToHuggingFace(hyperparameters.TOKENISER)
+                tokenizer = TktktToHuggingFace(hyperparameters.TOKENISER)
             else:
-                self.tokenizer = hyperparameters.TOKENISER
+                tokenizer = hyperparameters.TOKENISER
         elif isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
-            self.tokenizer = AutoTokenizer.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, add_prefix_space=True)
+            tokenizer = AutoTokenizer.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, add_prefix_space=True)
         else:
             raise RuntimeError("Cannot deduce tokeniser checkpoint from config.")
+        self._setTokenizer(tokenizer)
 
         # - Old models like GPT-2 have no pad token, but this doesn't really matter because it's actually the attention
         #   mask that determines if a token is processed, so you can replace it by any token you want. https://github.com/stanford-crfm/BioMedLM/issues/4
@@ -251,7 +266,7 @@ class Task(ABC, Generic[HC]):
             validation_dataset=datasetdict["validation"],
             hyperparameters=self.hyperparameters
         )
-        self.metrics: Dict[str, Metric] = {name: METRICS.load(name,env) for name in self.metric_config.to_compute}
+        self._setMetrics({name: METRICS.load(name,env) for name in self.metric_config.to_compute})
 
         # Set up reporting too
         folder_wandb = folder_to_this_models_checkpoints / "wandb"
@@ -296,9 +311,13 @@ class Task(ABC, Generic[HC]):
         batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(datasetdict["train"])) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
         batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(datasetdict["train"])) if isinstance(save_interval, (EveryNDescents, NEveryEpoch)) else None
 
+        # - Early stopping
+        name_metric_best_model, name_result_best_model, higher_metric_is_better = self.metric_config.to_judge
+        best_model_metric_handle = f"eval_{name_metric_best_model}" + "_"*bool(name_metric_best_model) + name_result_best_model
+
         # - Finally get args
         training_args = TrainingArguments(
-            max_steps=n_gradient_descents or -1,
+            max_steps=(n_gradient_descents or -1) if n_gradient_descents or has_length(datasetdict["train"]) else 1_000_000_000_000,  # Handle a very specific illegal case according to HF. Only reason it exists is for learning rate schedules that decrease relative to the max amount of descents, but we don't use those schedules.
 
             # Optimisation (adding all of this in the TrainingArguments because apparently Trainer knows how to use HuggingFace `accelerate` whereas I only know the old optimisers)
             # optim=OptimizerNames.ADAMW_TORCH,
@@ -329,7 +348,8 @@ class Task(ABC, Generic[HC]):
             output_dir=folder_to_this_models_checkpoints.as_posix(),
 
             load_best_model_at_end=hyperparameters.TRACK_BEST_MODEL,  # Will take the best model out of its checkpoint directory and load it into self.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
-            metric_for_best_model="eval_loss" if hyperparameters.TRACK_BEST_MODEL else None,  # TODO: Can become an issue if you don't want to select based on eval loss but e.g. downstream F1.
+            metric_for_best_model=best_model_metric_handle if hyperparameters.TRACK_BEST_MODEL else None,
+            greater_is_better=higher_metric_is_better,
             save_total_limit=1,  # This will keep the last model stored plus the best model if those aren't the same, allowing you to have the best model and continue training from last if you need to. https://stackoverflow.com/a/67615225/9352077
 
             # Logging
@@ -408,33 +428,43 @@ class Task(ABC, Generic[HC]):
 
         # Lastly, do some prints (not logs).
         print("="*17 + " TRAINING SIZES " + "="*17)
-        bs = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
-        e = getDatasetSize(datasetdict["train"], "train")
-        ev = hyperparameters.EXAMPLES_PER_EVALUATION
-        batches_per_epoch = totalBatches(e, bs)
-        batches_per_eval  = totalBatches(ev, bs)
-        print("Batch size:", bs)
+        batch_size = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
+        train_set_size = tryExceptNone(lambda: getDatasetSize(datasetdict["train"], "train"))
+        validation_set_size = hyperparameters.EXAMPLES_PER_EVALUATION
+        print("Batch size:", batch_size)
+
         print("Training set:")
-        print("\t", pluralise(e, "example"), "per epoch")
-        print("\t", pluralise(batches_per_epoch, "batch", "es"), "per epoch")
-        if n_gradient_descents:
-            print("\t", round(n_gradient_descents / batches_per_epoch, 1), "epochs")
-            print("\t", pluralise(n_gradient_descents, "batch", "es"), "in total")
+        if train_set_size:
+            batches_per_epoch = totalBatches(train_set_size, batch_size)
+            print("\t", pluralise(train_set_size, "example"), "per epoch")
+            print("\t", pluralise(batches_per_epoch, "batch", "es"), "per epoch")
+            if n_gradient_descents:
+                print("\t", round(n_gradient_descents / batches_per_epoch, 1), "epochs")
+                print("\t", pluralise(n_gradient_descents, "batch", "es"), "in total")
+        else:
+            batches_per_epoch = 0
+            print("\t", "No sizes known.")
+
         print("Evaluation set:")
-        print("\t", pluralise(ev, "example"), "per evaluation")
-        print("\t", pluralise(batches_per_eval, "batch", "es"), "per evaluation")
-        if batches_between_evals:
-            print("\t", pluralise(batches_between_evals, "training batch", "es"), "between evals")
-            print("\t", pluralise(batches_per_epoch // batches_between_evals, "eval"), "per training epoch")
+        if validation_set_size:
+            batches_per_eval = totalBatches(validation_set_size, batch_size)
+            print("\t", pluralise(validation_set_size, "example"), "per evaluation")
+            print("\t", pluralise(batches_per_eval, "batch", "es"), "per evaluation")
+            if batches_between_evals:
+                print("\t", pluralise(batches_between_evals, "training batch", "es"), "between evals")
+            if batches_per_epoch:
+                print("\t", pluralise(batches_per_epoch // batches_between_evals, "eval"), "per training epoch")
+        else:
+            print("\t", "No sizes known.")
         print("="*50)
 
         # Train, and evaluate afterwards.
         try:
-            log(f"Training {model.__class__.__name__} on {model.device}:")
+            log(f"Training {model.__class__.__name__} on {model.device}...")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
-            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model:")
+            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model...")
             log(trainer.evaluate())
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
         except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).

@@ -64,7 +64,8 @@ class MLM(Task[MaskedLMHeadConfig]):
                 to_compute=["pppl"],
                 to_track={
                     "pppl": {"pppl": "PPPL", "nll": "NLL"}
-                }
+                },
+                to_judge=("pppl", "nll", False)
             ),
             archit_class=ForMaskedLM,
             automodel_class=AutoModelForMaskedLM
