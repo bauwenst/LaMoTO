@@ -36,6 +36,7 @@ from ..trainer.callbacks import *
 from ..trainer.hyperparameters import *
 from ..trainer.trainers import LamotoTrainer, LamotoTrainerWithoutEvaluationLoop
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
+from ..util.exceptions import tryExceptNone
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import printLamotoWelcome, log
 
@@ -198,7 +199,7 @@ class Task(ABC, Generic[HC]):
         # Now that you have the tokeniser, tokenise the dataset.
         log("Loading dataset...")
         datasetdict = self.loadDataset()
-        n_examples_validation = getDatasetSize(datasetdict["validation"], split="validation")
+        n_examples_validation = tryExceptNone(getDatasetSize(datasetdict["validation"], split="validation")) or 1_000_000_000_000  # Very very big number assumed when you can't find the dataset size.
         hyperparameters.EXAMPLES_PER_EVALUATION = n_examples_validation if not hyperparameters.EXAMPLES_PER_EVALUATION else min(n_examples_validation, hyperparameters.EXAMPLES_PER_EVALUATION)
 
         log("Preparing dataset...")
@@ -269,7 +270,7 @@ class Task(ABC, Generic[HC]):
         # Training arguments
         # - Sizes
         stopping_condition = hyperparameters.HARD_STOPPING_CONDITION
-        n_gradient_descents = stopping_condition.getSteps(datasetdict["train"]) if not isinstance(stopping_condition, (NeverStop, AfterNMinutes)) else None
+        n_gradient_descents = tryExceptNone(stopping_condition.getSteps(datasetdict["train"])) if not isinstance(stopping_condition, (NeverStop, AfterNMinutes)) else None
         n_accumulations     = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // (torch.cuda.device_count() * hyperparameters.EXAMPLES_PER_DEVICEBATCH)  # The amount of times, to get to one effective batch, you have to push a device batch through all devices in parallel.
         wu = hyperparameters.EFFECTIVE_BATCHES_WARMUP  # Alias to shorten this long name.
         if isinstance(wu, int):
@@ -292,8 +293,8 @@ class Task(ABC, Generic[HC]):
                 raise ValueError("You indicated that you want to track the best model, but specified no evaluation interval!")
             save_interval = eval_interval
 
-        batches_between_evals = eval_interval.getSteps(datasetdict["train"]) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
-        batches_between_saves = save_interval.getSteps(datasetdict["train"]) if isinstance(save_interval, (EveryNDescents, NEveryEpoch)) else None
+        batches_between_evals = tryExceptNone(eval_interval.getSteps(datasetdict["train"])) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
+        batches_between_saves = tryExceptNone(save_interval.getSteps(datasetdict["train"])) if isinstance(save_interval, (EveryNDescents, NEveryEpoch)) else None
 
         # - Finally get args
         training_args = TrainingArguments(
