@@ -1,5 +1,7 @@
 # LaMoTO
 Language Modelling Tasks as Objects (LaMoTO) provides a framework for language model training (masked and causal, pretraining and finetuning) where the tasks, not just the models, are classes themselves.
+It abstracts over the HuggingFace `transformers.Trainer` with one goal: reduce the entire model training process to a single
+method call `task.train(hyperparameters)`.
 
 ## Usage
 Let's say you want to train a RoBERTa-base model for dependency parsing (for which, by the way, there is no HuggingFace
@@ -25,7 +27,17 @@ hp.archit_head_config = DependencyParsingHeadConfig(
 task = DP()
 task.train(hyperparameters=hp)
 ```
-See all the supported pre-training and fine-tuning tasks under `lamoto.tasks`.
+
+## Features
+- [x] Train models on >15 pre-training/fine-tuning tasks. See a list by importing `from lamoto.tasks`.
+  - Model architectures come from [ArchIt](https://github.com/bauwenst/ArchIt), which means that as long as you have a
+    `BaseModel` wrapper for your language model backbone, you can train it on any task, regardless of whether you wrote
+    code defining the backbone-with-head architecture required for that task.
+  - Custom (i.e. given) architectures are also supported.
+- [x] Evaluate models with a superset of the metrics in HuggingFace's `evaluate`, with custom inference procedures (see e.g. strided pseudo-perplexity or bits-per-character).
+- [x] Augment datasets before training or evaluating by somehow perturbing them.
+- [x] Supports [TkTkT](https://github.com/bauwenst/TkTkT) tokenisers.
+- [x] Weights-and-biases integration.
 
 ## Installation
 If you don't want to edit the source code yourself, run

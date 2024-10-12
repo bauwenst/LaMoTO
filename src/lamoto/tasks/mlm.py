@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import datasets
-from datasets import IterableDatasetDict
+from datasets import IterableDatasetDict, IterableDataset
 from transformers import AutoModelForMaskedLM, DataCollatorForLanguageModeling
 
 from archit.instantiation.basemodels import RobertaBaseModel
@@ -57,30 +57,38 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
 
 class MLM(Task[MaskedLMHeadConfig]):
 
-    def __init__(self, packing: bool=False):
+    def __init__(self, packing: bool=False, use_pppl: bool=False):
         super().__init__(
             task_name="MLM",
-            metric_config=MetricSetup(
+            metric_config=MetricSetup(  # This is quite computation-heavy.
                 to_compute=["pppl"],
                 to_track={
                     "pppl": {"pppl": "PPPL", "nll": "NLL"}
                 },
                 to_rank=RankingMetricSpec(metric_name="pppl", result_name="nll", higher_is_better=False)
+            ) if use_pppl else MetricSetup(  # Uses a cruder estimator for likelihood.
+                to_compute=[],
+                to_track=dict()
             ),
             archit_class=ForMaskedLM,
             automodel_class=AutoModelForMaskedLM
         )
         self.hyperparameters: MlmHyperparameters = None
         self._use_packing = packing
+        self._use_pppl = use_pppl
 
     def prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
-        if self._use_packing:
-            dataset["train"] = PackedDataset(dataset["train"], self.tokenizer, context_length=self._getMaxInputLength())
-            # The other splits aren't packed nor preprocessed, because the only metric computed is PPPL which does its own tokenisation.
-        else:
-            def preprocess(example):
-                return self.tokenizer(example["text"], is_split_into_words=False, add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
+        def preprocess(example):
+            return self.tokenizer(example["text"], is_split_into_words=False, add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
 
+        if self._use_packing:  # Train split is not tokenised here but in the packer.
+            dataset["train"] = PackedDataset(dataset["train"], self.tokenizer, context_length=self._getMaxInputLength())
+            if not self._use_pppl:  # Without PPPL, you need to preprocess the validation set yourself for HuggingFace's logit calculation.
+                validation_set: IterableDataset = dataset["validation"]
+                validation_set = validation_set.map(preprocess, batched=False)
+                validation_set = validation_set.remove_columns(["text"])
+                dataset["validation"] = validation_set
+        else:  # You can just tokenise the whole corpus.
             dataset = dataset.map(preprocess, batched=False)
             dataset = dataset.remove_columns(["text"])
         return dataset
