@@ -11,6 +11,10 @@ TODO: SuperGLUE
 
 TODO: Tokeniser parallelisation.
 
+TODO: in the Task.train core,
+    - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
+    - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
+
 TODO: Implement QA. I wonder if you need a logit transform for this too. The Trainer tutorial
        for QA sidesteps this question: https://huggingface.co/docs/transformers/tasks/question_answering#evaluate
 

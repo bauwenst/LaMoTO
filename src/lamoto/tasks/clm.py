@@ -71,7 +71,8 @@ class CLM(Task[CausalLMHeadConfig]):
                 to_compute=["ppl"],
                 to_track={
                     "ppl": {"ppl": "PPL", "nll": "NLL"}
-                }
+                },
+                to_rank=RankingMetricSpec(metric_name="ppl", result_name="nll", higher_is_better=False)
             ),
             archit_class=ForCausalLM,
             automodel_class=AutoModelForCausalLM

@@ -1,9 +1,5 @@
 """
 Core fine-tuning script for any task.
-
-TODO:
-    - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
-    - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
 """
 from typing import Any, Dict, Type, List, Tuple, Generic
 from pathlib import Path
@@ -39,16 +35,27 @@ from ..trainer.trainers import LamotoTrainer, LamotoTrainerWithoutEvaluationLoop
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.exceptions import tryExceptNone
 from ..util.strings import getSubstringAfterLastSlash
-from ..util.visuals import printLamotoWelcome, log
+from ..util.visuals import printLamotoWelcome, log, warn
 
 LamotoPaths = PathManager("lamoto")
+
+
+@dataclass
+class RankingMetricSpec:
+    """Specification of the metric used for determining the best model, if turned on in the hyperparameters."""
+    metric_name: str
+    result_name: str
+    higher_is_better: bool
+
+    def fullName(self) -> str:
+        return self.metric_name + "_" + self.result_name if self.metric_name else self.result_name
 
 
 @dataclass
 class MetricSetup:
     to_compute: List[str]               # Names of all the HuggingFace evaluate metrics to load and compute in the end.
     to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
-    to_judge: Tuple[str,str,bool] = ("", "loss", False)  # (metric name, result name, higher is better) to use for finding the best model with the validation set.
+    to_rank: RankingMetricSpec = None   # Which of these to measure for finding the best model with the validation set. Defaults to loss.
 
 
 class Task(ABC, Generic[HC]):
@@ -97,7 +104,16 @@ class Task(ABC, Generic[HC]):
             subresults = metric.compute(predictions=predictions, references=references)
             for key, value in subresults.items():
                 results[metric_name + "_" + key] = value
-        return results  # To this dictionary, the eval loss will be added post-hoc.
+
+        # Sanity checks
+        if self.metric_config.to_rank.fullName() != "loss" and self.metric_config.to_rank.fullName() not in results:
+            raise RuntimeError(f"The ranking metric '{self.metric_config.to_rank.metric_name}' did not compute the required result '{self.metric_config.to_rank.result_name}'. Results we did compute: {results}")
+        for metric_name, result_names in self.metric_config.to_track.items():
+            for result_name in result_names:
+                if metric_name + "_" + result_name not in results:
+                    warn(f"Metric '{metric_name}' did not compute the tracked result '{result_name}'.")
+
+        return results  # To this dictionary, the eval loss will be added post-hoc, and all keys will be prefixed by "eval_".
 
     def sneakyLogitTransform(self, logits, labels):
         return logits
@@ -152,13 +168,21 @@ class Task(ABC, Generic[HC]):
         printLamotoWelcome()
         transformers.set_seed(seed=hyperparameters.SEED)
 
-        # Sanity check(s)
+        # Imputations and sanity checks
         if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, Path):
             hyperparameters.MODEL_CONFIG_OR_CHECKPOINT = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT.as_posix()  # FIXME: Possibly have to make it a relative path due to HF restrictions.
+        if self.metric_config.to_rank is None:
+            self.metric_config.to_rank = RankingMetricSpec(metric_name="", result_name="loss", higher_is_better=False)
+
         if hyperparameters.init_weights and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
             raise ValueError("You said you wanted to initialise model weights from the checkpoint, but didn't give a checkpoint path!")
         if hyperparameters.archit_basemodel_class is None:
             raise ValueError("In order to parse model configs, the archit_basemodel_class hyperparameter cannot be None.")
+        if hyperparameters.TRACK_BEST_MODEL and self.metric_config.to_rank.fullName() != "loss" and self.metric_config.to_rank.metric_name not in self.metric_config.to_compute:
+            raise ValueError(f"Cannot rank models based on metric {self.metric_config.to_rank.metric_name} since it isn't computed.")
+        for metric_name in self.metric_config.to_track.keys():
+            if metric_name not in self.metric_config.to_compute:
+                raise ValueError(f"Requested tracking results for metrics {sorted(self.metric_config.to_track)} yet you are only computing metrics {sorted(self.metric_config.to_compute)}.")
 
         # Metadata
         self.adjustHyperparameters(hyperparameters)
@@ -311,9 +335,8 @@ class Task(ABC, Generic[HC]):
         batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(datasetdict["train"])) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
         batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(datasetdict["train"])) if isinstance(save_interval, (EveryNDescents, NEveryEpoch)) else None
 
-        # - Early stopping
-        name_metric_best_model, name_result_best_model, higher_metric_is_better = self.metric_config.to_judge
-        best_model_metric_handle = f"eval_{name_metric_best_model}" + "_"*bool(name_metric_best_model) + name_result_best_model
+        # - Early stopping (only used if required)
+        best_model_metric_handle = f"eval_{self.metric_config.to_rank.fullName()}" if hyperparameters.TRACK_BEST_MODEL else None
 
         # - Finally get args
         training_args = TrainingArguments(
@@ -348,8 +371,8 @@ class Task(ABC, Generic[HC]):
             output_dir=folder_to_this_models_checkpoints.as_posix(),
 
             load_best_model_at_end=hyperparameters.TRACK_BEST_MODEL,  # Will take the best model out of its checkpoint directory and load it into self.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
-            metric_for_best_model=best_model_metric_handle if hyperparameters.TRACK_BEST_MODEL else None,
-            greater_is_better=higher_metric_is_better,
+            metric_for_best_model=best_model_metric_handle,
+            greater_is_better=self.metric_config.to_rank.higher_is_better,
             save_total_limit=1,  # This will keep the last model stored plus the best model if those aren't the same, allowing you to have the best model and continue training from last if you need to. https://stackoverflow.com/a/67615225/9352077
 
             # Logging
@@ -394,9 +417,9 @@ class Task(ABC, Generic[HC]):
 
         if not hyperparameters.WANDB_PROJECT:
             if hyperparameters.TRACK_BEST_MODEL:
-                callbacks.append(FijectCallback(global_model_identifier + "_eval_loss", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
+                callbacks.append(FijectCallback(global_model_identifier + "_eval_goal", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
             callbacks.append(
-                FijectCallback(global_model_identifier + "_eval_task",
+                FijectCallback(global_model_identifier + "_eval_tracked",
                                evals_between_commits=4,
                                metric_names_with_formatting={(metric_name + "_" + result_name): formatting
                                                              for metric_name, result_formats in
@@ -485,6 +508,6 @@ class Task(ABC, Generic[HC]):
             raise e  # Automatically prints the traceback.
 
 
-__all__ = ["Task", "MetricSetup", "TaskHyperparameters", "getDefaultHyperparameters",
+__all__ = ["Task", "MetricSetup", "RankingMetricSpec", "TaskHyperparameters", "getDefaultHyperparameters",
            "Intervals", "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes", "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
            "DatasetDict", "DataCollator", "Any", "Tuple", "Path", "ModelAugmentation", "EvalPrediction"]

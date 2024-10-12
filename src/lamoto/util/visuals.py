@@ -3,9 +3,15 @@ from .. import __version__
 import pyfiglet
 import time
 
+import logging as logger
+
 
 def log(*args, **kwargs):
     print(f"[LaMoTO | {time.strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
+
+
+def warn(*args):
+    logger.warning(" ".join(map(repr, args)))  # The join-map-repr is what print() does by default.
 
 
 def printLamotoWelcome():

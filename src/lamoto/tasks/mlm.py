@@ -65,7 +65,7 @@ class MLM(Task[MaskedLMHeadConfig]):
                 to_track={
                     "pppl": {"pppl": "PPPL", "nll": "NLL"}
                 },
-                to_judge=("pppl", "nll", False)
+                to_rank=RankingMetricSpec(metric_name="pppl", result_name="nll", higher_is_better=False)
             ),
             archit_class=ForMaskedLM,
             automodel_class=AutoModelForMaskedLM
