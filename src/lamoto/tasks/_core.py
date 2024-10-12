@@ -11,9 +11,10 @@ import time
 import wandb
 import torch
 from datasets import DatasetDict, Dataset
-from transformers import DataCollator, Trainer, TrainingArguments, AutoTokenizer, PreTrainedModel, \
+from transformers import DataCollator, AutoTokenizer, PreTrainedModel, \
     PreTrainedTokenizerBase, PretrainedConfig, AutoConfig, IntervalStrategy, EarlyStoppingCallback, EvalPrediction
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
+from transformers.trainer import TrainingArguments
 from transformers.trainer_utils import has_length
 import transformers.optimization
 

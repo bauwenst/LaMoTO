@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import datasets
 from datasets import IterableDatasetDict, IterableDataset
 from transformers import AutoModelForMaskedLM, DataCollatorForLanguageModeling
+import torch
 
 from archit.instantiation.basemodels import RobertaBaseModel
 from archit.instantiation.heads import MaskedLMHeadConfig
@@ -83,12 +84,12 @@ class MLM(Task[MaskedLMHeadConfig]):
 
         if self._use_packing:  # Train split is not tokenised here but in the packer.
             dataset["train"] = PackedDataset(dataset["train"], self.tokenizer, context_length=self._getMaxInputLength())
-            if not self._use_pppl:  # Without PPPL, you need to preprocess the validation set yourself for HuggingFace's logit calculation.
+            if not self._use_pppl:  # Without PPPL, you need to preprocess the validation set yourself for HuggingFace's logit calculation. As is customary, this involves truncation, which is not the case when packing.
                 validation_set: IterableDataset = dataset["validation"]
                 validation_set = validation_set.map(preprocess, batched=False)
                 validation_set = validation_set.remove_columns(["text"])
                 dataset["validation"] = validation_set
-        else:  # You can just tokenise the whole corpus.
+        else:  # You can just tokenise the whole corpus. Does have truncation to the context length.
             dataset = dataset.map(preprocess, batched=False)
             dataset = dataset.remove_columns(["text"])
         return dataset
@@ -98,6 +99,9 @@ class MLM(Task[MaskedLMHeadConfig]):
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=True, mlm_probability=self.hyperparameters.MLM_PROBABILITY)
+
+    def sneakyLogitTransform(self, logits, labels):
+        return torch.tensor([[1]], device=logits[0].device)
 
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any, Any]:
         return None, None
