@@ -359,6 +359,7 @@ class Task(ABC, Generic[HC]):
             bf16=torch.cuda.is_bf16_supported(),
 
             # Evaluation
+            eval_on_start=not isinstance(eval_interval, NeverInterval),  # Always do an evaluation at the start, unless you wanted to avoid all evaluations.
             evaluation_strategy=IntervalStrategy.STEPS if batches_between_evals else IntervalStrategy.NO,
             eval_steps=batches_between_evals,
             per_device_eval_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,
@@ -401,8 +402,8 @@ class Task(ABC, Generic[HC]):
         if hyperparameters.TRACK_BEST_MODEL and hyperparameters.EVALS_OF_PATIENCE is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.EVALS_OF_PATIENCE))  # Patience is the amount of eval calls you can tolerate worsening loss.
 
-        if not isinstance(eval_interval, NeverInterval):
-            callbacks.append(EvaluateBeforeTrainingCallback())
+        # if not isinstance(eval_interval, NeverInterval):  # Didn't work, but has since become an option that works. https://discuss.huggingface.co/t/how-to-evaluate-before-first-training-step/18838
+        #     callbacks.append(EvaluateBeforeTrainingCallback())
 
         if isinstance(stopping_condition, AfterNMinutes):
             callbacks.append(CallbackAtTimeInterval(minutes=stopping_condition.minutes, events=EventType.STOP))

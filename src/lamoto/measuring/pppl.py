@@ -125,11 +125,11 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
 
         with torch.inference_mode():
             # Split the above tensors into appropriate batches to feed to the model.
-            for input_ids_part, attention_mask_part, labels_part in zip(torch.split(input_ids, device_batch_size), torch.split(attention_mask, device_batch_size), torch.split(labels_part, device_batch_size)):
+            for input_ids_part, attention_mask_part, labels_part in zip(torch.split(input_ids, device_batch_size), torch.split(attention_mask, device_batch_size), torch.split(labels, device_batch_size)):
                 outputs = model(
-                    input_ids=input_ids.to(model.device),
-                    attention_mask=attention_mask.to(model.device),
-                    labels=labels.to(model.device)
+                    input_ids=input_ids_part.to(model.device),
+                    attention_mask=attention_mask_part.to(model.device),
+                    labels=labels_part.to(model.device)
                 )
                 loss = outputs[0] if isinstance(outputs, tuple) else outputs.loss
                 nlls.append(input_ids_part.size(0)*loss)  # We are sure that every row contains exactly 1 label to predict.
