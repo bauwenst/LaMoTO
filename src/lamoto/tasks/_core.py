@@ -405,8 +405,11 @@ class Task(ABC, Generic[HC]):
             )
 
         # At last, the Trainer object.
-        no_traditional_metrics = all(isinstance(m, LamotoMetric) and m.isAutonomous() for m in self.metrics.values())
-        TrainerClass = LamotoTrainerWithoutEvaluationLoop if no_traditional_metrics and not hyperparameters.TRACK_BEST_MODEL else LamotoTrainer
+        if hyperparameters.TRACK_BEST_MODEL and best_model_metric_handle == "eval_loss":
+            no_traditional_metrics = False  # A "traditional metric" is a metric that (1) uses prediction logits that (2) can come from naive iteration over the evaluation set (unlike strided PPL, for example, which iterates in a special manner).
+        else:
+            no_traditional_metrics = all(isinstance(m, LamotoMetric) and m.isAutonomous() for m in self.metrics.values())
+        TrainerClass = LamotoTrainerWithoutEvaluationLoop if no_traditional_metrics else LamotoTrainer
         trainer = TrainerClass(
             model=model,
             # tokenizer=self.tokenizer,  # Don't pass it if you don't want to save it and have other wacky shit extracted from it to influence training.
@@ -418,7 +421,7 @@ class Task(ABC, Generic[HC]):
 
             # Data
             train_dataset=datasetdict["train"],
-            eval_dataset=[] if no_traditional_metrics and not hyperparameters.TRACK_BEST_MODEL else datasetdict["validation"],
+            eval_dataset=[] if no_traditional_metrics else datasetdict["validation"],
             data_collator=collator,
 
             # Evaluation

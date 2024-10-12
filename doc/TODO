@@ -1,5 +1,14 @@
 TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
 
+TODO: Some GLUE todos:
+    - CoLA needs Matthews correlation as metric?
+    - MNLI has two related datasets which people use more than MNLI?
+    - For binary tasks, does the HF metric for F1 compute a different number than accuracy?
+    - For MNLI, does F1 compute a different number than accuracy?
+    - STS-B needs its bottom method implemented.
+
+TODO: SuperGLUE
+
 TODO: Tokeniser parallelisation.
 
 TODO: Implement QA. I wonder if you need a logit transform for this too. The Trainer tutorial

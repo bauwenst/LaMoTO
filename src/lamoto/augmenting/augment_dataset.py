@@ -78,7 +78,7 @@ class TaskWrapper(Task[HC]):
             automodel_class=task.automodel_class,
             **task.automodel_args
         )
-        self._method_implementations = task
+        self._method_implementations: Task[HC] = task
 
     def loadDataset(self) -> DatasetDict:
         return self._method_implementations.loadDataset()
