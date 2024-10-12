@@ -96,9 +96,12 @@ class Task(ABC, Generic[HC]):
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         pass
 
+    def sneakyLogitTransform(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        return logits
+
     ####################################################################################################################
 
-    def computeMetrics(self, eval: EvalPrediction) -> dict:
+    def _computeMetrics(self, eval: EvalPrediction) -> dict:
         predictions, references = self.getPredictionsAndReferences(eval)
         results = dict()
         for metric_name, metric in self.metrics.items():
@@ -115,9 +118,6 @@ class Task(ABC, Generic[HC]):
                     warn(f"Metric '{metric_name}' did not compute the tracked result '{result_name}'.")
 
         return results  # To this dictionary, the eval loss will be added post-hoc, and all keys will be prefixed by "eval_".
-
-    def sneakyLogitTransform(self, logits, labels):
-        return logits
 
     def _setHyperparameters(self, hp: TaskHyperparameters[HC]):
         self.hyperparameters = hp
@@ -450,7 +450,7 @@ class Task(ABC, Generic[HC]):
             data_collator=collator,
 
             # Evaluation
-            compute_metrics=self.computeMetrics,
+            compute_metrics=self._computeMetrics,
             preprocess_logits_for_metrics=self.sneakyLogitTransform
         )
 

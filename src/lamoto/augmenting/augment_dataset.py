@@ -1,5 +1,6 @@
 from typing import Set, TypeVar, Dict
 from abc import abstractmethod, ABC
+from torch import Tensor
 
 from datasets.iterable_dataset import IterableDataset, Dataset
 from tktkt.preparation.mappers import TextMapper
@@ -89,11 +90,14 @@ class TaskWrapper(Task[HC]):
     def getCollator(self) -> DataCollator:
         return self._method_implementations.getCollator()
 
+    def adjustHyperparameters(self, hp: TaskHyperparameters[HC]):
+        return self._method_implementations.adjustHyperparameters(hp)
+
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         return self._method_implementations.getPredictionsAndReferences(eval)
 
-    def adjustHyperparameters(self, hp: TaskHyperparameters[HC]):
-        return self._method_implementations.adjustHyperparameters(hp)
+    def sneakyLogitTransform(self, logits: Tensor, labels: Tensor) -> Tensor:
+        return self._method_implementations.sneakyLogitTransform(logits, labels)
 
     # Finally, four methods to communicate the runtime fields with the underlying task, so it can use them in its implementations:
 
