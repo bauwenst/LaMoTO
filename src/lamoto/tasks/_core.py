@@ -213,8 +213,7 @@ class Task(ABC, Generic[HC]):
                                 + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
                                 + f"_{self.task_name}_{datetimeDashed()}"
 
-        folder_to_this_models_checkpoints = LamotoPaths.pathToCheckpoints() / global_model_identifier
-        folder_to_this_models_checkpoints.mkdir(exist_ok=True, parents=True)
+        folder_to_this_models_checkpoints = LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_model_identifier)
 
         # Set up tokeniser
         if hyperparameters.TOKENISER:

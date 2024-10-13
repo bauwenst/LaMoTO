@@ -5,6 +5,6 @@ T = TypeVar("T")
 
 def tryExceptNone(executable: Callable[[],T]) -> Optional[T]:
     try:
-        executable()
+        return executable()
     except:
         return None

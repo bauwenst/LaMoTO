@@ -52,7 +52,7 @@ class CallbackAtTimeInterval(TrainerCallback):
             if EventType.CHECKPOINT in self.event_types:
                 control.should_save = True
             if EventType.EVALUATE in self.event_types:
-                control.should_evaluate = True
+                control.should_evaluate = True  # An evaluation will be started, and when it finishes, the timer is reset.
             if EventType.STOP in self.event_types:
                 control.should_training_stop = True
 
