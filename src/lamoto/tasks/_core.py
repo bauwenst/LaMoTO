@@ -167,6 +167,7 @@ class Task(ABC, Generic[HC]):
         Encapsulation of everything you need to do to get a Trainer running.
         """
         printLamotoWelcome()
+        log("Running task:", self.__class__.__name__)
         transformers.set_seed(seed=hyperparameters.SEED)
 
         # Imputations and sanity checks
@@ -179,6 +180,8 @@ class Task(ABC, Generic[HC]):
             raise ValueError("You said you wanted to initialise model weights from the checkpoint, but didn't give a checkpoint path!")
         if hyperparameters.archit_basemodel_class is None:
             raise ValueError("In order to parse model configs, the archit_basemodel_class hyperparameter cannot be None.")
+        if hyperparameters.archit_head_config is None and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):  # Note: there is another failure case: when the checkpoint *is* a string, but *isn't* an ArchIt checkpoint. It errors below.
+            raise ValueError("Without a checkpoint, a head config must be provided to instantiate a new head.")
         if hyperparameters.TRACK_BEST_MODEL and self.metric_config.to_rank.fullName() != "loss" and self.metric_config.to_rank.metric_name not in self.metric_config.to_compute:
             raise ValueError(f"Cannot rank models based on metric {self.metric_config.to_rank.metric_name} since it isn't computed.")
         for metric_name in self.metric_config.to_track.keys():
@@ -189,13 +192,14 @@ class Task(ABC, Generic[HC]):
         self.adjustHyperparameters(hyperparameters)
         self._setHyperparameters(hyperparameters)
 
+        log("Loading model config...")
         config_or_str = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
         if not isinstance(config_or_str, str):  # It's an object.
             if isinstance(config_or_str, CombinedConfig):
-                raise ValueError("When instantiating a new model from a config, it must only parameterise the base model, without a head.")
+                raise ValueError("When instantiating a new model from a config, it must only parameterise the base model. The head is parameterised in the hyperparameters.")
             model_config = CombinedConfig(base_model_config=config_or_str,
                                           head_config=hyperparameters.archit_head_config,
-                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)
+                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # This call pretends to be CombinedConfig(**json).
         else:  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
             model_config = CombinedConfig.from_pretrained(config_or_str,
                                                           head_config=hyperparameters.archit_head_config,
@@ -216,6 +220,7 @@ class Task(ABC, Generic[HC]):
         folder_to_this_models_checkpoints = LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_model_identifier)
 
         # Set up tokeniser
+        log("Loading tokeniser...")
         if hyperparameters.TOKENISER:
             if isinstance(hyperparameters.TOKENISER, str):
                 tokenizer = AutoTokenizer.from_pretrained(hyperparameters.TOKENISER, add_prefix_space=True)
@@ -262,6 +267,7 @@ class Task(ABC, Generic[HC]):
                 # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
                 model: PreTrainedModel = self.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
             else:
+                assert hyperparameters.archit_head_config is not None, "You forgot to set the head config in the hyperparameters!"
                 model: PreTrainedModel = self.archit_class.fromModelAndHeadConfig(hyperparameters.archit_basemodel_class.from_config(self.model_config), hyperparameters.archit_head_config)
         else:  # Edge cases.
             if is_custom_hf_architecture:
@@ -274,7 +280,7 @@ class Task(ABC, Generic[HC]):
                 log(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({self.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({self.automodel_class.__name__}) instead of ArchIt.")
                 model: PreTrainedModel = self.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **self.automodel_args)
             else:
-                raise RuntimeError("Impossible.")
+                raise RuntimeError()
         model.config.pad_token_id = self.model_config.base_model_config.pad_token_id  # self.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
 
         # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.
@@ -458,7 +464,8 @@ class Task(ABC, Generic[HC]):
         batch_size = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
         train_set_size = tryExceptNone(lambda: getDatasetSize(datasetdict["train"], "train"))
         validation_set_size = hyperparameters.EXAMPLES_PER_EVALUATION
-        print("Batch size:", batch_size)
+        print("Batch size:", pluralise(batch_size, "example"))
+        print("Context length:", pluralise(self._getMaxInputLength(), "token"))
 
         print("Training set:")
         if train_set_size:
@@ -495,7 +502,7 @@ class Task(ABC, Generic[HC]):
             log(trainer.evaluate())
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
         except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
-            log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.\n...")
+            log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.")
             trainer.control.should_save     = True
             trainer.control.should_evaluate = False
             trainer.control.should_log      = False

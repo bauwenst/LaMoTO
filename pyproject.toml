@@ -25,6 +25,7 @@ dependencies = [
     "datasets >= 2.18.0",
     "evaluate >= 0.4.1",
     "pyfiglet >= 1.0.2",
+    "wandb",
 
     "supar            @ git+https://github.com/yzhangcs/parser",
     "hf_mtask_trainer @ git+https://github.com/zipzou/hf-multitask-trainer"

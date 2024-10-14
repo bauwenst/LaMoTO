@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from ._general import SequenceTaskHyperparameters
 
 from .cola import CoLA
@@ -13,6 +15,7 @@ from .stsb import STSB
 from ...augmenting.augment_model import ModelAugmentation
 
 
+@dataclass
 class HyperparametersGLUE:
     sst2: SequenceTaskHyperparameters
     cola: SequenceTaskHyperparameters
@@ -25,6 +28,22 @@ class HyperparametersGLUE:
     wnli: SequenceTaskHyperparameters
 
     stsb: SequenceTaskHyperparameters
+
+    @classmethod
+    def setAll(self, hp: SequenceTaskHyperparameters) -> "HyperparametersGLUE":
+        return HyperparametersGLUE(
+            sst2=hp.copy(),
+            cola=hp.copy(),
+
+            qqp=hp.copy(),
+            mrpc=hp.copy(),
+            rte=hp.copy(),
+            qnli=hp.copy(),
+            mnli=hp.copy(),
+            wnli=hp.copy(),
+
+            stsb=hp.copy()
+        )
 
 
 class GLUE:

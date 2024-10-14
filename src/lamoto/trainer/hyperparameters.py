@@ -160,6 +160,9 @@ class TaskHyperparameters(Generic[HC]):
     TOKENISER: Optional[Union[PreTrainedTokenizerBase, TokeniserWithFiniteTypeDomain, str]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
     ADD_SPECIAL_TOKENS: bool
 
+    def copy(self) -> "TaskHyperparameters[HC]":
+        return deepcopy(self)
+
 
 @dataclass
 class EvaluationEnvironment:
@@ -178,16 +181,15 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     EXAMPLES_PER_EFFECTIVE_BATCH=32,
     EXAMPLES_PER_DEVICEBATCH=32,
     EFFECTIVE_BATCHES_WARMUP=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-
     HARD_STOPPING_CONDITION=AfterNEpochs(epochs=10, effective_batch_size=32),
-    EXAMPLES_PER_EVALUATION=None,
-    EVALS_OF_PATIENCE=9,
 
-    TRACK_BEST_MODEL=True,
+    EXAMPLES_PER_EVALUATION=None,
     EVAL_VS_SAVE_INTERVALS=Intervals(
-        evaluation=NEveryEpoch(per_epoch=1, effective_batch_size=32),
+        evaluation=EveryNDescents(descents=1024),  # Not relative to epoch size because epochs can be insanely massive.
         checkpointing=None
     ),
+    EVALS_OF_PATIENCE=5,
+    TRACK_BEST_MODEL=True,
 
     SEED=69420,
     init_weights=True,
@@ -206,7 +208,7 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
 
 
 def getDefaultHyperparameters() -> TaskHyperparameters:
-    return deepcopy(SUGGESTED_HYPERPARAMETERS)
+    return SUGGESTED_HYPERPARAMETERS.copy()
 
 
 __all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",

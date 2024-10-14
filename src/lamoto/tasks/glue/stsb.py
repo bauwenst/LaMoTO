@@ -1,5 +1,6 @@
 from archit.instantiation.tasks import ForSequenceRegression, SequenceClassificationHeadConfig
 from transformers import AutoModelForSequenceClassification, DataCollatorWithPadding
+from datasets import load_dataset
 
 from ._general import SequenceTaskHyperparameters
 from .._core import *
@@ -26,6 +27,9 @@ class STSB(Task[SequenceClassificationHeadConfig]):
             num_labels=1
         )
 
+    def loadDataset(self) -> DatasetDict:
+        return load_dataset("glue", "stsb")
+
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             return self.tokenizer(example["sentence1"], example["sentence2"], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,
@@ -42,7 +46,5 @@ class STSB(Task[SequenceClassificationHeadConfig]):
         return DataCollatorWithPadding(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
-        # FIXME: Do you still have an extra dimension in regression?
-        raise NotImplementedError
-        # predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.
-        # return predictions.tolist(), labels.tolist()
+        predictions, labels = eval.predictions.squeeze(), eval.label_ids
+        return predictions.tolist(), labels.tolist()
