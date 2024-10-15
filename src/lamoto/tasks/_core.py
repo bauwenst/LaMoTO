@@ -533,7 +533,7 @@ class Task(ABC, Generic[HC]):
             log("*** SUCCESSFULLY FINISHED LaMoTO TRAINING ***")
             all_results = validation_results | test_results
             with open(LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_model_identifier) / f"metrics-{trainer.state.global_step}.json", "w", encoding="utf-8") as handle:
-                json.dump(all_results, handle)
+                json.dump(all_results, handle, indent=4)
             return all_results
 
         except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).

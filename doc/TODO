@@ -4,6 +4,12 @@ TODO: SuperGLUE
 
 TODO: Dataset caching. For hyperparameter tuning, you don't want to keep calling .map() each time.
 
+TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
+
+TODO: I would like more decoupling between evaluation and saving.
+    - Be able to save more frequently than evals so that you don't lose hours of progress just because you're scared of the cost of eval.
+    - Be able to delete models after training, which is what you need for phase 1 of finetuning.
+
 TODO: Hour-long backoff wrapper around streamed datasets, to smooth over HuggingFace outages when streaming.
     - Also spice it up by sending the user an email to notify them of this "hybernation mode".
     - Also save the model.
