@@ -2,7 +2,18 @@ TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
 
 TODO: SuperGLUE
 
-TODO: A framework for hyperparameter tuning as follows:
+TODO: Dataset caching. For hyperparameter tuning, you don't want to keep calling .map() each time.
+
+TODO: Hour-long backoff wrapper around streamed datasets, to smooth over HuggingFace outages when streaming.
+    - Also spice it up by sending the user an email to notify them of this "hybernation mode".
+    - Also save the model.
+
+TODO: It would be very cool if there was a callback connected to some kind of messaging
+      service, where you could send a signal to kill training and the model will (after the current step) quit and save.
+
+TODO: Test the resume-from-folder functionality. It isn't properly tested.
+
+TODO: A framework for hyperparameter tuning as follows (I have this implemented in WiaT):
     - Given are ranges for various hyperparameters, an amount of samples, and a maximal amount of descents.
     - for _ in range(samples): run fine-tuning for a max amount of descents. Could be many epochs, could be less than 1 epoch. Evaluate on the full validation set.
     - Select the sampled set of hyperparameters with the best validation set performance.

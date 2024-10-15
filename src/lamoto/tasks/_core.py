@@ -8,24 +8,27 @@ from dataclasses import dataclass
 
 import traceback
 import time
+import json
 import wandb
 import torch
 from datasets import DatasetDict, Dataset
+import transformers
 from transformers import DataCollator, AutoTokenizer, PreTrainedModel, \
     PreTrainedTokenizerBase, PretrainedConfig, AutoConfig, IntervalStrategy, EarlyStoppingCallback, EvalPrediction
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
 from transformers.trainer import TrainingArguments
 from transformers.trainer_utils import has_length
 import transformers.optimization
+from transformers.utils.logging import set_verbosity_error
 
 from fiject.hooks.transformers import FijectCallback
 from tktkt.files.paths import PathManager
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from tktkt.util.timing import datetimeDashed
-from tktkt.util.printing import pluralise
+from tktkt.util.printing import pluralise, intsep
 from archit.instantiation.abstracts import ModelWithHead, CombinedConfig
-from archit.util import torchPrint
+from archit.util import torchPrint, parameterCountBaseVsHead
 
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric, LamotoMetric
@@ -39,6 +42,11 @@ from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import printLamotoWelcome, log, warn
 
 LamotoPaths = PathManager("lamoto")
+
+DO_WARNINGS_AND_PROGRESSBARS = True
+def showWarningsAndProgress(enabled: bool):
+    global DO_WARNINGS_AND_PROGRESSBARS
+    DO_WARNINGS_AND_PROGRESSBARS = enabled
 
 
 @dataclass
@@ -162,13 +170,15 @@ class Task(ABC, Generic[HC]):
         return self.archit_class.head_class.hfEquivalentSuffix() in architecture_name and \
                self.archit_class.head_class.hfEquivalentSuffix() != architecture_name
 
-    def train(self, hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(), model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
+    def train(self, hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(), model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Dict[str, float]:
         """
         Encapsulation of everything you need to do to get a Trainer running.
         """
         printLamotoWelcome()
         log("Running task:", self.__class__.__name__)
         transformers.set_seed(seed=hyperparameters.SEED)
+        if not DO_WARNINGS_AND_PROGRESSBARS:
+            set_verbosity_error()
 
         # Imputations and sanity checks
         if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, Path):
@@ -287,7 +297,6 @@ class Task(ABC, Generic[HC]):
         if model_augmentation:
             model_augmentation.augment(model, self.tokenizer)
         model.to("cuda")
-        torchPrint(model)
 
         # Now that we have a reference to the dataset and model, build the metrics.
         env = EvaluationEnvironment(
@@ -338,8 +347,8 @@ class Task(ABC, Generic[HC]):
                 raise ValueError("You indicated that you want to track the best model, but specified no evaluation interval!")
             save_interval = eval_interval
 
-        batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(datasetdict["train"])) if isinstance(eval_interval, (EveryNDescents, NEveryEpoch)) else None
-        batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(datasetdict["train"])) if isinstance(save_interval, (EveryNDescents, NEveryEpoch)) else None
+        batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(datasetdict["train"])) if isinstance(eval_interval, (EveryNDescents, EveryNDescentsOrOncePerEpoch, NEveryEpoch)) else None
+        batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(datasetdict["train"])) if isinstance(save_interval, (EveryNDescents, EveryNDescentsOrOncePerEpoch, NEveryEpoch)) else None
 
         # - Early stopping (only used if required)
         best_model_metric_handle = f"eval_{self.metric_config.to_rank.fullName()}" if hyperparameters.TRACK_BEST_MODEL else None
@@ -400,7 +409,7 @@ class Task(ABC, Generic[HC]):
         )
 
         # - Build optimiser
-        optimizer = torch.optim.AdamW(model.parameters(), lr=hyperparameters.LEARNING_RATE, weight_decay=hyperparameters.L2_REGULARISATION, betas=(0.9, 0.999))  # Not using transformers.optimization because it gives a deprecation warning.
+        optimizer = torch.optim.AdamW(model.parameters(), lr=hyperparameters.learning_rate, weight_decay=hyperparameters.adamw_decay_rate, betas=(0.9, 0.999))  # Not using transformers.optimization because it gives a deprecation warning.
         scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=n_descents_of_warmup)  # Not using a linear decay because that's the whole point of having Adam.
 
         # - Build callbacks
@@ -460,6 +469,22 @@ class Task(ABC, Generic[HC]):
         )
 
         # Lastly, do some prints (not logs).
+        # Print the loaded model and a breakdown of its parameter counts.
+        log("="*17 + "ARCHITECTURE" + "="*17)
+        torchPrint(model)
+        (p_base_train, p_base_total), (p_head_train, p_head_total) = parameterCountBaseVsHead(model)
+        print("Parameter counts:")
+        print("|-- Base model:")
+        print("|   |-- Trainable:", intsep(p_base_train))
+        print("|   `-------- All:", intsep(p_base_total))
+        print("|-- Head:")
+        print("|   |-- Trainable:", intsep(p_head_train))
+        print("|   `-------- All:", intsep(p_head_total))
+        print("`-- Total:")
+        print("    |-- Trainable:", intsep(p_base_train + p_head_train))
+        print("    `-------- All:", intsep(p_base_total + p_head_total))
+        print()
+
         print("="*17 + " TRAINING SIZES " + "="*17)
         batch_size = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
         train_set_size = tryExceptNone(lambda: getDatasetSize(datasetdict["train"], "train"))
@@ -486,7 +511,7 @@ class Task(ABC, Generic[HC]):
             print("\t", pluralise(batches_per_eval, "batch", "es"), "per evaluation")
             if batches_between_evals:
                 print("\t", pluralise(batches_between_evals, "training batch", "es"), "between evals")
-            if batches_per_epoch:
+            if batches_per_epoch and batches_between_evals:
                 print("\t", pluralise(batches_per_epoch // batches_between_evals, "eval"), "per training epoch")
         else:
             print("\t", "No sizes known.")
@@ -494,16 +519,23 @@ class Task(ABC, Generic[HC]):
 
         # Train, and evaluate afterwards.
         try:
-            log(f"Training {model.__class__.__name__} on {model.device}...")
+            log(f"Training model {model.__class__.__name__} on task {self.__class__.__name__} on device {model.device}...")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
             log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on validation set...")
-            log(trainer.evaluate(datasetdict["validation"]))
+            validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval")
+            print(validation_results)
             log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
-            log(trainer.evaluate(datasetdict["test"]))
+            test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test")
+            print(test_results)
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
             log("*** SUCCESSFULLY FINISHED LaMoTO TRAINING ***")
+            all_results = validation_results | test_results
+            with open(LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_model_identifier) / f"metrics-{trainer.state.global_step}.json", "w", encoding="utf-8") as handle:
+                json.dump(all_results, handle)
+            return all_results
+
         except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
             log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.")
             trainer.control.should_save     = True

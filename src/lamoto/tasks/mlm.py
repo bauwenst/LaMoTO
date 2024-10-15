@@ -48,8 +48,8 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     TOKENISER="roberta-base",
     ADD_SPECIAL_TOKENS=True,
 
-    LEARNING_RATE=6e-4,
-    L2_REGULARISATION=0.01,
+    learning_rate=6e-4,
+    adamw_decay_rate=0.01,
 
     MLM_PROBABILITY=0.15,
     PPPL_PARAMETERS=PPPL_Parameters(right_fraction=0.5)

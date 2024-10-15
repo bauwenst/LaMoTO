@@ -1,4 +1,4 @@
-from datasets import DatasetDict
+from datasets import DatasetDict, load_dataset
 
 from ._general import CompareSentencesGLUETask
 
@@ -13,7 +13,11 @@ class MNLI(CompareSentencesGLUETask):
         super().__init__("mnli", num_labels=3, text_field1="premise", text_field2="hypothesis")
 
     def loadDataset(self) -> DatasetDict:
-        datasetdict = super().loadDataset()
-        datasetdict["validation"] = datasetdict["validation_mismatched"]
-        datasetdict["test"]       = datasetdict["test_mismatched"]
-        return datasetdict
+        original_datasetdict = load_dataset("glue", self.task_name)
+        new_datasetdict      = original_datasetdict["train"].train_test_split(
+            test_size=len(original_datasetdict["validation_mismatched"])/len(original_datasetdict["train"]),
+            stratify_by_column="label",
+            seed=self.hyperparameters.SEED
+        )
+        new_datasetdict["validation"] = original_datasetdict["validation_mismatched"]
+        return new_datasetdict

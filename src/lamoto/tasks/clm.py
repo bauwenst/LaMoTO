@@ -55,8 +55,8 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     TOKENISER="openai-community/gpt2",
     ADD_SPECIAL_TOKENS=False,
 
-    LEARNING_RATE = 2e-5,
-    L2_REGULARISATION = 0.01,
+    learning_rate=2e-5,
+    adamw_decay_rate=0.01,
 
     PPL = PPL_Parameters(stride_fraction=1/8)
 )

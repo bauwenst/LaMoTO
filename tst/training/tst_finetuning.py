@@ -3,6 +3,8 @@ from tst.preamble import *
 from archit.instantiation.heads import *
 from lamoto.tasks import *
 from lamoto.tasks._core import getDefaultHyperparameters
+from lamoto.trainer.hyperparameters import *
+
 
 hp = getDefaultHyperparameters()
 hp.SEED = 0
@@ -52,15 +54,25 @@ def tst_glue():
 
 def tst_qnli():
     hp.archit_head_config = SequenceClassificationHeadConfig()
-    task = QNLI()  # https://github.com/huggingface/transformers/issues/33985
+    task = QNLI()  # Suffers from https://github.com/huggingface/transformers/issues/33985
+    task.train(hp)
+
+
+def tst_qqp():
+    hp.archit_head_config = SequenceClassificationHeadConfig()
+
+    hp.HARD_STOPPING_CONDITION = AfterNDescents(descents=5)
+
+    task = QQP()
     task.train(hp)
 
 
 if __name__ == "__main__":
-    tst_glue()
-    # tst_qnli()
+    # tst_glue()
+    tst_qnli()
     # tst_sts()
     # tst_pos()
     # tst_ner()
     # tst_cola()
     # tst_dp()
+    # tst_qqp()

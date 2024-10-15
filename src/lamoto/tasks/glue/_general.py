@@ -26,7 +26,15 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
         self._num_labels = num_labels
 
     def loadDataset(self) -> DatasetDict:
-        return load_dataset("glue", self.task_name)
+        # Since GLUE tasks don't have test labels, we create our own test split from the training set, with same size as validation set.
+        original_datasetdict = load_dataset("glue", self.task_name)
+        new_datasetdict      = original_datasetdict["train"].train_test_split(
+            test_size=len(original_datasetdict["validation"])/len(original_datasetdict["train"]),
+            stratify_by_column="label",
+            seed=self.hyperparameters.SEED
+        )
+        new_datasetdict["validation"] = original_datasetdict["validation"]
+        return new_datasetdict
 
     def adjustHyperparameters(self, hp: SequenceTaskHyperparameters):
         hp.archit_head_config.num_labels = self._num_labels

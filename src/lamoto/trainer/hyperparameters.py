@@ -40,6 +40,23 @@ class EveryNDescents(LamotoIntervalStrategy):
         return self.steps_between_events
 
 
+class EveryNDescentsOrOncePerEpoch(LamotoIntervalStrategy):
+    """
+    Same as EveryNDescents except if epochs are smaller than N, you evaluate once per epoch.
+    """
+    def __init__(self, descents: int, effective_batch_size: int):
+        self.steps_between_events = descents
+        self.examples_per_step    = effective_batch_size
+
+    def getSteps(self, train_dataset: DatasetInfoMixin) -> int:
+        try:
+            examples_per_epoch = getDatasetSize(train_dataset, split="train")
+            steps_per_epoch    = totalBatches(examples_per_epoch, self.examples_per_step)
+            return min(self.steps_between_events, steps_per_epoch)
+        except:
+            return self.steps_between_events  # Not just None!
+
+
 class NEveryEpoch(LamotoIntervalStrategy):
     def __init__(self, per_epoch: int, effective_batch_size: int):
         self.events_per_epoch = per_epoch
@@ -153,8 +170,8 @@ class TaskHyperparameters(Generic[HC]):
     custom_hf_class: Optional[Type[PreTrainedModel]]  # If set, will be used instead of ArchIt or AutoModel.
 
     # - Gradients:
-    LEARNING_RATE: float
-    L2_REGULARISATION: float
+    learning_rate: float
+    adamw_decay_rate: float  # Not the same as L2 regularisation. That's the whole point of the AdamW paper!
 
     # Tokeniser
     TOKENISER: Optional[Union[PreTrainedTokenizerBase, TokeniserWithFiniteTypeDomain, str]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
@@ -199,8 +216,8 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     archit_head_config=None,
     custom_hf_class=None,
 
-    LEARNING_RATE=2e-5,
-    L2_REGULARISATION=0.01,
+    learning_rate=2e-5,
+    adamw_decay_rate=0.01,
 
     TOKENISER=None,
     ADD_SPECIAL_TOKENS=True
@@ -212,6 +229,6 @@ def getDefaultHyperparameters() -> TaskHyperparameters:
 
 
 __all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",
-           "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes",
+           "NeverInterval", "EveryNDescents", "EveryNDescentsOrOncePerEpoch", "NEveryEpoch", "EveryNMinutes",
            "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
            "PC", "HC", "getDefaultHyperparameters"]
