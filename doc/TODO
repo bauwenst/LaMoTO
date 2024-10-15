@@ -6,6 +6,12 @@ TODO: Dataset caching. For hyperparameter tuning, you don't want to keep calling
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
 
+TODO: When device batch is set bigger than the effective batches, it has to be lowered.
+
+TODO: The interval/stopping hyperparameter classes that require a batch size are redundant and can go out of sync.
+      E.g., if you change the batch size in given hyperparameters, you don't know if you should change the intervals too.
+      Bad design. Should be able to refer to the batch size inside the hyperparameter object.
+
 TODO: I would like more decoupling between evaluation and saving.
     - Be able to save more frequently than evals so that you don't lose hours of progress just because you're scared of the cost of eval.
     - Be able to delete models after training, which is what you need for phase 1 of finetuning.

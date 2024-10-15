@@ -1,3 +1,5 @@
+from transformers import EvalPrediction
+
 from ._general import CompareSentencesGLUETask
 
 
@@ -9,7 +11,6 @@ class STSB(CompareSentencesGLUETask):
     def __init__(self):
         super().__init__(task_name="stsb", num_labels=1, is_regressive=True)
 
-    # Equivalent to argmax(-1) because there is only one class
-    # def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
-    #     predictions, labels = eval.predictions.squeeze(), eval.label_ids
-    #     return predictions.tolist(), labels.tolist()
+    def getPredictionsAndReferences(self, eval: EvalPrediction):
+        predictions, labels = eval.predictions.squeeze(), eval.label_ids
+        return predictions.tolist(), labels.tolist()

@@ -254,11 +254,11 @@ class Task(ABC, Generic[HC]):
         log("Loading dataset...")
         datasetdict = self.loadDataset()
         n_examples_validation = tryExceptNone(lambda: getDatasetSize(datasetdict["validation"], split="validation")) or 1_000_000_000_000  # Very very big number assumed when you can't find the dataset size.
-        hyperparameters.EXAMPLES_PER_EVALUATION = n_examples_validation if not hyperparameters.EXAMPLES_PER_EVALUATION else min(n_examples_validation, hyperparameters.EXAMPLES_PER_EVALUATION)
+        n_examples_validation = n_examples_validation if not hyperparameters.EXAMPLES_PER_EVALUATION else min(n_examples_validation, hyperparameters.EXAMPLES_PER_EVALUATION)
 
         log("Preparing dataset...")
         datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"], seed=hyperparameters.SEED)
-        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=hyperparameters.SEED, truncate_to=hyperparameters.EXAMPLES_PER_EVALUATION)
+        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=hyperparameters.SEED, truncate_to=n_examples_validation)
         datasetdict = self.prepareDataset(datasetdict)
 
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
@@ -487,15 +487,14 @@ class Task(ABC, Generic[HC]):
 
         print("="*17 + " TRAINING SIZES " + "="*17)
         batch_size = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
-        train_set_size = tryExceptNone(lambda: getDatasetSize(datasetdict["train"], "train"))
-        validation_set_size = hyperparameters.EXAMPLES_PER_EVALUATION
+        n_examples_training = tryExceptNone(lambda: getDatasetSize(datasetdict["train"], "train"))
         print("Batch size:", pluralise(batch_size, "example"))
         print("Context length:", pluralise(self._getMaxInputLength(), "token"))
 
         print("Training set:")
-        if train_set_size:
-            batches_per_epoch = totalBatches(train_set_size, batch_size)
-            print("\t", pluralise(train_set_size, "example"), "per epoch")
+        if n_examples_training:
+            batches_per_epoch = totalBatches(n_examples_training, batch_size)
+            print("\t", pluralise(n_examples_training, "example"), "per epoch")
             print("\t", pluralise(batches_per_epoch, "batch", "es"), "per epoch")
             if n_gradient_descents:
                 print("\t", round(n_gradient_descents / batches_per_epoch, 1), "epochs")
@@ -505,9 +504,9 @@ class Task(ABC, Generic[HC]):
             print("\t", "No sizes known.")
 
         print("Validation set:")
-        if validation_set_size:
-            batches_per_eval = totalBatches(validation_set_size, batch_size)
-            print("\t", pluralise(validation_set_size, "example"), "per evaluation")
+        if n_examples_validation:
+            batches_per_eval = totalBatches(n_examples_validation, batch_size)
+            print("\t", pluralise(n_examples_validation, "example"), "per evaluation")
             print("\t", pluralise(batches_per_eval, "batch", "es"), "per evaluation")
             if batches_between_evals:
                 print("\t", pluralise(batches_between_evals, "training batch", "es"), "between evals")
