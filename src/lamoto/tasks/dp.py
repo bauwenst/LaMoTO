@@ -110,7 +110,7 @@ class DP(Task[DependencyParsingHeadConfig]):
         )
 
     def loadDataset(self) -> DatasetDict:
-        return load_dataset("universal_dependencies", "en_ewt", trust_remote_code=True)
+        return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def getTagset(self) -> Counter:
         print("Generating tagset manually...")

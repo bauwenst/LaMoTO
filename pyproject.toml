@@ -26,6 +26,7 @@ dependencies = [
     "evaluate >= 0.4.1",
     "pyfiglet >= 1.0.2",
     "wandb",
+    "scikit-learn",  # Technically a dependency of evaluate, but they refuse to add it to their metadata.
 
     "supar            @ git+https://github.com/yzhangcs/parser",
     "hf_mtask_trainer @ git+https://github.com/zipzou/hf-multitask-trainer"

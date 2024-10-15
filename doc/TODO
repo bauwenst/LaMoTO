@@ -2,6 +2,13 @@ TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
 
 TODO: SuperGLUE
 
+TODO: A framework for hyperparameter tuning as follows:
+    - Given are ranges for various hyperparameters, an amount of samples, and a maximal amount of descents.
+    - for _ in range(samples): run fine-tuning for a max amount of descents. Could be many epochs, could be less than 1 epoch. Evaluate on the full validation set.
+    - Select the sampled set of hyperparameters with the best validation set performance.
+    - Re-run finetuning with that set WITHOUT max amount of descents, with early stopping on the validation set.
+    - Evaluate the result on the test set.
+
 TODO: Tokeniser parallelisation.
 
 TODO: in the Task.train core,
@@ -13,9 +20,3 @@ TODO: Implement QA. I wonder if you need a logit transform for this too. The Tra
 
 TODO: I'm not happy with how metrics are set up. It really makes zero sense to embed constructor arguments inside
       the task config to then parse them implicitly (if you didn't forget them) or error (because you did forget them).
-
-FIXME:
-  - It seems to me that the EvaluateBeforeTrainingCallback actually evaluates after one iteration.
-    The only hypothesis I have is that the gradients are computed first, THEN you evaluate, and THEN you apply the gradients.
-        - If this turns out to be an actual issue, I think you can just call trainer.evaluate() before the .train() call
-          and indeed the FijectCallback will still add the result to its graph as per usual.

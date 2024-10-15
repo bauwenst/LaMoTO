@@ -498,7 +498,7 @@ class Task(ABC, Generic[HC]):
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
-            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model...")
+            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on validation set...")
             log(trainer.evaluate())
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
         except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
@@ -516,6 +516,58 @@ class Task(ABC, Generic[HC]):
             raise e  # Automatically prints the traceback.
 
 
-__all__ = ["Task", "MetricSetup", "RankingMetricSpec", "TaskHyperparameters", "getDefaultHyperparameters",
+class TaskWrapper(Task[HC]):
+    """
+    A task which, by default, steals all the implementations from an underlying task.
+    """
+
+    def __init__(self, task: Task[HC]):
+        super().__init__(
+            task_name=task.task_name,
+            metric_config=task.metric_config,
+            archit_class=task.archit_class,
+            automodel_class=task.automodel_class,
+            **task.automodel_args
+        )
+        self._method_implementations: Task[HC] = task
+
+    def loadDataset(self) -> DatasetDict:
+        return self._method_implementations.loadDataset()
+
+    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+        return self._method_implementations.prepareDataset(dataset)
+
+    def getCollator(self) -> DataCollator:
+        return self._method_implementations.getCollator()
+
+    def adjustHyperparameters(self, hp: TaskHyperparameters[HC]):
+        return self._method_implementations.adjustHyperparameters(hp)
+
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+        return self._method_implementations.getPredictionsAndReferences(eval)
+
+    def sneakyLogitTransform(self, logits: Tensor, labels: Tensor) -> Tensor:
+        return self._method_implementations.sneakyLogitTransform(logits, labels)
+
+    # Finally, four methods to communicate the runtime fields with the underlying task, so it can use them in its implementations:
+
+    def _setHyperparameters(self, hp: TaskHyperparameters[HC]):
+        super()._setHyperparameters(hp)
+        self._method_implementations._setHyperparameters(hp)
+
+    def _setMetrics(self, m: Dict[str, Metric]):
+        super()._setMetrics(m)
+        self._method_implementations._setMetrics(m)
+
+    def _setModelConfig(self, mc: PretrainedConfig):
+        super()._setModelConfig(mc)
+        self._method_implementations._setModelConfig(mc)
+
+    def _setTokenizer(self, tk: PreTrainedTokenizerBase):
+        super()._setTokenizer(tk)
+        self._method_implementations._setTokenizer(tk)
+
+
+__all__ = ["Task", "MetricSetup", "RankingMetricSpec", "TaskHyperparameters", "getDefaultHyperparameters", "TaskWrapper",
            "Intervals", "NeverInterval", "EveryNDescents", "NEveryEpoch", "EveryNMinutes", "NeverStop", "AfterNDescents", "AfterNEpochs", "AfterNTokens", "AfterNMinutes",
            "DatasetDict", "DataCollator", "Any", "Tuple", "Path", "ModelAugmentation", "EvalPrediction"]
