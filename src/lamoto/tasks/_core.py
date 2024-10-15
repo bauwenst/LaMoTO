@@ -479,7 +479,7 @@ class Task(ABC, Generic[HC]):
             batches_per_epoch = 0
             print("\t", "No sizes known.")
 
-        print("Evaluation set:")
+        print("Validation set:")
         if validation_set_size:
             batches_per_eval = totalBatches(validation_set_size, batch_size)
             print("\t", pluralise(validation_set_size, "example"), "per evaluation")
@@ -499,21 +499,30 @@ class Task(ABC, Generic[HC]):
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
             log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on validation set...")
-            log(trainer.evaluate())
+            log(trainer.evaluate(datasetdict["validation"]))
+            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
+            log(trainer.evaluate(datasetdict["test"]))
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
-        except Exception as e:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
+            log("*** SUCCESSFULLY FINISHED LaMoTO TRAINING ***")
+        except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
             log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.")
             trainer.control.should_save     = True
             trainer.control.should_evaluate = False
             trainer.control.should_log      = False
-            trainer._maybe_log_save_evaluate(tr_loss=None, grad_norm=None, model=None, trial=None, epoch=None, ignore_keys_for_eval=None)  # These arguments are imputed anyway.
-            wandb.finish(exit_code=1)
+            try:
+                trainer._maybe_log_save_evaluate(tr_loss=None, grad_norm=None, model=None, trial=None, epoch=None, ignore_keys_for_eval=None)  # These arguments are imputed anyway.
+                log("Save successful. Now raising the exception. Bye bye!")
+            except Exception as e2:
+                log("Save FAILED. Something is broken. Raising all exceptions.")
+                log("=" * 50)
+                wandb.finish(exit_code=1)
+                time.sleep(1)  # First let all the prints happen, so that the traceback doesn't race it to the output.
+                raise e2  # Automatically prints the traceback.
 
-            log("Save successful. Now raising the exception. Bye bye!")
-            log("="*50)
-            time.sleep(1)  # First let all the prints happen, so that the traceback doesn't race it to the output.
-            # print(traceback.format_exc())
-            raise e  # Automatically prints the traceback.
+            log("=" * 50)
+            wandb.finish(exit_code=1)
+            time.sleep(1)
+            raise e1
 
 
 class TaskWrapper(Task[HC]):
