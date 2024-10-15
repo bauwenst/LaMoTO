@@ -555,7 +555,7 @@ class TaskWrapper(Task[HC]):
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
         return self._method_implementations.getPredictionsAndReferences(eval)
 
-    def sneakyLogitTransform(self, logits: Tensor, labels: Tensor) -> Tensor:
+    def sneakyLogitTransform(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
         return self._method_implementations.sneakyLogitTransform(logits, labels)
 
     # Finally, four methods to communicate the runtime fields with the underlying task, so it can use them in its implementations:
