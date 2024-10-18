@@ -8,6 +8,8 @@ TODO: MNLI validation and test set should be switched (now test set comes from t
 
 TODO: When device batch is set bigger than the effective batches, it has to be lowered.
 
+TODO: DP and NER only work with "Fast" HF tokenisers due to .word_ids(). Use DP's tokenisation instead.
+
 TODO: The interval/stopping hyperparameter classes that require a batch size are redundant and can go out of sync.
       E.g., if you change the batch size in given hyperparameters, you don't know if you should change the intervals too.
       Bad design. Should be able to refer to the batch size inside the hyperparameter object.
