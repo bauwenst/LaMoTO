@@ -1,5 +1,6 @@
 from typing import Optional, List
 import torch
+import shutil
 from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, denumpify_detensorize, deepspeed_init, logger, has_length
 
 from hf_mtask_trainer import HfMultiTaskTrainer
@@ -7,15 +8,21 @@ from hf_mtask_trainer import HfMultiTaskTrainer
 
 class LamotoTrainer(HfMultiTaskTrainer):
     """
-    By using this as the parent class (a subclass of Trainer), models are equipped with a self.report_metrics() method
+    By using this as the parent class (a subclass of Trainer), a model is equipped with a self.report_metrics() method
     before training that is linked back to the Trainer. This allows it to collect extra metrics inside its modules. To
     make use of this, your architecture would contain something like
     ```
         if hasattr(self, "report_metrics"):
             self.report_metrics(key1=val1, key2=val2, ...)
     ```
+    Also, it adds a method to delete checkpoints.
     """
-    pass
+
+    def deleteCheckpointsInOrder(self, amount: int):
+        assert amount > 0
+        checkpoint_paths = self._sorted_checkpoints(use_mtime=False, output_dir=self._get_output_dir(None))  # Note: puts best model at the end of the list if applicable.
+        for checkpoint in checkpoint_paths[0:amount]:
+            shutil.rmtree(checkpoint, ignore_errors=True)
 
 
 class LamotoTrainerWithoutEvaluationLoop(LamotoTrainer):

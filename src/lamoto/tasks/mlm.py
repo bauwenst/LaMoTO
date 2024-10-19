@@ -23,6 +23,7 @@ class MlmHyperparameters(TaskHyperparameters[MaskedLMHeadConfig]):
 SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa's hyperparameters.
     SAVE_AS=None,
     WANDB_PROJECT=None,
+    traceless=False,
 
     EXAMPLES_PER_EFFECTIVE_BATCH=8192,
     EXAMPLES_PER_DEVICEBATCH=64,  # Should definitely fit on an A100.

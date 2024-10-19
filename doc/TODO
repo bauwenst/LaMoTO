@@ -6,8 +6,6 @@ TODO: Dataset caching. For hyperparameter tuning, you don't want to keep calling
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
 
-TODO: When device batch is set bigger than the effective batches, it has to be lowered.
-
 TODO: DP and NER only work with "Fast" HF tokenisers due to .word_ids(). Use DP's tokenisation instead.
 
 TODO: The interval/stopping hyperparameter classes that require a batch size are redundant and can go out of sync.
@@ -26,13 +24,6 @@ TODO: It would be very cool if there was a callback connected to some kind of me
       service, where you could send a signal to kill training and the model will (after the current step) quit and save.
 
 TODO: Test the resume-from-folder functionality. It isn't properly tested.
-
-TODO: A framework for hyperparameter tuning as follows (I have this implemented in WiaT):
-    - Given are ranges for various hyperparameters, an amount of samples, and a maximal amount of descents.
-    - for _ in range(samples): run fine-tuning for a max amount of descents. Could be many epochs, could be less than 1 epoch. Evaluate on the full validation set.
-    - Select the sampled set of hyperparameters with the best validation set performance.
-    - Re-run finetuning with that set WITHOUT max amount of descents, with early stopping on the validation set.
-    - Evaluate the result on the test set.
 
 TODO: Tokeniser parallelisation.
 

@@ -29,6 +29,7 @@ class ClmHyperparameters(TaskHyperparameters[CausalLMHeadConfig]):
 SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     SAVE_AS=None,
     WANDB_PROJECT=None,
+    traceless=False,
 
     EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
     EXAMPLES_PER_DEVICEBATCH = 64,  # Used to fit on an A100, but recently got an error saying 80 GiB got filled

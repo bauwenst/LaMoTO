@@ -90,6 +90,15 @@ class NeverStop(LamotoStoppingStrategy):
         raise NotImplementedError("No maximum amount of steps defined when the rule is to never stop.")
 
 
+class AfterNExamples(LamotoStoppingStrategy):
+    def __init__(self, examples: int, effective_batch_size: int):
+        self.examples_to_end = examples
+        self.examples_per_batch = effective_batch_size
+
+    def getSteps(self, train_dataset: DatasetInfoMixin) -> int:
+        return totalBatches(self.examples_to_end, self.examples_per_batch)
+
+
 class AfterNDescents(LamotoStoppingStrategy):
     def __init__(self, descents: int):
         self.steps_to_end = descents
@@ -139,6 +148,7 @@ class Intervals:
 class TaskHyperparameters(Generic[HC]):
     SAVE_AS: Optional[str]  # Not necessary if a checkpoint name is given.
     WANDB_PROJECT: Optional[str]
+    traceless: bool  # Whether to keep any model and any graph of intermediate results at the end of training, or only the evaluation results.
 
     # Sizes
     # - An "effective batch" is all the examples used to compute the gradient of one step of gradient descent.
@@ -194,6 +204,7 @@ from archit.instantiation.basemodels import RobertaBaseModel
 SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     SAVE_AS=None,
     WANDB_PROJECT=None,
+    traceless=False,
 
     EXAMPLES_PER_EFFECTIVE_BATCH=32,
     EXAMPLES_PER_DEVICEBATCH=32,

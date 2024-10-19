@@ -198,6 +198,36 @@ class Task(ABC, Generic[HC]):
             if metric_name not in self.metric_config.to_compute:
                 raise ValueError(f"Requested tracking results for metrics {sorted(self.metric_config.to_track)} yet you are only computing metrics {sorted(self.metric_config.to_compute)}.")
 
+        # Imputation of device batch size specifically
+        n_devices = torch.cuda.device_count()
+        if hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH % n_devices != 0:  # This is an unsolvable issue by setting a new device batch size.
+            raise ValueError(f"Effective batch size ({hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH}) must be a multiple of the amount of devices ({n_devices}).")
+
+        n_examples_per_pass_per_device = hyperparameters.EXAMPLES_PER_DEVICEBATCH
+        n_examples_per_pass            = n_examples_per_pass_per_device * n_devices
+        if n_examples_per_pass > hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH:  # One pass through your devices already exceeds one effective batch.
+            n_examples_per_pass_per_device = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_devices  # Suggest a new device batch size.
+            n_examples_per_pass            = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
+        if hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH % n_examples_per_pass != 0:  # You can't push an integer amount of passes through your devices to get to the effective batch size.
+            # Example: effective batch size 96, 4 devices, device batch size 7  =>  28 per pass whilst you need a total of 24.
+            # Because we get to choose the device batch size but not the effective batch size or amount of device, we choose a new one as follows:
+            #   - The base criterion is that effective batch size % (device size * devices) == 0, thus effective batch size == device size * devices * integer.
+            #   - It has to be smaller than whatever device batch size we have currently.
+            #   - It has to be a power of 2.
+            #   - It has to be as high as possible given the above.
+            # In the example: we want to get to 96//4 == 24 examples with each device, so push 24 examples for 1 pass, 12 for 2 passes, 8 for 3 passes, 6 for 4 passes, 4 for 6 passes, 3 for 8 passes, 2 for 12 passes or 1 for 24 passes.
+            # The best of these is size 4 for 6 passes because it is smaller than the given 7 whilst being the highest possible power of 2.
+            n_examples_per_device = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_devices
+            for n_passes in range(1, n_examples_per_device+1):
+                if n_examples_per_device % n_passes == 0:
+                    n_examples_per_pass_per_device = n_examples_per_device // n_passes
+                    if n_examples_per_pass_per_device & (n_examples_per_pass_per_device-1) == 0:  # The only numbers for which -1 flips all the bits are powers of 2.
+                        break
+            else:
+                raise ValueError("Impossible.")
+            n_examples_per_pass = n_devices * n_examples_per_pass_per_device
+        n_passes = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_examples_per_pass
+
         # Metadata
         self.adjustHyperparameters(hyperparameters)
         self._setHyperparameters(hyperparameters)
@@ -264,8 +294,8 @@ class Task(ABC, Generic[HC]):
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
         collator = self.getCollator()
 
-        # Get the model...
-        self.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float32
+        # Get the model...  FIXME: Somehow, the DP head uses an operation that doesn't exist for bfloat16. Temporary fix below.
+        self.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() and self.__class__.__name__ != "DP" else torch.float32
 
         hf_checkpoint_classname = self.model_config.architectures[0] if self.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
         is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and self._isHfCheckpointForThisTask(hf_checkpoint_classname)
@@ -311,7 +341,7 @@ class Task(ABC, Generic[HC]):
         folder_wandb = folder_to_this_models_checkpoints / "wandb"
         folder_wandb.mkdir(exist_ok=True)
         wandb.init(
-            mode="disabled" if not hyperparameters.WANDB_PROJECT else "online",
+            mode="disabled" if hyperparameters.traceless or not hyperparameters.WANDB_PROJECT else "online",
 
             project=hyperparameters.WANDB_PROJECT,
             group=model_name,
@@ -325,7 +355,6 @@ class Task(ABC, Generic[HC]):
         # - Sizes
         stopping_condition = hyperparameters.HARD_STOPPING_CONDITION
         n_gradient_descents = tryExceptNone(lambda: stopping_condition.getSteps(datasetdict["train"])) if not isinstance(stopping_condition, (NeverStop, AfterNMinutes)) else None
-        n_accumulations     = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // (torch.cuda.device_count() * hyperparameters.EXAMPLES_PER_DEVICEBATCH)  # The amount of times, to get to one effective batch, you have to push a device batch through all devices in parallel.
         wu = hyperparameters.EFFECTIVE_BATCHES_WARMUP  # Alias to shorten this long name.
         if isinstance(wu, int):
             if wu < 0:
@@ -366,8 +395,8 @@ class Task(ABC, Generic[HC]):
             # warmup_steps=n_descents_of_warmup,
 
             # Batches
-            per_device_train_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,
-            gradient_accumulation_steps=n_accumulations,
+            per_device_train_batch_size=n_examples_per_pass_per_device,
+            gradient_accumulation_steps=n_passes,
 
             # Style of computations
             gradient_checkpointing=model.supports_gradient_checkpointing,  # Only if you have the VRAM though. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
@@ -377,8 +406,8 @@ class Task(ABC, Generic[HC]):
             eval_on_start=not isinstance(eval_interval, NeverInterval),  # Always do an evaluation at the start, unless you wanted to avoid all evaluations.
             evaluation_strategy=IntervalStrategy.STEPS if batches_between_evals else IntervalStrategy.NO,
             eval_steps=batches_between_evals,
-            per_device_eval_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,
-            eval_accumulation_steps=n_accumulations,  # "Number of predictions steps to accumulate the output tensors for, before moving the results to the CPU."
+            per_device_eval_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,  # We know that the GPU can handle at least this much data during eval if it can during training, since training additionally requires the gradients and optimiser to be stored in VRAM as overhead.
+            eval_accumulation_steps=1,  # "Number of predictions steps to accumulate the output tensors for, before moving the results to the CPU. If left unset, all predictions are accumulated on GPU before being moved to the CPU (faster but requires more GPU memory)." You always need more RAM than VRAM, of course.
 
             # Saving
             save_strategy=IntervalStrategy.STEPS if batches_between_saves else IntervalStrategy.NO,
@@ -392,7 +421,7 @@ class Task(ABC, Generic[HC]):
             save_total_limit=1,  # This will keep the last model stored plus the best model if those aren't the same, allowing you to have the best model and continue training from last if you need to. https://stackoverflow.com/a/67615225/9352077
 
             # Logging
-            report_to=["wandb"],  # Can be turned off below.
+            report_to=["wandb"],  # Can be turned off above.
             logging_strategy=IntervalStrategy.STEPS,
             logging_steps=1,  # Gradient descents between each push to the log.
             logging_first_step=True,
@@ -431,7 +460,7 @@ class Task(ABC, Generic[HC]):
             if isinstance(save_interval, EveryNMinutes):
                 callbacks.append(CallbackAtTimeInterval(minutes=save_interval.minutes, events=EventType.CHECKPOINT))
 
-        if not hyperparameters.WANDB_PROJECT:
+        if not hyperparameters.traceless and not hyperparameters.WANDB_PROJECT:
             if hyperparameters.TRACK_BEST_MODEL:
                 callbacks.append(FijectCallback(global_model_identifier + "_eval_goal", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
             callbacks.append(
@@ -529,10 +558,19 @@ class Task(ABC, Generic[HC]):
             test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test")
             print(test_results)
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
-            log("*** SUCCESSFULLY FINISHED LaMoTO TRAINING ***")
+
+            # Save results
             all_results = validation_results | test_results
-            with open(LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_model_identifier) / f"metrics-{trainer.state.global_step}.json", "w", encoding="utf-8") as handle:
+            results_path = LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_model_identifier) / f"metrics-{trainer.state.global_step}.json"
+            log(f"Saving results to {results_path.as_posix()} ...")
+            with open(results_path, "w", encoding="utf-8") as handle:
                 json.dump(all_results, handle, indent=4)
+
+            # Delete all other artifacts if requested.
+            if hyperparameters.traceless:
+                log("Deleting models...")
+                trainer.deleteCheckpointsInOrder(amount=2)
+
             return all_results
 
         except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
