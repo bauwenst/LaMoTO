@@ -1,14 +1,12 @@
 # Types
 from dataclasses import dataclass
-from typing import Iterable, Tuple, Any
 
 # ML libs
 import datasets
-from datasets import DatasetDict, IterableDatasetDict
+from datasets import IterableDatasetDict
 from transformers import \
     DataCollatorForLanguageModeling, \
-    AutoModelForCausalLM, \
-    PreTrainedTokenizerBase, DataCollator, EvalPrediction
+    AutoModelForCausalLM
 
 from archit.instantiation.heads import CausalLMHeadConfig
 from archit.instantiation.tasks import ForCausalLM
@@ -17,7 +15,7 @@ from archit.instantiation.basemodels import GPT2BaseModel
 # Relative
 from ._core import *
 from ..measuring.ppl import PPL_Parameters
-from ..trainer.hyperparameters import Intervals
+from ..training.auxiliary.hyperparameters import *
 from ..util.datasets import PackedDataset
 
 
@@ -34,7 +32,7 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
     EXAMPLES_PER_DEVICEBATCH = 64,  # Used to fit on an A100, but recently got an error saying 80 GiB got filled
     EFFECTIVE_BATCHES_WARMUP=0.1,
-    HARD_STOPPING_CONDITION=AfterNTokens(10_000_000_000, tokens_per_packed_example=1024, effective_batch_size=512),  # From GEITje.
+    HARD_STOPPING_CONDITION=AfterNPackedTokens(10_000_000_000, tokens_per_packed_example=1024),  # From GEITje.
 
     EXAMPLES_PER_EVALUATION = 2**14,
 

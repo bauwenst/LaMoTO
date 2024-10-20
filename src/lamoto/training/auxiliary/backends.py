@@ -1,3 +1,6 @@
+"""
+Backend classes that do the actual model training itself.
+"""
 from typing import Optional, List
 import torch
 import shutil
@@ -6,7 +9,7 @@ from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, den
 from hf_mtask_trainer import HfMultiTaskTrainer
 
 
-class LamotoTrainer(HfMultiTaskTrainer):
+class ModelTrainer(HfMultiTaskTrainer):
     """
     By using this as the parent class (a subclass of Trainer), a model is equipped with a self.report_metrics() method
     before training that is linked back to the Trainer. This allows it to collect extra metrics inside its modules. To
@@ -25,7 +28,7 @@ class LamotoTrainer(HfMultiTaskTrainer):
             shutil.rmtree(checkpoint, ignore_errors=True)
 
 
-class LamotoTrainerWithoutEvaluationLoop(LamotoTrainer):
+class ModelTrainerWithoutEvaluationLoop(ModelTrainer):
     """
     Has a version of the evaluation loop where, rather than looping over a dataloader, we call compute_metrics on Nones.
     The reason for not altering evaluate() or get_eval_dataloader() is that we now still have the benefits of

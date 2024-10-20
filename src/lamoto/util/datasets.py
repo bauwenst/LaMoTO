@@ -25,7 +25,7 @@ def getDatasetSize(dataset: DatasetInfoMixin, split: str="train"):  # DatasetInf
         try:  # Should work for both Dataset and IterableDataset.
             return dataset.info.splits[split].num_examples
         except:
-            raise ValueError(f"Could not resolve size of dataset split '{split}'.")
+            raise ValueError(f"Could not resolve size of dataset split '{split}'.")  # This is e.g. the case for the SlimPajama dataset.
 
 
 def totalBatches(total_examples: int, batch_size: int):

@@ -37,7 +37,7 @@ task.train(hyperparameters=hp)
 - [x] Evaluate models with a superset of the metrics in HuggingFace's `evaluate`, with custom inference procedures (see e.g. strided pseudo-perplexity or bits-per-character).
 - [x] Augment datasets before training or evaluating by somehow perturbing them.
 - [x] Supports [TkTkT](https://github.com/bauwenst/TkTkT) tokenisers.
-- [x] Weights-and-biases integration.
+- [x] Weights-and-Biases integration.
 
 ## Installation
 If you don't want to edit the source code yourself, run
@@ -50,4 +50,7 @@ git clone https://github.com/bauwenst/LaMoTO
 cd LaMoTO
 pip install -e .[github]
 ```
-If you are me from the future: don't include the `[github]` tag, it will fuck up the editable installs for the packages I maintain.
+To be able to use the Weights-and-Biases integration, make sure you first run `wandb login` in a command-line terminal 
+on the system you want to run on.
+
+<!-- If you are me from the future: don't include the `[github]` tag, it will fuck up the editable installs for the packages I maintain. -->

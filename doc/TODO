@@ -1,33 +1,29 @@
-TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
-
-TODO: SuperGLUE
-
-TODO: Dataset caching. For hyperparameter tuning, you don't want to keep calling .map() each time.
-
-TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
-
 TODO: DP and NER only work with "Fast" HF tokenisers due to .word_ids(). Use DP's tokenisation instead.
 
-TODO: The interval/stopping hyperparameter classes that require a batch size are redundant and can go out of sync.
-      E.g., if you change the batch size in given hyperparameters, you don't know if you should change the intervals too.
-      Bad design. Should be able to refer to the batch size inside the hyperparameter object.
-
-TODO: I would like more decoupling between evaluation and saving.
-    - Be able to save more frequently than evals so that you don't lose hours of progress just because you're scared of the cost of eval.
-    - Be able to delete models after training, which is what you need for phase 1 of finetuning.
+TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
 
 TODO: Hour-long backoff wrapper around streamed datasets, to smooth over HuggingFace outages when streaming.
     - Also spice it up by sending the user an email to notify them of this "hybernation mode".
     - Also save the model.
 
+TODO: Dataset caching. For hyperparameter tuning, you don't want to keep calling .map() each time.
+
+TODO: SuperGLUE
+
+TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
+
 TODO: It would be very cool if there was a callback connected to some kind of messaging
       service, where you could send a signal to kill training and the model will (after the current step) quit and save.
 
+TODO: I would like more decoupling between evaluation and saving.
+    - Be able to save more frequently than evals so that you don't lose hours of progress just because you're scared of the cost of eval.
+
 TODO: Test the resume-from-folder functionality. It isn't properly tested.
+    - Also, this is really too much manual labour. Resuming should be done automatically where possible.
 
 TODO: Tokeniser parallelisation.
 
-TODO: in the Task.train core,
+TODO: in the TaskTrainer.train core,
     - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
     - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
 
@@ -36,3 +32,5 @@ TODO: Implement QA. I wonder if you need a logit transform for this too. The Tra
 
 TODO: I'm not happy with how metrics are set up. It really makes zero sense to embed constructor arguments inside
       the task config to then parse them implicitly (if you didn't forget them) or error (because you did forget them).
+    - Also, a metric should be able to tell at declaration whether it will be able to deliver a requested result, rather
+      than only being able to do a sanity check after it has been computed.

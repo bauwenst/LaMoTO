@@ -1,9 +1,6 @@
-from tst.preamble import *
-
 from archit.instantiation.heads import *
 from lamoto.tasks import *
-from lamoto.tasks._core import getDefaultHyperparameters
-from lamoto.trainer.hyperparameters import *
+from lamoto.training.auxiliary.hyperparameters import *
 
 
 hp = getDefaultHyperparameters()
@@ -69,9 +66,9 @@ def tst_qqp():
 
 if __name__ == "__main__":
     # tst_glue()
-    tst_qnli()
+    # tst_qnli()
     # tst_sts()
-    # tst_pos()
+    tst_pos()
     # tst_ner()
     # tst_cola()
     # tst_dp()

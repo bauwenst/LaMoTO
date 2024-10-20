@@ -1,12 +1,11 @@
-from typing import Protocol, Any, Dict, Type, Union, Optional
+from typing import Protocol, Any, Dict, Type, Optional
 from typing_extensions import Self  # https://stackoverflow.com/a/77247460/9352077
 from abc import ABC, abstractmethod
 from torch import Tensor
 
 import evaluate
-from evaluate import Metric as HuggingfaceMetric
 
-from ..trainer.hyperparameters import TaskHyperparameters, EvaluationEnvironment
+from ..training.auxiliary.hyperparameters import TaskHyperparameters, EvaluationEnvironment
 
 
 class MetricHyperparameters:
