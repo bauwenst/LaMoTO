@@ -233,7 +233,8 @@ class TaskTrainer:
         # Training arguments
         # - Sizes
         stopping_condition = hyperparameters.HARD_STOPPING_CONDITION
-        n_gradient_descents = tryExceptNone(lambda: stopping_condition.getSteps(datasetdict["train"]))
+        n_gradient_descents = tryExceptNone(lambda: stopping_condition.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+                                                                                dataset=datasetdict["train"], split_name="train"))
         wu = hyperparameters.EFFECTIVE_BATCHES_WARMUP  # Alias to shorten this long name.
         if isinstance(wu, int):
             if wu < 0:
@@ -255,8 +256,10 @@ class TaskTrainer:
                 raise ValueError("You indicated that you want to track the best model, but specified no evaluation interval!")
             save_interval = eval_interval
 
-        batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(datasetdict["train"]))
-        batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(datasetdict["train"]))
+        batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+                                                                             dataset=datasetdict["train"], split_name="train"))
+        batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+                                                                             dataset=datasetdict["train"], split_name="train"))
 
         # - Early stopping (only used if required)
         best_model_metric_handle = f"eval_{task.metric_config.to_rank.fullName()}" if hyperparameters.TRACK_BEST_MODEL else None
