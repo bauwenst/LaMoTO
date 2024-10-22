@@ -220,7 +220,7 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
 
     EXAMPLES_PER_EVALUATION=None,
     EVAL_VS_SAVE_INTERVALS=Intervals(
-        evaluation=EveryNDescents(descents=1024),  # Not relative to epoch size because epochs can be insanely massive.
+        evaluation=EveryNDescents(descents=512),  # Not relative to epoch size because epochs can be insanely massive.
         checkpointing=None
     ),
     EVALS_OF_PATIENCE=5,

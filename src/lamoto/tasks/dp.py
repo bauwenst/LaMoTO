@@ -1,6 +1,6 @@
+from typing import List, Dict, Union
 from dataclasses import dataclass
 from collections import Counter
-from typing import List
 
 from datasets import load_dataset
 from transformers import PreTrainedTokenizerBase
@@ -77,6 +77,118 @@ class DataCollatorForDependencyParsing(DataCollatorMixin):
             "attention_mask": attention_mask,
             "labels": (labels_arcs, labels_rels)
         }
+
+
+class TruncatingWordLabelPreprocessor:
+    """
+    Handles tokenisation, truncation, and special-token padding for tasks which have their input pre-segmented into words
+    (like PoS, NER, DP ... often token-level tasks) where possibly some labels are to word indices.
+    """
+
+    def __init__(self, tokenizer: PreTrainedTokenizerBase, max_tokens: int, redirect_to_dummy_if_index_was_truncated: bool):
+        """
+        :param redirect_to_dummy_if_index_was_truncated: Words that are truncated cannot be referred to by their index
+                                                         anymore, so for the remaining words, if such an index is used
+                                                         as label, either you no longer predict anything (False) or you
+                                                         add a dummy token at the end (True) which you predict if you
+                                                         want to signify "the index I had to predict is further away than this".
+        """
+        self._tokenizer = tokenizer
+        self._truncate_to = max_tokens
+        self._end_dummy = redirect_to_dummy_if_index_was_truncated
+
+    def preprocess(self, words: List[str], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+        tokens, indexing_labels, other_labels = self._tokenizeAndTruncate(words, indexing_labels, other_labels)
+        return self._addSpecialsAndShiftIndices(tokens, indexing_labels, other_labels)
+
+    def _tokenizeAndTruncate(self, words: List[str], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+        max_tokens = self._truncate_to - self._tokenizer.num_special_tokens_to_add(pair=False) - 1 - self._end_dummy
+        tokens_so_far = 0
+
+        subword_ids_per_word = []
+        for word_idx, word in enumerate(words):
+            subwords = self._tokenizer(word, add_special_tokens=False)["input_ids"]
+            tokens_so_far += len(subwords)
+            if tokens_so_far < max_tokens:
+                subword_ids_per_word.append(subwords)
+            else:
+                excess = tokens_so_far - max_tokens
+                subword_ids_per_word.append(subwords[:len(subwords) - excess])
+
+                # Cut away the rest of the labels.
+                for field in indexing_labels:
+                    indexing_labels[field] = indexing_labels[field][:word_idx+1]
+                for field in other_labels:
+                    other_labels[field] = other_labels[field][:word_idx+1]
+                break
+
+        return subword_ids_per_word, indexing_labels, other_labels
+
+    def _addSpecialsAndShiftIndices(self, tokens: List[List[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+        """
+        :param indexing_labels: Lists of labels, with each label being the index of one of the words in the inputs. The
+                                assumption is that
+                                    1. These labels are 1-based (the index used to refer to the first word in the input is 1);
+                                    2. The label for "index points to a special unit outside the sentence" is 0.
+        """
+        # Make the 1-based heads (with 0 the root) actually correspond to indices. We add a dummy at index 0 with all labels -100.
+        tokens.insert(0, [self._tokenizer.unk_token_id])  # Needs to be a single-element list because otherwise in the specials mask below it is counted for offsets.
+        for field in indexing_labels:
+            indexing_labels[field].insert(0, -100)
+        for field in other_labels:
+            other_labels[field].insert(0, -100)
+
+        if self._end_dummy:
+            tokens.append([self._tokenizer.unk_token_id])
+            for field in indexing_labels:
+                indexing_labels[field].append(-100)
+            for field in other_labels:
+                other_labels[field].append(-100)
+
+        # Due to truncation, some of the incoming arrows for the remaining words have no starting point (some heads have disappeared).
+        # Set these to -100 if there is no overflow dummy.
+        maximal_index     = len(tokens) - 1  # If a dummy has been added, len(tokens)-1 is the index of the dummy. Word index len(tokens)-1 has been truncated and hence those labels should indeed point to the dummy.
+        replacement_index = len(tokens) - 1 if self._end_dummy else -100
+        for field in indexing_labels:
+            indexing_labels[field] = [index if index <= maximal_index else replacement_index
+                                      for index in indexing_labels[field]]
+
+        # At this point in the code, all index values are correct. Now we introduce specials anywhere in the sequence.
+        tokens_with_specials: List[Union[List[int],int]] = self._tokenizer.build_inputs_with_special_tokens(tokens)
+
+        # The tokeniser's build_inputs_with_special_tokens has inserted special tokens in places we don't know. We now
+        # want to transfer this to the labels, but the labels currently have the wrong length. The only way to correct
+        # them is with a loop that remembers both the index in the original labels and in the new tokens.
+        # First, find how much these specials have offset each word.
+        mask = self._tokenizer.get_special_tokens_mask(tokens_with_specials, already_has_special_tokens=True)  # I trust the implementation for already_has_special_tokens=False more, but you're not allowed to use it with a fast tokenizer apparently.
+        offsets = [sum(mask[:i]) for i in range(len(mask)) if mask[i] != 1]  # Indexable on word indices (where "word" can also be the start or end dummy, since they do not contribute to offsets), so the new head index is head + offsets[head].
+
+        # Insert -100 as the labels of the special tokens, and turn [special, [tokens], special] into [[special], [tokens], [special]].
+        indexing_labels_with_specials = {field: [] for field in indexing_labels}
+        other_labels_with_specials    = {field: [] for field in other_labels}
+
+        old_i = 0
+        for new_i, e in enumerate(tokens_with_specials):
+            is_special = bool(mask[new_i])
+            if is_special:  # Don't advance the cursor in the old label lists. Make up a label of -100 on the spot.
+                assert isinstance(e, int)
+                tokens_with_specials[new_i] = [tokens_with_specials[new_i]]
+                for field in indexing_labels_with_specials:
+                    indexing_labels_with_specials[field].append(-100)
+                for field in other_labels_with_specials:
+                    other_labels_with_specials[field].append(-100)
+            else:
+                assert isinstance(e, list)
+                for field in indexing_labels_with_specials:  # Offset these labels
+                    label = indexing_labels[field][old_i]
+                    indexing_labels_with_specials[field].append(label + offsets[old_i]  if label != -100 else  -100)
+                for field in other_labels_with_specials:  # Copy these labels
+                    label = other_labels[field][old_i]
+                    other_labels_with_specials[field].append(label)
+
+                old_i += 1
+
+        return tokens_with_specials, indexing_labels_with_specials, other_labels_with_specials
 
 
 class DP(Task[DependencyParsingHeadConfig]):
@@ -172,7 +284,33 @@ class DP(Task[DependencyParsingHeadConfig]):
         return torch.tensor([[1]], device=logits[0].device)
 
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+        truncator = TruncatingWordLabelPreprocessor(self.tokenizer, max_tokens=self._getMaxInputLength(), redirect_to_dummy_if_index_was_truncated=False)
+
         def preprocess(example):
+            # First of all: take out all unlabelled words and their corresponding labels. The heads are counted as the
+            # indices in the sequence WITHOUT these words. There are two classes of them:
+            #   - MWEs, in which case the words that follow are the decomposition of said word. For example, the MWE
+            #     "doctor's" would produce the UD words ["doctor's", "doctor", "'s"] and all arcs referring to the index
+            #     of "doctor's" or words after it actually refer to one word in the future (here it would be "doctor").
+            #   - Repetition, like the "excited" in "Grace is more excited to see her than she is excited to see me."
+            words = []
+            heads = []
+            deprels = []
+            for i in range(len(example["tokens"])):
+                if example["head"][i] != "None":
+                    words.append(                 example["tokens"][i])
+                    heads.append(             int(example["head"  ][i]))
+                    deprels.append(self.tag_to_id[example["deprel"][i]])
+
+            tokens, labels1, labels2 = truncator.preprocess(words, {"labels_arcs": heads}, {"labels_rels": deprels})
+            enc = dict()
+            enc["words"] = tokens  # List of lists, because this is the format expected by ArchIt's BaseModelExtended class.
+            enc["labels_arcs"] = labels1["labels_arcs"]
+            enc["labels_rels"] = labels2["labels_rels"]
+            enc["attention_mask"] = [1]*len(tokens)  # word-level attention mask for the head
+            return enc
+
+        def preprocess2(example):
             # First of all: take out all unlabelled words and their corresponding labels. The heads are counted as the
             # indices in the sequence WITHOUT these words. There are two classes of them:
             #   - MWEs, in which case the words that follow are the decomposition of said word. For example, the MWE
@@ -209,7 +347,7 @@ class DP(Task[DependencyParsingHeadConfig]):
                     excess = tokens_so_far - max_tokens
                     subword_ids_per_word[word_idx] = subwords[:len(subwords)-excess]
 
-                    # Cut away the rest of the words.
+                    # Cut away the rest of the words and labels.
                     subword_ids_per_word = subword_ids_per_word[:word_idx+1]
                     heads                = heads[:word_idx+1]
                     deprels              = deprels[:word_idx+1]
@@ -253,12 +391,12 @@ class DP(Task[DependencyParsingHeadConfig]):
                     head   = heads[actual_words_seen]
                     deprel = deprels[actual_words_seen]
 
-                    word_head_labels  .append(head + offsets[head] if head != -100 else head)
+                    word_head_labels  .append(head + offsets[head] if head != -100 else -100)
                     word_deprel_labels.append(deprel)
                     actual_words_seen += 1
 
             enc = dict()
-            enc["words"]       = with_special_tokens_added
+            enc["words"]       = with_special_tokens_added  # List of lists, because this is the format expected by ArchIt's BaseModelExtended class.
             enc["labels_arcs"] = word_head_labels
             enc["labels_rels"] = word_deprel_labels
             enc["attention_mask"] = [1]*len(with_special_tokens_added)  # word-level attention mask for the head

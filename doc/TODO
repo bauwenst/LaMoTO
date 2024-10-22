@@ -12,6 +12,8 @@ TODO: SuperGLUE
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
 
+TODO: Logarithmic intervalling would be cool. A lot of evals at the start and then gradually fewer and fewer.
+
 TODO: It would be very cool if there was a callback connected to some kind of messaging
       service, where you could send a signal to kill training and the model will (after the current step) quit and save.
 

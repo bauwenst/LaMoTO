@@ -1,4 +1,9 @@
+from wiat.training.archit_base import DebertaBaseModel
+
+from tst.preamble import *
+
 from archit.instantiation.heads import *
+from archit.instantiation.basemodels import RobertaBaseModel
 from lamoto.tasks import *
 from lamoto.training.auxiliary.hyperparameters import *
 
@@ -6,6 +11,9 @@ from lamoto.training.auxiliary.hyperparameters import *
 hp = getDefaultHyperparameters()
 hp.SEED = 0
 hp.MODEL_CONFIG_OR_CHECKPOINT = "haisongzhang/roberta-tiny-cased"  # 4 layers, 512 hidden size
+hp.archit_basemodel_class = RobertaBaseModel
+# hp.MODEL_CONFIG_OR_CHECKPOINT = "microsoft/deberta-base"
+# hp.archit_basemodel_class = DebertaBaseModel
 
 
 def tst_pos():
@@ -68,8 +76,8 @@ if __name__ == "__main__":
     # tst_glue()
     # tst_qnli()
     # tst_sts()
-    tst_pos()
+    # tst_pos()
     # tst_ner()
     # tst_cola()
-    # tst_dp()
+    tst_dp()
     # tst_qqp()
