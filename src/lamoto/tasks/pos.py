@@ -5,6 +5,7 @@ from archit.instantiation.heads import TokenClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
+from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
 
 
 class POS(Task[TokenClassificationHeadConfig]):
@@ -34,21 +35,18 @@ class POS(Task[TokenClassificationHeadConfig]):
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        def preprocess(example):
-            enc = self.tokenizer(example["tokens"], is_split_into_words=True,
-                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
-            word_labels  = example["upos"]  # Note: this is already a list of integers.
-            token_labels = []
+        flattener = FlattenWordLabels(tokenizer=self.tokenizer,
+                                      max_tokens=self._getMaxInputLength(),
+                                      add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,
+                                      pooling_mode=LabelPooling.LAST)
 
-            word_ids = enc.word_ids()
-            for i in range(len(word_ids)):
-                if word_ids[i] is not None and (i == 0 or word_ids[i] != word_ids[i-1]):  # First-only pooling is better for NER (due to capitals): https://aclanthology.org/2021.eacl-main.194.pdf
-                    token_labels.append(word_labels[word_ids[i]])
-                else:
-                    token_labels.append(-100)
-
-            enc["labels"] = token_labels
-            return enc
+        def preprocess(example: dict):
+            input_ids, labels = flattener.preprocess(example["tokens"], {"labels": example["upos"]})
+            return {
+                "input_ids": input_ids,
+                "labels": labels["labels"],
+                "attention_mask": [1]*len(input_ids)
+            }
 
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["tokens", "idx", "text", "lemmas", "upos", "xpos", "feats", "head", "deprel", "deps", "misc"])

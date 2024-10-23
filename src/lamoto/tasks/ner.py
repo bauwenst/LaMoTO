@@ -6,6 +6,7 @@ from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 
 from ._core import *
+from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
 
 
 class NER(Task[TokenClassificationHeadConfig]):
@@ -34,21 +35,17 @@ class NER(Task[TokenClassificationHeadConfig]):
         return load_dataset("conll2003")
 
     def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+        tokenise_truncate_flatten = FlattenWordLabels(tokenizer=self.tokenizer,
+                                                      max_tokens=self._getMaxInputLength(),
+                                                      add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,
+                                                      pooling_mode=LabelPooling.FIRST)  # Only learn from the first token, which is easiest for NER (due to capitals): https://aclanthology.org/2021.eacl-main.194.pdf
         def preprocess(example):
-            enc = self.tokenizer(example["tokens"], is_split_into_words=True,
-                                 add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
-            word_labels  = example["ner_tags"]
-            token_labels = []
-
-            word_ids = enc.word_ids()
-            for i in range(len(word_ids)):
-                if word_ids[i] is not None and (i == 0 or word_ids[i] != word_ids[i-1]):  # First-only pooling is better for NER (due to capitals): https://aclanthology.org/2021.eacl-main.194.pdf
-                    token_labels.append(word_labels[word_ids[i]])
-                else:
-                    token_labels.append(-100)
-
-            enc["labels"] = token_labels
-            return enc
+            tokens, labels = tokenise_truncate_flatten.preprocess(example["tokens"], {"ner_tags": example["ner_tags"]})
+            return {
+                "input_ids": tokens,
+                "attention_mask": [1]*len(tokens),
+                "labels": labels["ner_tags"]
+            }
 
         dataset = dataset.map(preprocess, batched=False)
         dataset = dataset.remove_columns(["tokens", "id", "chunk_tags", "pos_tags", "ner_tags"])
