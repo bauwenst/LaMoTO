@@ -25,6 +25,7 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     SAVE_AS=None,
     WANDB_PROJECT=None,
     traceless=False,
+    store_in_hf_cache=False,
 
     EXAMPLES_PER_EFFECTIVE_BATCH=8192,
     EXAMPLES_PER_DEVICEBATCH=64,  # Should definitely fit on an A100.
@@ -80,7 +81,7 @@ class MLM(Task[MaskedLMHeadConfig]):
         self._use_packing = packing
         self._use_pppl = use_pppl
 
-    def prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
+    def _prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
         def preprocess(example):
             return self.tokenizer(example["text"], is_split_into_words=False, add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
 
@@ -117,12 +118,12 @@ class MLM(Task[MaskedLMHeadConfig]):
 
 
 class MLM_C4(MLM):
-    def loadDataset(self) -> IterableDatasetDict:
+    def _loadDataset(self) -> IterableDatasetDict:
         dataset: datasets.IterableDatasetDict = datasets.load_dataset("allenai/c4", "en", streaming=True)
         return dataset.remove_columns(["timestamp", "url"])
 
 
 class MLM_SlimPajama(MLM):
-    def loadDataset(self) -> IterableDatasetDict:
+    def _loadDataset(self) -> IterableDatasetDict:
         dataset: datasets.IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True, trust_remote_code=True)
         return dataset.remove_columns(["meta"])

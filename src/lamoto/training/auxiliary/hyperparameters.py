@@ -155,7 +155,8 @@ class Intervals:
 class TaskHyperparameters(Generic[HC]):
     SAVE_AS: Optional[str]  # Not necessary if a checkpoint name is given.
     WANDB_PROJECT: Optional[str]
-    traceless: bool  # Whether to keep any model and any graph of intermediate results at the end of training, or only the evaluation results.
+    traceless: bool  # Whether to discard any model and any graph of intermediate results and only the evaluation results, or to keep graphs and the usual two checkpoints.
+    store_in_hf_cache: bool  # Whether to store model checkpoints in the HF_HOME cache folder, or just the CWD.
 
     # Sizes
     # - An "effective batch" is all the examples used to compute the gradient of one step of gradient descent.
@@ -212,6 +213,7 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     SAVE_AS=None,
     WANDB_PROJECT=None,
     traceless=False,
+    store_in_hf_cache=False,
 
     EXAMPLES_PER_EFFECTIVE_BATCH=32,
     EXAMPLES_PER_DEVICEBATCH=32,

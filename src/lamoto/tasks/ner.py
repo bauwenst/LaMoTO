@@ -31,10 +31,10 @@ class NER(Task[TokenClassificationHeadConfig]):
             num_labels=len(self.tagset)  # == 9 == len(['O', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG', 'B-LOC', 'I-LOC', 'B-MISC', 'I-MISC'])
         )
 
-    def loadDataset(self) -> DatasetDict:
+    def _loadDataset(self) -> DatasetDict:
         return load_dataset("conll2003")
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         tokenise_truncate_flatten = FlattenWordLabels(tokenizer=self.tokenizer,
                                                       max_tokens=self._getMaxInputLength(),
                                                       add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,

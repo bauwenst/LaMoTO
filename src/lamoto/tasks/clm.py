@@ -28,6 +28,7 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     SAVE_AS=None,
     WANDB_PROJECT=None,
     traceless=False,
+    store_in_hf_cache=False,
 
     EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
     EXAMPLES_PER_DEVICEBATCH = 64,  # Used to fit on an A100, but recently got an error saying 80 GiB got filled
@@ -77,7 +78,7 @@ class CLM(Task[CausalLMHeadConfig]):
             automodel_class=AutoModelForCausalLM
         )
 
-    def prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
+    def _prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
         dataset["train"] = PackedDataset(dataset["train"], self.tokenizer, context_length=self._getMaxInputLength())
         # Note: the validation dataset in CLM is left untokenised. That's because (1) it is an IterableDataset and
         # hence can't be preprocessed anyway -- every evaluation it is re-tokenised -- and (2) the dataset is only
@@ -97,5 +98,5 @@ class CLM(Task[CausalLMHeadConfig]):
 
 class PretrainingC4(CLM):
 
-    def loadDataset(self) -> IterableDatasetDict:
+    def _loadDataset(self) -> IterableDatasetDict:
         return datasets.load_dataset("allenai/c4", "en", streaming=True)

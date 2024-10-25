@@ -14,6 +14,7 @@ from ._core import *
 from ..measuring import DependencyParsingMetrics
 from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import WordLevelPreprocessorWithDummies
+from ..util.visuals import log
 
 
 def relu(x):
@@ -109,24 +110,25 @@ class DP(Task[DependencyParsingHeadConfig]):
 
             num_labels=len(self.tagset)
         )
+        self._metric: DependencyParsingMetrics = self.metrics["attachment"]
 
-    def loadDataset(self) -> DatasetDict:
+    def _loadDataset(self) -> DatasetDict:
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def getTagset(self) -> Counter:
-        print("Generating tagset manually...")
+        log("Generating tagset manually...")
         counter = Counter()
         dataset = self.loadDataset()
         for split in dataset:
             for label_sequence in dataset[split]["deprel"]:
                 counter.update(label_sequence)
-        print("Finished generating tagset.")
+        log("Finished generating tagset.")
         return counter
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):
         hp.archit_head_config.num_labels = len(self.tagset)
 
-    def sneakyLogitTransform(self, logits, labels):
+    def sneakyLogitTransform(self, logits: Tuple[torch.Tensor,torch.Tensor], labels: Tuple[torch.Tensor,torch.Tensor]):
         """
         Here's the reasoning behind this method.
 
@@ -169,10 +171,10 @@ class DP(Task[DependencyParsingHeadConfig]):
         The first two approaches have their place too, namely when you want metrics that aren't logit-based, like strided
         PPL in causal LM. That's not the case for DP though.
         """
-        self.metrics["attachment"].add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
+        self._metric.add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
         return torch.tensor([[1]], device=logits[0].device)
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         filter_and_correct = FilterAndCorrectUDtypes(self.tag_to_id)
         truncator = WordLevelPreprocessorWithDummies(self.tokenizer, max_tokens=self._getMaxInputLength(), add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS, redirect_to_dummy_if_index_was_truncated=False)
 

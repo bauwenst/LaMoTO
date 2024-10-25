@@ -4,11 +4,12 @@ from pathlib import Path
 import json
 import time
 import torch
-import transformers
 import wandb
+import transformers
 from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer
 from transformers.trainer_utils import has_length
 from transformers.utils.logging import set_verbosity_error
+from huggingface_hub.constants import HF_HUB_CACHE
 
 from archit.instantiation.abstracts import CombinedConfig
 from archit.util import torchPrint, parameterCountBaseVsHead
@@ -27,7 +28,7 @@ from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckp
 from .auxiliary.hyperparameters import *
 from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
-from ..util.exceptions import tryExceptNone
+from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import log, printLamotoWelcome
 
@@ -103,7 +104,7 @@ class TaskTrainer:
                     if n_examples_per_pass_per_device & (n_examples_per_pass_per_device-1) == 0:  # The only numbers for which -1 flips all the bits are powers of 2.
                         break
             else:
-                raise ValueError("Impossible.")
+                raise ImpossibleBranchError()
             n_examples_per_pass = n_devices * n_examples_per_pass_per_device
         n_passes = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_examples_per_pass
 
@@ -136,7 +137,10 @@ class TaskTrainer:
                                 + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
                                 + f"_{task.task_name}_{datetimeDashed()}"
 
-        folder_to_this_models_checkpoints = LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_model_identifier)
+        if hyperparameters.store_in_hf_cache:
+            folder_to_this_models_checkpoints = LamotoPaths.append(Path(HF_HUB_CACHE), global_model_identifier)  # If that first path doesn't exist yet, it will be created automatically.
+        else:
+            folder_to_this_models_checkpoints = LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_model_identifier)
 
         # Set up tokeniser
         log("Loading tokeniser...")
@@ -199,7 +203,7 @@ class TaskTrainer:
                 log(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({task.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({task.automodel_class.__name__}) instead of ArchIt.")
                 model: PreTrainedModel = task.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **task.automodel_args)
             else:
-                raise RuntimeError()
+                raise ImpossibleBranchError()
         model.config.pad_token_id = task.model_config.base_model_config.pad_token_id  # task.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
 
         # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.

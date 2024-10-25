@@ -26,7 +26,7 @@ class POS(Task[TokenClassificationHeadConfig]):
             num_labels=len(self.tagset)
         )
 
-    def loadDataset(self) -> DatasetDict:
+    def _loadDataset(self) -> DatasetDict:
         """
         Can use many datasets, since PoS tags sometimes come with a dataset meant for a different purpose.
         For example, you can actually reuse the entirety of the NER task and just replace "ner_tags" by "pos_tags" since
@@ -34,7 +34,7 @@ class POS(Task[TokenClassificationHeadConfig]):
         """
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         flattener = FlattenWordLabels(tokenizer=self.tokenizer,
                                       max_tokens=self._getMaxInputLength(),
                                       add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,

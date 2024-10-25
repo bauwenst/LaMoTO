@@ -26,7 +26,7 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
         self._num_labels = num_labels
         self._is_regressive = is_regressive
 
-    def loadDataset(self) -> DatasetDict:
+    def _loadDataset(self) -> DatasetDict:
         # Since GLUE tasks don't have test labels, we create our own test split from the training set, with same size as validation set.
         original_datasetdict = load_dataset("glue", self.task_name)
         new_datasetdict      = original_datasetdict["train"].train_test_split(
@@ -86,7 +86,7 @@ class CompareSentencesGLUETask(GLUETask):
         self._field1 = text_field1
         self._field2 = text_field2
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             return self.tokenizer(example[self._field1], example[self._field2], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,
                                   truncation=True, max_length=self._getMaxInputLength())
@@ -117,7 +117,7 @@ class ClassifySentenceGLUETask(GLUETask):
             num_labels=2
         )
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             return self.tokenizer(example["sentence"], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,  # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
                                   truncation=True, max_length=self._getMaxInputLength())

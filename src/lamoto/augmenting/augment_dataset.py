@@ -79,8 +79,8 @@ class TaskWithAugmentedDataset(TaskWrapper):
         self._augmentation = augmentation
         self._splits = splits
 
-    def loadDataset(self) -> DatasetDict:
-        splits = self._method_implementations.loadDataset()
+    def _loadDataset(self) -> DatasetDict:
+        splits = self._method_implementations._loadDataset()
         for split_name in self._splits:
             splits[split_name] = self._augmentation.augment(splits[split_name])
         return splits

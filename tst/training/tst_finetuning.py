@@ -79,5 +79,5 @@ if __name__ == "__main__":
     # tst_pos()
     # tst_ner()
     # tst_cola()
-    tst_dp()
-    # tst_qqp()
+    # tst_dp()
+    tst_qqp()

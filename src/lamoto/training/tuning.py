@@ -18,10 +18,10 @@ class MetaHyperparameters:
     n_grid_samples: int
 
     max_examples_phase_1: int
-    max_evals_phase_1: int
+    minmax_evals_phase_1: int  # When the maximum amount of examples is reached, this is the minimum amount of evals that have been done. (It can be higher when epochs are smaller than this.)
 
     max_examples_phase_2: int
-    max_evals_phase_2: int
+    minmax_evals_phase_2: int
 
     rank_by: RankingMetricSpec
 
@@ -76,7 +76,7 @@ class TaskTuner:
         best_sample = self._phase1(task, hp, meta)
 
         # Apply best hp changes
-        hp.HARD_STOPPING_CONDITION = original_stopping_condition
+        hp.HARD_STOPPING_CONDITION = original_stopping_condition  # FIXME: We override this in phase 2 regardless... Maybe allow both custom stopping condition and automatic stopping condition?
         hp.traceless               = original_traceless
         return self._phase2(task, hp, meta, best_sample)
 
@@ -88,7 +88,7 @@ class TaskTuner:
         hp.traceless = True
         hp.TRACK_BEST_MODEL = True
         hp.HARD_STOPPING_CONDITION = AfterNExamples(meta.max_examples_phase_1)  # Independent of batch size.
-        hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_1 // meta.max_evals_phase_1)
+        hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_1 // meta.minmax_evals_phase_1)
         hp.EXAMPLES_PER_EVALUATION = None  # Inference should be fast enough to process anything in GLUE quickly enough.
 
         # Grid setup
@@ -136,7 +136,7 @@ class TaskTuner:
         Use the best hyperparameters you found and run until you can't.
         """
         hp.HARD_STOPPING_CONDITION = AfterNExamples(meta.max_examples_phase_2)
-        hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_2 // meta.max_evals_phase_2)
+        hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_2 // meta.minmax_evals_phase_2)
 
         self._setSample(hp, best_sample)
         log("Starting long tuning for best hyperparameters:", best_sample)

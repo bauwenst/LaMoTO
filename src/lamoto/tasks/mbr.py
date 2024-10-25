@@ -90,7 +90,7 @@ class MBR(Task[TokenClassificationHeadConfig]):
     def _datasetInContext(self) -> Iterable[dict]:
         raise RuntimeError("No in-context dataset exists currently.")
 
-    def loadDataset(self) -> DatasetDict:
+    def _loadDataset(self) -> DatasetDict:
         iterable = self._datasetOutOfContext() if self.single_word_dataset else self._datasetInContext()
 
         # Turn iterable into a Dataset. TODO: Not sure how sane this is. Works for small morphological datasets, but it should be as lazy as possible, rather than loading the whole dataset into memory at once.
@@ -105,7 +105,7 @@ class MBR(Task[TokenClassificationHeadConfig]):
             "test": datasetdict_valid_vs_test["test"]
         })
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             output = self.tokenizer(example["text"], add_special_tokens=False,
                                     # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.

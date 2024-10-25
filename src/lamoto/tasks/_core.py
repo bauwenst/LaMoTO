@@ -15,7 +15,7 @@ from archit.instantiation.abstracts import ModelWithHead
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric
 from ..training.auxiliary.hyperparameters import TaskHyperparameters, getDefaultHyperparameters, PC, HC
-from ..util.visuals import warn
+from ..util.visuals import warn, log
 
 
 @dataclass
@@ -40,7 +40,7 @@ class Task(ABC, Generic[HC]):
 
     def __init__(self, task_name: str, metric_config: MetricSetup,
                  archit_class: Type[ModelWithHead[PC,HC]], automodel_class: Type[_BaseAutoModelClass], **automodel_args):
-        self.task_name       = task_name
+        self.task_name       = task_name.lower()
         self.metric_config   = metric_config
         self.archit_class    = archit_class
         self.automodel_class = automodel_class
@@ -53,12 +53,16 @@ class Task(ABC, Generic[HC]):
         self.model_config: PretrainedConfig = None
         self.metrics: Dict[str, Metric] = None
 
+        # Caches
+        self._dataset_cache_raw: DatasetDict      = None
+        self._dataset_cache_prepared: DatasetDict = None
+
     @abstractmethod
-    def loadDataset(self) -> DatasetDict:
+    def _loadDataset(self) -> DatasetDict:
         pass
 
     @abstractmethod
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         pass
 
     @abstractmethod
@@ -77,6 +81,18 @@ class Task(ABC, Generic[HC]):
         return logits
 
     ####################################################################################################################
+
+    def loadDataset(self) -> DatasetDict:
+        if self._dataset_cache_raw is None:
+            log("Dataset cache will be imputed.")
+            self._dataset_cache_raw = self._loadDataset()
+        return self._dataset_cache_raw
+
+    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+        if self._dataset_cache_prepared is None:
+            log("Prepared dataset cache will be imputed.")
+            self._dataset_cache_prepared = self._prepareDataset(dataset)
+        return self._dataset_cache_prepared
 
     def _computeMetrics(self, eval: EvalPrediction) -> dict:
         predictions, references = self.getPredictionsAndReferences(eval)
@@ -161,11 +177,11 @@ class TaskWrapper(Task[HC]):
         )
         self._method_implementations: Task[HC] = task
 
-    def loadDataset(self) -> DatasetDict:
-        return self._method_implementations.loadDataset()
+    def _loadDataset(self) -> DatasetDict:
+        return self._method_implementations._loadDataset()
 
-    def prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        return self._method_implementations.prepareDataset(dataset)
+    def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+        return self._method_implementations._prepareDataset(dataset)
 
     def getCollator(self) -> DataCollator:
         return self._method_implementations.getCollator()

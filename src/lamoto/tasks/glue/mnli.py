@@ -12,7 +12,7 @@ class MNLI(CompareSentencesGLUETask):
     def __init__(self):
         super().__init__("mnli", num_labels=3, text_field1="premise", text_field2="hypothesis")
 
-    def loadDataset(self) -> DatasetDict:
+    def _loadDataset(self) -> DatasetDict:
         original_datasetdict = load_dataset("glue", self.task_name)
         new_datasetdict      = original_datasetdict["train"].train_test_split(
             test_size=len(original_datasetdict["validation_mismatched"])/len(original_datasetdict["train"]),

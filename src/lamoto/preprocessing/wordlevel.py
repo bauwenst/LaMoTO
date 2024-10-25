@@ -2,6 +2,8 @@ from enum import Enum
 from typing import List, Dict, Tuple, Any, Union, Optional
 from transformers import PreTrainedTokenizerBase
 
+from ..util.exceptions import ImpossibleBranchError
+
 
 class WordLevelPreprocessor:
     """
@@ -180,7 +182,7 @@ class FlattenWordLabels(WordLevelPreprocessor):
                 elif self._pooling == LabelPooling.ALL:
                     extra_flattened_labels = [actual_label]*n_subwords
                 else:
-                    raise RuntimeError("Impossible.")
+                    raise ImpossibleBranchError()
                 flattened_labels[field].extend(extra_flattened_labels)
 
         return flattened_tokens, flattened_labels
