@@ -11,7 +11,7 @@ from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
 class POS(Task[TokenClassificationHeadConfig]):
 
     def __init__(self):
-        self.tagset = ["B-" + tag for tag in self.loadDataset()["train"].features["upos"].feature.names]
+        self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"].feature.names]
         super().__init__(
             task_name="pos",
             metric_config=MetricSetup(

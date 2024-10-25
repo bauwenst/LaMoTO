@@ -16,7 +16,7 @@ class NER(Task[TokenClassificationHeadConfig]):
     """
 
     def __init__(self):
-        self.tagset = self.loadDataset()["train"].features["ner_tags"].feature.names
+        self.tagset = self._loadDataset()["train"].features["ner_tags"].feature.names
         super().__init__(
             task_name="ner",
             metric_config=MetricSetup(

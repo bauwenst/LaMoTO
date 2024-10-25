@@ -118,7 +118,7 @@ class DP(Task[DependencyParsingHeadConfig]):
     def getTagset(self) -> Counter:
         log("Generating tagset manually...")
         counter = Counter()
-        dataset = self.loadDataset()
+        dataset = self._loadDataset()
         for split in dataset:
             for label_sequence in dataset[split]["deprel"]:
                 counter.update(label_sequence)

@@ -140,7 +140,7 @@ class Task(ABC, Generic[HC]):
                 return n
         except:
             if "max_position_embeddings" in self.model_config.attribute_map:  # All PretrainedConfig classes have an attribute map.
-                return self.model_config.__dict__[self.model_config.attribute_map["max_position_embeddings"]]
+                return getattr(self.model_config, self.model_config.attribute_map["max_position_embeddings"])
             else:
                 raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
 

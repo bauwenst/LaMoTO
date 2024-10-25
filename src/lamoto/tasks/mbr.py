@@ -35,6 +35,7 @@ from archit.instantiation.heads import TokenClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
+from ..training.auxiliary.hyperparameters import NEveryEpoch
 
 
 ##################################
@@ -42,7 +43,7 @@ SUGGESTED_HYPERPARAMETERS_MBR = getDefaultHyperparameters()
 SUGGESTED_HYPERPARAMETERS_MBR.CHECKPOINT_OR_CONFIG = "google/canine-c"
 SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER = "google/canine-c"
 SUGGESTED_HYPERPARAMETERS_MBR.EFFECTIVE_BATCHES_WARMUP = 1000
-SUGGESTED_HYPERPARAMETERS_MBR.EVAL_VS_SAVE_INTERVALS.evaluation = NEveryEpoch(per_epoch=9, effective_batch_size=SUGGESTED_HYPERPARAMETERS_MBR.EXAMPLES_PER_EFFECTIVE_BATCH)
+SUGGESTED_HYPERPARAMETERS_MBR.EVAL_VS_SAVE_INTERVALS.evaluation = NEveryEpoch(per_epoch=9)
 
 DATASET: ModestDataset[WordSegmentation] = English_Celex()
 ##################################
