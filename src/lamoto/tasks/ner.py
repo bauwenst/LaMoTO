@@ -32,7 +32,7 @@ class NER(Task[TokenClassificationHeadConfig]):
         )
 
     def _loadDataset(self) -> DatasetDict:
-        return load_dataset("conll2003")
+        return load_dataset("eriktks/conll2003", trust_remote_code=True)
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         tokenise_truncate_flatten = FlattenWordLabels(tokenizer=self.tokenizer,
