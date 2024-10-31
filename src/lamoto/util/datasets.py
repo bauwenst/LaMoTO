@@ -1,7 +1,7 @@
 import time
 import warnings
 from copy import deepcopy
-from typing import Iterable, Union, TypeVar, Generator
+from typing import Iterable, Union, TypeVar, Generator, List
 from transformers import PreTrainedTokenizerBase
 from abc import ABC
 
@@ -33,6 +33,20 @@ def getDatasetSize(dataset: DatasetInfoMixin, split: str="train"):  # DatasetInf
             return dataset.info.splits[split].num_examples
         except:
             raise ValueError(f"Could not resolve size of dataset split '{split}'.")  # This is e.g. the case for the SlimPajama dataset.
+
+
+def sortSplits(splits: Iterable[str]) -> List[str]:
+    def splitSortKey(split: str):
+        if "tr" in split:
+            return 0
+        elif "va" in split:
+            return 1
+        elif "te" in split:
+            return 2
+        else:
+            return 3
+
+    return sorted(splits, key=splitSortKey)
 
 
 def totalBatches(total_examples: int, batch_size: int):

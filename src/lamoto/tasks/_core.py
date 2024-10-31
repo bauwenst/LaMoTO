@@ -167,9 +167,9 @@ class TaskWrapper(Task[HC]):
     A task which, by default, steals all the implementations from an underlying task.
     """
 
-    def __init__(self, task: Task[HC]):
+    def __init__(self, task: Task[HC], wrapper_name: str):
         super().__init__(
-            task_name=task.task_name,
+            task_name=task.task_name + "+" + wrapper_name,
             metric_config=task.metric_config,
             archit_class=task.archit_class,
             automodel_class=task.automodel_class,

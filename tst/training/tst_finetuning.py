@@ -1,9 +1,7 @@
-from wiat.training.archit_base import DebertaBaseModel
-
 from tst.preamble import *
 
 from archit.instantiation.heads import *
-from archit.instantiation.basemodels import RobertaBaseModel
+from archit.instantiation.basemodels import RobertaBaseModel, DebertaBaseModel
 from lamoto.tasks import *
 from lamoto.training.auxiliary.hyperparameters import *
 
@@ -77,7 +75,7 @@ if __name__ == "__main__":
     # tst_qnli()
     # tst_sts()
     # tst_pos()
-    tst_ner()
+    # tst_ner()
     # tst_cola()
-    # tst_dp()
+    tst_dp()
     # tst_qqp()

@@ -133,9 +133,9 @@ class TaskTrainer:
         else:  # We don't use the tokeniser name because it isn't directly related to the model.
             raise RuntimeError("Cannot deduce name to save model as from a config.")
 
-        global_model_identifier = model_name \
-                                + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
-                                + f"_{task.task_name}_{datetimeDashed()}"
+        global_model_identifier = model_name + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
+                                + f"_{task.task_name}" \
+                                + f"_{datetimeDashed()}"
 
         if hyperparameters.store_in_hf_cache:
             folder_to_this_models_checkpoints = LamotoPaths.append(Path(HF_HUB_CACHE), global_model_identifier)  # If that first path doesn't exist yet, it will be created automatically.
