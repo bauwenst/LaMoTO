@@ -110,7 +110,7 @@ class DP(Task[DependencyParsingHeadConfig]):
 
             num_labels=len(self.tagset)
         )
-        self._metric: DependencyParsingMetrics = self.metrics["attachment"]
+        self._metric: DependencyParsingMetrics = None
 
     def _loadDataset(self) -> DatasetDict:
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
@@ -171,6 +171,8 @@ class DP(Task[DependencyParsingHeadConfig]):
         The first two approaches have their place too, namely when you want metrics that aren't logit-based, like strided
         PPL in causal LM. That's not the case for DP though.
         """
+        if self._metric is None:  # At initialisation, the metric objects haven't been loaded yet.
+            self._metric = self.metrics["attachment"]
         self._metric.add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
         return torch.tensor([[1]], device=logits[0].device)
 

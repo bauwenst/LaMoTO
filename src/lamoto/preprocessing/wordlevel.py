@@ -3,6 +3,7 @@ from typing import List, Dict, Tuple, Any, Union, Optional
 from transformers import PreTrainedTokenizerBase
 
 from ..util.exceptions import ImpossibleBranchError
+from ..util.visuals import log
 
 
 class WordLevelPreprocessor:
@@ -27,27 +28,66 @@ class WordLevelPreprocessor:
         return tokens, indexing_labels, other_labels
 
     def tokenizeAndTruncate(self, words: List[str], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+        """
+        Tokenise the words into subwords, stopping (possibly truncating the subwords of the last word that was tokenised)
+        once we reach the maximally allowed amount of tokens.
+
+        All words with no tokens in the result have their labels removed. For those words that remain, indexing labels
+        are altered when they refer to words that were removed NOT due to truncation OR to words that come after such words.
+
+        The assumption is made that the indexing labels are 1-based.
+        """
         max_tokens = self._truncate_to - self.reservedForSpecials()
         tokens_so_far = 0
 
         subword_ids_per_word = []
-        for word_idx, word in enumerate(words):
-            subwords = self._tokenizer(word, add_special_tokens=False)["input_ids"]
+        indexing_labels_truncated = {field: [] for field in indexing_labels}
+        other_labels_truncated    = {field: [] for field in other_labels}
+        removed_indices = []
+        for word_idx,word in enumerate(words):
+            subwords = list(self._tokenizer(word, add_special_tokens=False)["input_ids"])
+            if not subwords:
+                log(f"\tSkipping labels related to the word '{word}' because it is tokenised into 0 tokens.")
+                # No tokens means no embeddings means no logit to compare to the label.
+                #   => Don't add the empty list of tokens.
+                #   => Don't add the labels OF this word
+                #      AND every word referring TO this word should get a label of -100
+                #      AND every word referring to a word AFTER this word should have that index shifted down.
+                # Note: you should obviously avoid having the tokeniser output 0 tokens for a word, because that means
+                # the word is as meaningless as an empty string, and taking away labels may arbitrarily boost test results.
+                removed_indices.append(1 + word_idx)
+                continue
+
             tokens_so_far += len(subwords)
+            for field in indexing_labels_truncated:
+                indexing_labels_truncated[field].append(indexing_labels[field][word_idx])
+            for field in other_labels_truncated:
+                other_labels_truncated[field].append(other_labels[field][word_idx])
+
             if tokens_so_far < max_tokens:
                 subword_ids_per_word.append(subwords)
-            else:
+            else:  # Due to this 'else', we know that at the start of an iteration, there is always at least 1 more token of capacity.
                 excess = tokens_so_far - max_tokens
                 subword_ids_per_word.append(subwords[:len(subwords) - excess])
-
-                # Cut away the rest of the labels.
-                for field in indexing_labels:
-                    indexing_labels[field] = indexing_labels[field][:word_idx+1]
-                for field in other_labels:
-                    other_labels[field] = other_labels[field][:word_idx+1]
                 break
 
-        return subword_ids_per_word, indexing_labels, other_labels
+        # Set labels to -100 if they refer to removed words, and shift down labels referring to words after removed words.
+        for j in range(len(removed_indices)):
+            r = removed_indices[j]
+            for field in indexing_labels_truncated:
+                labels = indexing_labels_truncated[field]
+                for i in range(len(labels)):
+                    l = labels[i]
+                    if l > r:
+                        labels[i] = l - 1
+                    elif l == r:
+                        labels[i] = -100
+
+            # Now that all fields have been downshifted, the remaining indices to find also need to be downshifted.
+            for i in range(j+1, len(removed_indices)):
+                removed_indices[i] -= 1
+
+        return subword_ids_per_word, indexing_labels_truncated, other_labels_truncated
 
     def addSpecialsAndShiftIndices(self, tokens: List[List[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
         # Now we introduce specials anywhere in the sequence.
@@ -109,6 +149,7 @@ class WordLevelPreprocessorWithDummies(WordLevelPreprocessor):
         tokens, indexing_labels, other_labels = self.addDummies(tokens, indexing_labels, other_labels)
         if self._add_specials:
             tokens, indexing_labels, other_labels = self.addSpecialsAndShiftIndices(tokens, indexing_labels, other_labels)
+        print(tokens)
         return tokens, indexing_labels, other_labels
 
     def addDummies(self, tokens: List[List[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:

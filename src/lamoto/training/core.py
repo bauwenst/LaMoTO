@@ -229,7 +229,7 @@ class TaskTrainer:
             project=hyperparameters.WANDB_PROJECT,
             group=model_name,
             name=global_model_identifier,
-            tags=[task.task_name] + ([model_augmentation.name] if model_augmentation else []),
+            tags=[task.task_name, torch.cuda.get_device_name()] + ([model_augmentation.name] if model_augmentation else []),
 
             dir=folder_wandb.as_posix()
         )
@@ -290,7 +290,7 @@ class TaskTrainer:
 
             # Evaluation
             eval_on_start=not isinstance(eval_interval, Never),  # Always do an evaluation at the start, unless you wanted to avoid all evaluations.
-            evaluation_strategy=IntervalStrategy.STEPS if batches_between_evals else IntervalStrategy.NO,
+            eval_strategy=IntervalStrategy.STEPS if batches_between_evals else IntervalStrategy.NO,
             eval_steps=batches_between_evals,
             per_device_eval_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,  # We know that the GPU can handle at least this much data during eval if it can during training, since training additionally requires the gradients and optimiser to be stored in VRAM as overhead.
             eval_accumulation_steps=1,  # "Number of predictions steps to accumulate the output tensors for, before moving the results to the CPU. If left unset, all predictions are accumulated on GPU before being moved to the CPU (faster but requires more GPU memory)." You always need more RAM than VRAM, of course.
@@ -426,7 +426,10 @@ class TaskTrainer:
             if batches_between_evals:
                 print("\t", pluralise(batches_between_evals, "training batch", "es"), "between evals")
             if batches_per_epoch and batches_between_evals:
-                print("\t", pluralise(batches_per_epoch // batches_between_evals, "eval"), "per training epoch")
+                if batches_per_epoch > batches_between_evals:
+                    print("\t", pluralise(round(batches_per_epoch / batches_between_evals, 2), "eval"), "per training epoch")
+                else:
+                    print("\t", pluralise(round(batches_between_evals / batches_per_epoch, 2), "training epoch"), "per eval")
         else:
             print("\t", "No sizes known.")
         print("="*50)
