@@ -55,7 +55,7 @@ class TaskTrainer:
         Encapsulation of everything you need to do to get a Trainer running.
         """
         printLamotoWelcome()
-        log("Running task:", task.__class__.__name__)
+        log("Running task:", task.task_name)
         transformers.set_seed(seed=hyperparameters.SEED)
         if not DO_WARNINGS_AND_PROGRESSBARS:
             set_verbosity_error()
@@ -178,7 +178,7 @@ class TaskTrainer:
         collator = task.getCollator()
 
         # Get the model...  FIXME: Somehow, the DP head uses an operation that doesn't exist for bfloat16. Temporary fix below.
-        task.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() and task.__class__.__name__ != "DP" else torch.float32
+        task.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() and not task.task_name.startswith("dp") else torch.float32
 
         hf_checkpoint_classname = task.model_config.architectures[0] if task.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
         is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and task._isHfCheckpointForThisTask(hf_checkpoint_classname)

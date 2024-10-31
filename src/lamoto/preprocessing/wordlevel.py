@@ -149,7 +149,6 @@ class WordLevelPreprocessorWithDummies(WordLevelPreprocessor):
         tokens, indexing_labels, other_labels = self.addDummies(tokens, indexing_labels, other_labels)
         if self._add_specials:
             tokens, indexing_labels, other_labels = self.addSpecialsAndShiftIndices(tokens, indexing_labels, other_labels)
-        print(tokens)
         return tokens, indexing_labels, other_labels
 
     def addDummies(self, tokens: List[List[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
