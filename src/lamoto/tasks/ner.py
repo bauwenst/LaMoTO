@@ -18,7 +18,7 @@ class NER(Task[TokenClassificationHeadConfig]):
     def __init__(self):
         self.tagset = self._loadDataset()["train"].features["ner_tags"].feature.names
         super().__init__(
-            task_name="ner",
+            task_name="NER",
             metric_config=MetricSetup(
                 to_compute=["seqeval"],
                 to_track={

@@ -178,7 +178,7 @@ class TaskTrainer:
         collator = task.getCollator()
 
         # Get the model...  FIXME: Somehow, the DP head uses an operation that doesn't exist for bfloat16. Temporary fix below.
-        task.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() and not task.task_name.startswith("dp") else torch.float32
+        task.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() and not task.task_name.lower().startswith("dp") else torch.float32
 
         hf_checkpoint_classname = task.model_config.architectures[0] if task.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
         is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and task._isHfCheckpointForThisTask(hf_checkpoint_classname)
@@ -436,7 +436,7 @@ class TaskTrainer:
 
         # Train, and evaluate afterwards.
         try:
-            log(f"Training model {model.__class__.__name__} on task {task.__class__.__name__} on device {model.device}...")
+            log(f"Training model {model.__class__.__name__} on task {task.task_name} on device {model.device}...")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()

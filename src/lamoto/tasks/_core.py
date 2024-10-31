@@ -40,7 +40,7 @@ class Task(ABC, Generic[HC]):
 
     def __init__(self, task_name: str, metric_config: MetricSetup,
                  archit_class: Type[ModelWithHead[PC,HC]], automodel_class: Type[_BaseAutoModelClass], **automodel_args):
-        self.task_name       = task_name.lower()
+        self.task_name       = task_name
         self.metric_config   = metric_config
         self.archit_class    = archit_class
         self.automodel_class = automodel_class
