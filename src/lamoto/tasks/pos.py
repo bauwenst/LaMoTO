@@ -5,12 +5,15 @@ from archit.instantiation.heads import TokenClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
+from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
+from ..util.visuals import log
 
 
 class POS(Task[TokenClassificationHeadConfig]):
 
     def __init__(self):
+        log("Generating tagset...")
         self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"].feature.names]
         super().__init__(
             task_name="POS",
@@ -35,20 +38,22 @@ class POS(Task[TokenClassificationHeadConfig]):
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
+        sanitiser = FilterAndCorrectUDtypes()
         flattener = FlattenWordLabels(tokenizer=self.tokenizer,
                                       max_tokens=self._getMaxInputLength(),
                                       add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,
                                       pooling_mode=LabelPooling.LAST)
 
-        def preprocess(example: dict):
-            input_ids, labels = flattener.preprocess(example["tokens"], {"labels": example["upos"]})
+        def datasetMap(example: dict):
+            words, _, _, pos = sanitiser.preprocess(words=example["tokens"], heads=example["head"], pos_tags=example["upos"])
+            input_ids, labels = flattener.preprocess(words, {"pos": pos})
             return {
                 "input_ids": input_ids,
-                "labels": labels["labels"],
+                "labels": labels["pos"],
                 "attention_mask": [1]*len(input_ids)
             }
 
-        dataset = dataset.map(preprocess, batched=False)
+        dataset = dataset.map(datasetMap, batched=False)
         dataset = dataset.remove_columns(["tokens", "idx", "text", "lemmas", "upos", "xpos", "feats", "head", "deprel", "deps", "misc"])
         return dataset
 

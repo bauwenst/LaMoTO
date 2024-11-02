@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from typing import Optional, List
 
 import numpy.random as npr
-from tktkt.util.printing import dprint, pluralise
+from tktkt.util.printing import dprint, pluralise, ordinal
 
+from ..tasks._core import Task, RankingMetricSpec, ModelAugmentation
 from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch
-from .core import log
-from ..tasks._core import Task, RankingMetricSpec
+from .core import log, TaskTrainer
 
 
 @dataclass
@@ -31,20 +31,28 @@ class TaskTuner:
     Samples values for certain hyperparameters in their given domains, and knows how to alter the training procedure
     when those supported hyperparameters change.
 
-        warmups               = [50, 100, 500, 1000]
+    For the GRaMPa paper, I used:
+        warmup_steps          = [50, 100, 500, 1000]
         effective_batch_sizes = [16, 32, 64, 128, 256, 512]
         learning_rates        = [1e-6, 5e-6, 1e-5, 5e-5, 1e-4, 5e-4, 1e-3]
-        decay_rates           = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
+        adamw_decay_rates     = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10]
     """
 
-    def __init__(self, warmup_steps: Optional[List[int]],
-                 effective_batch_sizes: Optional[List[int]],
-                 learning_rates: Optional[List[float]],
-                 adamw_decay_rates: Optional[List[float]]):
-        self._warmup_steps_grid         = warmup_steps or []
+    def __init__(
+        self,
+        warmup_steps: Optional[List[int]],
+        effective_batch_sizes: Optional[List[int]],
+        learning_rates: Optional[List[float]],
+        adamw_decay_rates: Optional[List[float]],
+        ###
+        model_augmentation: Optional[ModelAugmentation]=None
+    ):
+        self._warmup_steps_grid         = warmup_steps          or []
         self._effective_batch_size_grid = effective_batch_sizes or []
-        self._learning_rates            = learning_rates
-        self._decay_rates               = adamw_decay_rates
+        self._learning_rates            = learning_rates        or []
+        self._decay_rates               = adamw_decay_rates     or []
+        self._model_augmentation = model_augmentation
+        self._trainer = TaskTrainer()
 
     @dataclass
     class _HyperparameterGridSample:
@@ -108,9 +116,9 @@ class TaskTuner:
             grid_sample = TaskTuner._HyperparameterGridSample(wu=wu, bs=bs, lr=lr, dr=dr)
             self._setSample(hp, grid_sample)
 
-            log(f"\nStarting short tuning for {n+1}th hyperparameter set:", grid_sample)
-            results = task.train(hp)
-            log(f"Finished short tuning for {n+1}th hyperparameter set:", grid_sample)
+            log(f"\nStarting short tuning for {ordinal(n+1)} hyperparameter set:", grid_sample)
+            results = self._trainer.train(task, hp, self._model_augmentation)
+            log(f"Finished short tuning for {ordinal(n+1)} hyperparameter set:", grid_sample)
             print("Results:")
             dprint(results, indent=1)
 
@@ -128,7 +136,7 @@ class TaskTuner:
         if best_sample is None:
             raise RuntimeError(f"No hyperparameter sets resulted in the ranking metric '{ranking_metric_name}'.")
 
-        log(f"Best hyperparameters out of {pluralise(meta.n_grid_samples, 'sample')} as measured by {ranking_metric_name}:", best_sample)
+        log(f"Best hyperparameters out of {pluralise(meta.n_grid_samples, 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
         return best_sample
 
     def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: _HyperparameterGridSample):
@@ -141,7 +149,7 @@ class TaskTuner:
         self._setSample(hp, best_sample)
         log("Starting long tuning for best hyperparameters:", best_sample)
         task.metric_config.to_rank = meta.rank_by
-        results = task.train(hp)
+        results = self._trainer.train(task, hp, self._model_augmentation)
         log("Finished long tuning for best hyperparameters:", best_sample)
         print("Results:")
         dprint(results, indent=1)

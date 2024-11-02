@@ -1,4 +1,6 @@
-# LaMoTO
+<img src="doc/logo.png">
+
+# LaMoTO: Language Modelling Tasks as Objects
 Language Modelling Tasks as Objects (LaMoTO) provides a framework for language model training (masked and causal, pretraining and finetuning) where the tasks, not just the models, are classes themselves.
 It abstracts over the HuggingFace `transformers.Trainer` with one goal: reduce the entire model training process to a single
 method call `task.train(hyperparameters)`.
@@ -10,7 +12,8 @@ class). This is how you would do that in LaMoTO, supported by the magic of [Arch
 ```python
 from archit.instantiation.basemodels import RobertaBaseModel
 from archit.instantiation.heads import DependencyParsingHeadConfig, BaseModelExtendedConfig
-from lamoto.tasks import DP, getDefaultHyperparameters
+from lamoto.tasks import DP
+from lamoto.training.auxiliary.hyperparameters import getDefaultHyperparameters
 
 # Define task hyperparameters.
 hp = getDefaultHyperparameters()

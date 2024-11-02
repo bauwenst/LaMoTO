@@ -11,7 +11,7 @@ from supar.utils.fn import pad
 from archit.instantiation.tasks import ForDependencyParsing, DependencyParsingHeadConfig
 
 from ._core import *
-from ..measuring import DependencyParsingMetrics
+from ..measuring import DependencyParsingMetrics, Metric
 from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import WordLevelPreprocessorWithDummies
 from ..util.visuals import log
@@ -87,11 +87,10 @@ class DP(Task[DependencyParsingHeadConfig]):
     """
 
     def __init__(self):
-        # The dataloader doesn't have a domain for the labels. Since UD allows using "sublabels", we can't even hardcode the 37 standard labels.
-        # tagset = ["nsubj", "obj", "iobj", "csubj", "ccomp", "xcomp", "obl", "vocative", "expl", "dislocated", "advcl", "advmod", "discourse", "aux", "cop", "mark", "nmod", "appos", "nummod", "acl", "amod", "det", "clf", "case", "conj", "cc", "fixed", "flat", "list", "parataxis", "compound", "orphan", "goeswith", "reparandum", "punct", "root", "dep"]
+        # The dataloader doesn't provide a domain for the labels. Since UD allows using "sublabels", we can't even hardcode the 37 standard labels ["nsubj", "obj", "iobj", "csubj", "ccomp", "xcomp", "obl", "vocative", "expl", "dislocated", "advcl", "advmod", "discourse", "aux", "cop", "mark", "nmod", "appos", "nummod", "acl", "amod", "det", "clf", "case", "conj", "cc", "fixed", "flat", "list", "parataxis", "compound", "orphan", "goeswith", "reparandum", "punct", "root", "dep"]
         tags = self.getTagset()
         self.tagset = list(sorted(tags, key=tags.get, reverse=True))
-        self.tag_to_id = {tag: i for i,tag in enumerate(self.tagset)}
+        self.reltag_to_id = {tag: i for i, tag in enumerate(self.tagset)}
         super().__init__(
             task_name="DP",
             metric_config=MetricSetup(
@@ -110,7 +109,21 @@ class DP(Task[DependencyParsingHeadConfig]):
 
             num_labels=len(self.tagset)
         )
+
+        # Extra temporary field that must be reset every time you reset the metrics.
         self._metric: DependencyParsingMetrics = None
+
+    def resetTemporaryFields(self):
+        super().resetTemporaryFields()
+        self._metric = None
+
+    def _setMetrics(self, m: Dict[str, Metric]):
+        super()._setMetrics(m)
+        self._metric = self.metrics["attachment"]
+
+    def sneakyLogitTransform(self, logits: Tuple[torch.Tensor,torch.Tensor], labels: Tuple[torch.Tensor,torch.Tensor]):
+        self._metric.add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
+        return torch.tensor([[1]], device=logits[0].device)
 
     def _loadDataset(self) -> DatasetDict:
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
@@ -128,61 +141,13 @@ class DP(Task[DependencyParsingHeadConfig]):
     def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):
         hp.archit_head_config.num_labels = len(self.tagset)
 
-    def sneakyLogitTransform(self, logits: Tuple[torch.Tensor,torch.Tensor], labels: Tuple[torch.Tensor,torch.Tensor]):
-        """
-        Here's the reasoning behind this method.
-
-        The issue to solve is that when you are evaluating in the HuggingFace trainer, all predictions and labels are
-        concatenated into one big tensor. The problem for DP arc predictions is that the amount of possible labels
-        CHANGES every batch, because the labels are positions inside the given sentence. Hence, you can't concatenate the
-        predictions for several batches because they don't have same amount of prediction classes.
-        You don't see this problem in training nor the first evaluation batch, because there is no batch interaction (yet) there.
-
-        As an example of the error you get:
-           RuntimeError: The expanded size of the tensor (60) must match the existing size (58) at non-singleton dimension 2.
-           Target sizes: [32, 58, 60].  Tensor sizes: [32, 58, 58]
-        The first batch had 60 positions, the second batch had 58.
-
-        Any solution for this has to basically force the Trainer to not accumulate logits, and instead commit them to the
-        evaluation metric immediately (which is how supar does it). Here's how you could do that:
-            1. Write a custom Trainer that has an evaluation_loop that just doesn't accumulate.
-               The problem with this approach is that Trainer actually has a bunch of useful acceleration code.
-            2. Use the existing Trainer but with empty validation dataset and use some kind of callback to evaluate the model inside
-               the callback instead of in Trainer's evaluation loop.
-            3. Trainer has an argument preprocess_logits_for_metrics that is called like
-                    logits = preprocess_logits_for_metrics(logits,labels)
-               before saving the logits. Here's how you could use that:
-                    - Instantiate the UAS/LAS metric
-                    - Capture it inside the preprocess_logits_for_metrics function and compute it immediately
-                    - Let preprocess_logits_for_metrics return empty tensors as logits and labels
-                    - Let computeMetrics return that metric's value.
-               Another approach:
-                    - Let preprocess_logits_for_metrics flatten the B x L x L logits into a B x L² tensor.
-                    - When the time comes to computeMetrics, have some way to identify the different lengths L and turn
-                      them back into squares inside a Metric.compute.
-               Yet another approach:
-                    - Compress the B x L x L logits into B x L x 1 class argmaxes, rather than letting the metric do this.
-                    - Let computeMetrics finish the process with UAS/LAS.
-
-        This sneakyLogitTransform() method is used to perform the third approach, except more elegantly, we capture `self`
-        (the only time Python allows currying is in expressions `self.method`) and then we access the metric instance
-        that is already present in `self` anyway.
-
-        The first two approaches have their place too, namely when you want metrics that aren't logit-based, like strided
-        PPL in causal LM. That's not the case for DP though.
-        """
-        if self._metric is None:  # At initialisation, the metric objects haven't been loaded yet.
-            self._metric = self.metrics["attachment"]
-        self._metric.add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
-        return torch.tensor([[1]], device=logits[0].device)
-
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        filter_and_correct = FilterAndCorrectUDtypes(self.tag_to_id)
+        filter_and_correct = FilterAndCorrectUDtypes(self.reltag_to_id)
         truncator = WordLevelPreprocessorWithDummies(self.tokenizer, max_tokens=self._getMaxInputLength(), add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS, redirect_to_dummy_if_index_was_truncated=False)
 
         def datasetMap(example: dict):
             # Filter entries with None head, map strings to ints, and truncate everything to a fixed token limit.
-            words, heads, deprels = filter_and_correct.preprocess(example["tokens"], example["head"], example["deprel"])
+            words, heads, deprels, _ = filter_and_correct.preprocess(words=example["tokens"], heads=example["head"], relations=example["deprel"])
             tokens, labels1, labels2 = truncator.preprocess(words, {"labels_arcs": heads}, {"labels_rels": deprels})
 
             # Marshal the results.

@@ -1,4 +1,4 @@
-from ._core import MetricRegistry
+from ._core import MetricRegistry, Metric
 from .las import DependencyParsingMetrics
 from .ppl import Perplexity
 from .pppl import PseudoPerplexity

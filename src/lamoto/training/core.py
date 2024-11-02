@@ -52,13 +52,14 @@ class TaskTrainer:
         resume_from_folder: Path=None
     ) -> Dict[str, float]:
         """
-        Encapsulation of everything you need to do to get a Trainer running.
+        Encapsulation of everything you need to do to get a (modified) transformers.Trainer running.
         """
         printLamotoWelcome()
         log("Running task:", task.task_name)
         transformers.set_seed(seed=hyperparameters.SEED)
         if not DO_WARNINGS_AND_PROGRESSBARS:
             set_verbosity_error()
+        task.resetTemporaryFields()
 
         # Imputations and sanity checks
         if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, Path):

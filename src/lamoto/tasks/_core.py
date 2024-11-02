@@ -37,6 +37,10 @@ class MetricSetup:
 
 
 class Task(ABC, Generic[HC]):
+    """
+    The central abstraction in LaMoTO. Stores all metadata required to train a PyTorch language model to perform a
+    certain downstream task.
+    """
 
     def __init__(self, task_name: str, metric_config: MetricSetup,
                  archit_class: Type[ModelWithHead[PC,HC]], automodel_class: Type[_BaseAutoModelClass], **automodel_args):
@@ -46,16 +50,21 @@ class Task(ABC, Generic[HC]):
         self.automodel_class = automodel_class
         self.automodel_args  = automodel_args
 
-        # Fields that can be used by method implementations, but are only instantiated once .train() is called, to
-        # avoid loading heavy objects that would be duplicated by the super() call of a task wrapper.
+        # Caches; these are fields that should not be reset on training.
+        self._dataset_cache_raw: DatasetDict      = None
+        self._dataset_cache_prepared: DatasetDict = None
+
+        # Temporary fields only instantiated during training. These are effectively hidden method arguments.
         self.hyperparameters: TaskHyperparameters[HC] = None
         self.tokenizer: PreTrainedTokenizerBase = None
         self.model_config: PretrainedConfig = None
         self.metrics: Dict[str, Metric] = None
 
-        # Caches
-        self._dataset_cache_raw: DatasetDict      = None
-        self._dataset_cache_prepared: DatasetDict = None
+    def resetTemporaryFields(self):
+        self._setHyperparameters(None)
+        self._setTokenizer(None)
+        self._setModelConfig(None)
+        self._setMetrics(None)
 
     @abstractmethod
     def _loadDataset(self) -> DatasetDict:
@@ -78,6 +87,7 @@ class Task(ABC, Generic[HC]):
         pass
 
     def sneakyLogitTransform(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """See the design notes for why this method exists."""
         return logits
 
     ####################################################################################################################
