@@ -1,7 +1,7 @@
 """
 Core fine-tuning script for any task.
 """
-from typing import Any, Dict, Type, List, Tuple, Generic
+from typing import Any, Dict, Type, List, Tuple, Generic, Optional
 from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -51,14 +51,14 @@ class Task(ABC, Generic[HC]):
         self.automodel_args  = automodel_args
 
         # Caches; these are fields that should not be reset on training.
-        self._dataset_cache_raw: DatasetDict      = None
-        self._dataset_cache_prepared: DatasetDict = None
+        self._dataset_cache_raw: Optional[DatasetDict]      = None
+        self._dataset_cache_prepared: Optional[DatasetDict] = None
 
         # Temporary fields only instantiated during training. These are effectively hidden method arguments.
-        self.hyperparameters: TaskHyperparameters[HC] = None
-        self.tokenizer: PreTrainedTokenizerBase = None
-        self.model_config: PretrainedConfig = None
-        self.metrics: Dict[str, Metric] = None
+        self.hyperparameters: Optional[TaskHyperparameters[HC]] = None
+        self.tokenizer: Optional[PreTrainedTokenizerBase] = None
+        self.model_config: Optional[PretrainedConfig] = None
+        self.metrics: Optional[Dict[str, Metric]] = None
 
     def resetTemporaryFields(self):
         self._setHyperparameters(None)
@@ -122,13 +122,13 @@ class Task(ABC, Generic[HC]):
 
         return results  # To this dictionary, the eval loss will be added post-hoc, and all keys will be prefixed by "eval_".
 
-    def _setHyperparameters(self, hp: TaskHyperparameters[HC]):
+    def _setHyperparameters(self, hp: Optional[TaskHyperparameters[HC]]):
         self.hyperparameters = hp
-    def _setModelConfig(self, mc: PretrainedConfig):
+    def _setModelConfig(self, mc: Optional[PretrainedConfig]):
         self.model_config = mc
-    def _setMetrics(self, m: Dict[str, Metric]):
+    def _setMetrics(self, m: Optional[Dict[str, Metric]]):
         self.metrics = m
-    def _setTokenizer(self, tk: PreTrainedTokenizerBase):
+    def _setTokenizer(self, tk: Optional[PreTrainedTokenizerBase]):
         self.tokenizer = tk
 
     def _getMaxInputLength(self) -> int:
@@ -207,21 +207,25 @@ class TaskWrapper(Task[HC]):
 
     # Finally, four methods to communicate the runtime fields with the underlying task, so it can use them in its implementations:
 
-    def _setHyperparameters(self, hp: TaskHyperparameters[HC]):
+    def _setHyperparameters(self, hp: Optional[TaskHyperparameters[HC]]):
         super()._setHyperparameters(hp)
         self._method_implementations._setHyperparameters(hp)
 
-    def _setMetrics(self, m: Dict[str, Metric]):
+    def _setMetrics(self, m: Optional[Dict[str, Metric]]):
         super()._setMetrics(m)
         self._method_implementations._setMetrics(m)
 
-    def _setModelConfig(self, mc: PretrainedConfig):
+    def _setModelConfig(self, mc: Optional[PretrainedConfig]):
         super()._setModelConfig(mc)
         self._method_implementations._setModelConfig(mc)
 
-    def _setTokenizer(self, tk: PreTrainedTokenizerBase):
+    def _setTokenizer(self, tk: Optional[PreTrainedTokenizerBase]):
         super()._setTokenizer(tk)
         self._method_implementations._setTokenizer(tk)
+
+    def resetTemporaryFields(self):
+        super().resetTemporaryFields()
+        self._method_implementations.resetTemporaryFields()
 
 
 __all__ = ["Task", "MetricSetup", "RankingMetricSpec", "TaskHyperparameters", "getDefaultHyperparameters", "TaskWrapper",

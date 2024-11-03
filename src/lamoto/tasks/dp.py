@@ -1,4 +1,4 @@
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional
 from dataclasses import dataclass
 from collections import Counter
 
@@ -117,9 +117,10 @@ class DP(Task[DependencyParsingHeadConfig]):
         super().resetTemporaryFields()
         self._metric = None
 
-    def _setMetrics(self, m: Dict[str, Metric]):
+    def _setMetrics(self, m: Optional[Dict[str, Metric]]):
         super()._setMetrics(m)
-        self._metric = self.metrics["attachment"]
+        if m is not None:
+            self._metric = self.metrics["attachment"]
 
     def sneakyLogitTransform(self, logits: Tuple[torch.Tensor,torch.Tensor], labels: Tuple[torch.Tensor,torch.Tensor]):
         self._metric.add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
