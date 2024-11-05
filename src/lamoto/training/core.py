@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Tuple
 from pathlib import Path
 
 import json
@@ -50,9 +50,9 @@ class TaskTrainer:
         hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(),
         model_augmentation: ModelAugmentation=None,
         resume_from_folder: Path=None
-    ) -> Dict[str, float]:
+    ) -> Tuple[str, Dict[str, float]]:
         """
-        Encapsulation of everything you need to do to get a (modified) transformers.Trainer running.
+        Encapsulation of everything you need to do to get a (modified) `transformers.Trainer` running.
         """
         printLamotoWelcome()
         log("Running task:", task.task_name)
@@ -461,7 +461,7 @@ class TaskTrainer:
                 log("Deleting models...")
                 trainer.deleteCheckpointsInOrder(amount=2)
 
-            return all_results
+            return global_model_identifier, all_results
 
         except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
             log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.")

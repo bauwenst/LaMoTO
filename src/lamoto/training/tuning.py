@@ -1,15 +1,16 @@
 """
 Tuning framework in which many models are trained for the same task with various hyperparameter sets.
 """
-from dataclasses import dataclass
-from typing import Optional, List
+import json
+from dataclasses import dataclass, asdict
+from typing import Optional, List, Dict
 
 import numpy.random as npr
 from tktkt.util.printing import dprint, pluralise, ordinal
 
 from ..tasks._core import Task, RankingMetricSpec, ModelAugmentation
 from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch
-from .core import log, TaskTrainer
+from .core import log, TaskTrainer, LamotoPaths
 
 
 @dataclass
@@ -117,7 +118,7 @@ class TaskTuner:
             self._setSample(hp, grid_sample)
 
             log(f"\nStarting short tuning for {ordinal(n+1)} hyperparameter set:", grid_sample)
-            results = self._trainer.train(task, hp, self._model_augmentation)
+            _, results = self._trainer.train(task, hp, self._model_augmentation)
             log(f"Finished short tuning for {ordinal(n+1)} hyperparameter set:", grid_sample)
             print("Results:")
             dprint(results, indent=1)
@@ -139,7 +140,7 @@ class TaskTuner:
         log(f"Best hyperparameters out of {pluralise(meta.n_grid_samples, 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
         return best_sample
 
-    def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: _HyperparameterGridSample):
+    def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: _HyperparameterGridSample) -> Dict[str,float]:
         """
         Use the best hyperparameters you found and run until you can't.
         """
@@ -149,8 +150,14 @@ class TaskTuner:
         self._setSample(hp, best_sample)
         log("Starting long tuning for best hyperparameters:", best_sample)
         task.metric_config.to_rank = meta.rank_by
-        results = self._trainer.train(task, hp, self._model_augmentation)
+        identifier, results = self._trainer.train(task, hp, self._model_augmentation)
         log("Finished long tuning for best hyperparameters:", best_sample)
         print("Results:")
         dprint(results, indent=1)
+
+        # Save meta-hyperparameters so there is no confusion about how finetuning was done later on.
+        #   TODO: Ideally, these are also added to the W&B log, but that would essentially mean giving an arbitrary dictionary to the Trainer
+        #         (perhaps in a method?) that is then .log()ed after wandb.init and before wandb.finish.
+        with open(LamotoPaths.append(LamotoPaths.pathToEvaluations(), identifier) / "tuning-config.json", "w", encoding="utf-8") as handle:
+            json.dump(asdict(meta), handle)
         return results
