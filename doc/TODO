@@ -8,8 +8,6 @@ TODO: SuperGLUE
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
 
-TODO: Logarithmic intervalling would be cool. A lot of evals at the start and then gradually fewer and fewer.
-
 TODO: DP has an extremely niche issue where, if you train for like 12 epochs with batch size 128, GPU memory has slowly
       become too fragmented due to the logit tensors of size N² with N varying per example. No idea how to fix this.
       Here's the error:
@@ -34,8 +32,8 @@ TODO: in the TaskTrainer.train core,
     - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
     - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
 
-TODO: Implement QA. I wonder if you need a logit transform for this too. The Trainer tutorial
-       for QA sidesteps this question: https://huggingface.co/docs/transformers/tasks/question_answering#evaluate
+TODO: Implement QA. There is a head for this in ArchIt. I wonder if you need a "sneaky logit transform" for this like for DP due to
+      varying logit sizes. The Trainer tutorial for QA sidesteps this question: https://huggingface.co/docs/transformers/tasks/question_answering#evaluate
 
 TODO: I'm not happy with how metrics are set up. It really makes zero sense to embed constructor arguments inside
       the task config to then parse them implicitly (if you didn't forget them) or error (because you did forget them).

@@ -1,11 +1,9 @@
-"""
-FIXME:
-    - The dataset size is always taken from the train split. That should also be changed. getSteps() should probably have three arguments: a dataset, a split, and a batch size.
-"""
 from typing import Optional, Union, Generic, Type
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import warnings
+import numpy as np
 from copy import deepcopy
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedConfig
 from datasets import Dataset
@@ -21,6 +19,9 @@ class BatchesPerTriggerStrategy(ABC):
     """
     A "step" is one gradient descent, or equivalently, one effective batch.
     You can use this as a time axis in the training process. Used for both intervalling and stopping strategies.
+
+    All descendants of this class are a @dataclass so that they can be serialised with repr() and deserialised with eval().
+    The @dataclass decorator is not heritable.
     """
     @abstractmethod
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
@@ -28,109 +29,136 @@ class BatchesPerTriggerStrategy(ABC):
         pass
 
 
+@dataclass
 class Never(BatchesPerTriggerStrategy):
 
     def getSteps(self, *args, **kwargs):
         raise NotImplementedError("No strategy for getting this interval.")
 
 
+@dataclass
 class EveryNExamples(BatchesPerTriggerStrategy):
-
-    def __init__(self, examples: int):
-        self._examples_per_trigger = examples
+    examples: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
-        return totalBatches(self._examples_per_trigger, batch_size)
+        return totalBatches(self.examples, batch_size)
 
 
+@dataclass
 class EveryNExamplesOrOncePerEpoch(BatchesPerTriggerStrategy):
-
-    def __init__(self, examples: int):
-        self._examples_per_trigger = examples
+    max_examples: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
         try:
             examples_per_epoch = getDatasetSize(dataset, split=split_name)
         except:
-            examples_per_epoch = self._examples_per_trigger
+            examples_per_epoch = self.max_examples
 
-        examples_per_trigger = min(examples_per_epoch, self._examples_per_trigger)
+        examples_per_trigger = min(examples_per_epoch, self.max_examples)
         return totalBatches(examples_per_trigger, batch_size)
 
 
+@dataclass
 class EveryNDescents(BatchesPerTriggerStrategy):
-
-    def __init__(self, descents: int):
-        self._batches_per_trigger = descents
+    descents: int
 
     def getSteps(self, *args, **kwargs) -> int:
-        return self._batches_per_trigger
+        return self.descents
 
 
+@dataclass
 class EveryNDescentsOrOncePerEpoch(BatchesPerTriggerStrategy):
     """
     Same as EveryNDescents except if epochs are smaller than N, you evaluate once per epoch.
     """
-    def __init__(self, descents: int):
-        self._max_batches_per_trigger = descents
+    max_descents: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
         try:
             examples_per_epoch = getDatasetSize(dataset, split=split_name)
             batches_per_epoch  = totalBatches(examples_per_epoch, batch_size)
         except:
-            batches_per_epoch = self._max_batches_per_trigger
+            batches_per_epoch = self.max_descents
 
-        return min(self._max_batches_per_trigger, batches_per_epoch)
+        return min(self.max_descents, batches_per_epoch)
 
 
+@dataclass
+class EveryExpDescents(BatchesPerTriggerStrategy):
+    """
+    Produces triggers that are linearly spaced on a log axis. This is equivalent to using linearly spaced values as
+    exponents for an exponential function. Examples:
+        Start 1, spacing 1:     1, 10^1, 10^2, 10^3, ...
+        Start 10, spacing 0.1: 10, 10^1.1, 10^1.2, 10^1.3, ...
+    If you need a sequence that goes like 1, 2, 3, ..., 10, 20, 30, ... This is not the right class.
+    """
+    start: int = 10
+    exp_spacing: float = 1.0
+
+    def getSteps(self, *args, **kwargs) -> int:
+        raise NotImplementedError("Log-based intervals aren't enforced with step arguments, but a custom callback.")
+
+
+@dataclass
+class EveryRatchetingDescents(BatchesPerTriggerStrategy):
+    """
+    Starts at a given amount and ratchets up the step size after every N increases. For example:
+        start 10, 9 steps: 10, 20, 30, ..., 100, 200, 300, ..., 1000, 2000, 3000, ...
+        start 20, 4 steps: 20, 40, 60, 80, 100, 200, 300, 400, 500, 1000, 1500, 2000, 2500, 5000, 7500, 1000, ...
+    """
+    start: int = 10
+    steps: int = 9
+
+    def getSteps(self, *args, **kwargs) -> int:
+        raise NotImplementedError("Ratchet-based intervals aren't enforced with step arguments, but a custom callback.")
+
+
+@dataclass
 class EveryNEpochs(BatchesPerTriggerStrategy):
-
-    def __init__(self, epochs: int):
-        self._epochs_per_trigger = epochs
+    epochs: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
         try:
             examples_per_epoch = getDatasetSize(dataset, split=split_name)
             batches_per_epoch  = totalBatches(examples_per_epoch, batch_size)
-            return self._epochs_per_trigger * batches_per_epoch
+            return self.epochs * batches_per_epoch
         except:
             raise RuntimeError("Could not retrieve dataset size.")
 
 
+@dataclass
 class NEveryEpoch(BatchesPerTriggerStrategy):
-    def __init__(self, per_epoch: int):
-        self._triggers_per_epoch = per_epoch
+    per_epoch: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:  # DatasetInfoMixin is the parent class for Dataset and IterableDataset.
         examples_per_epoch = getDatasetSize(dataset, split=split_name)
         batches_per_epoch  = totalBatches(examples_per_epoch, batch_size)
-        batches_per_trigger = batches_per_epoch // self._triggers_per_epoch
+        batches_per_trigger = batches_per_epoch // self.per_epoch
 
         if batches_per_trigger == 0:
-            raise RuntimeError(f"Too many triggers per epoch ({batches_per_epoch} batches per epoch yet {self._triggers_per_epoch} triggers per epoch requested).")
+            raise RuntimeError(f"Too many triggers per epoch ({batches_per_epoch} batches per epoch yet {self.per_epoch} triggers per epoch requested).")
 
         return batches_per_trigger
 
 
+@dataclass
 class EveryNMinutes(BatchesPerTriggerStrategy):
-    def __init__(self, minutes: int):
-        self.minutes = minutes
+    minutes: int
 
     def getSteps(self, *args, **kwargs) -> int:
         raise NotImplementedError("Time-based intervals aren't enforced with step arguments, but a custom callback.")
 
 
+@dataclass
 class EveryNPackedTokens(BatchesPerTriggerStrategy):
     """
     Only works for packed datasets. Otherwise, you need to use a TrainerCallback that uses state.num_input_tokens_seen.
     """
-    def __init__(self, total_tokens: int, tokens_per_packed_example: int):
-        self.total_tokens = total_tokens
-        self.tokens_per_example = tokens_per_packed_example
+    total_tokens: int
+    max_context_length: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
-        total_examples = totalBatches(self.total_tokens, self.tokens_per_example)
+        total_examples = totalBatches(self.total_tokens, self.max_context_length)
         total_steps    = totalBatches(total_examples, batch_size)
         return total_steps
 
@@ -198,6 +226,48 @@ class TaskHyperparameters(Generic[HC]):
     def copy(self) -> "TaskHyperparameters[HC]":
         return deepcopy(self)
 
+    def toDict(self) -> dict:
+        """
+        Convert this object to a dictionary that is safe for being stored as a JSON file.
+        """
+        hp_as_dict = dict(self.__dict__)
+        hp_as_dict["_hp_class"]               = self.__class__.__name__
+        hp_as_dict["HARD_STOPPING_CONDITION"] = repr(self.HARD_STOPPING_CONDITION)
+        hp_as_dict["EVAL_VS_SAVE_INTERVALS"]  = repr(self.EVAL_VS_SAVE_INTERVALS)
+        hp_as_dict["archit_basemodel_class"]  = self.archit_basemodel_class.__name__
+        hp_as_dict["custom_hf_class"]         = self.custom_hf_class.__name__ if self.custom_hf_class else None
+        if isinstance(self.MODEL_CONFIG_OR_CHECKPOINT, PretrainedConfig):
+            hp_as_dict["MODEL_CONFIG_OR_CHECKPOINT"] = {
+                "_config_class":  self.MODEL_CONFIG_OR_CHECKPOINT.__class__.__name__,
+                "_config_fields": self.MODEL_CONFIG_OR_CHECKPOINT.to_dict(),
+            }
+        if self.TOKENISER is not None and not isinstance(self.TOKENISER, str):
+            hp_as_dict["TOKENISER"] = repr(self.TOKENISER)
+        return hp_as_dict
+
+
+def hyperparametersFromDict(hp_as_dict: dict) -> TaskHyperparameters:
+    """
+    Inverse of TaskHyperparameters.toDict(), with the possible exception of not restoring the tokeniser.
+    """
+    hp_class = eval(hp_as_dict.pop("_hp_class"))
+    hp = hp_class(**hp_as_dict)
+    hp.HARD_STOPPING_CONDITION = eval(hp.HARD_STOPPING_CONDITION)
+    hp.EVAL_VS_SAVE_INTERVALS  = eval(hp.EVAL_VS_SAVE_INTERVALS)
+    hp.archit_basemodel_class  = eval(hp.archit_basemodel_class)
+    hp.custom_hf_class         = eval(hp.custom_hf_class) if hp.custom_hf_class is not None else None
+    if isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, dict):
+        config_class = eval(hp.MODEL_CONFIG_OR_CHECKPOINT["_config_class"])
+        config_fields = hp.MODEL_CONFIG_OR_CHECKPOINT["_config_fields"]
+        hp.MODEL_CONFIG_OR_CHECKPOINT = config_class(**config_fields)
+    if hp.TOKENISER is not None:
+        try:
+            hp.TOKENISER = eval(hp.TOKENISER)
+        except:
+            hp.TOKENISER = None
+            warnings.warn(f"Tokeniser set to 'None' (so the model's default tokeniser will be used) because it could not be reconstructed from the given value:\n{hp.TOKENISER}")
+    return hp
+
 
 @dataclass
 class EvaluationEnvironment:
@@ -249,6 +319,6 @@ def getDefaultHyperparameters() -> TaskHyperparameters:
 
 
 __all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",
-           "Never", "EveryNDescents", "EveryNDescentsOrOncePerEpoch", "NEveryEpoch", "EveryNMinutes", "EveryNPackedTokens",
+           "Never", "EveryNEpochs", "EveryNDescents", "EveryNDescentsOrOncePerEpoch", "NEveryEpoch", "EveryNMinutes", "EveryNPackedTokens",
            "AfterNDescents", "AfterNEpochs", "AfterNPackedTokens", "AfterNMinutes",
            "PC", "HC", "getDefaultHyperparameters"]

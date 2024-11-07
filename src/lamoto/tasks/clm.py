@@ -33,7 +33,7 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
     EXAMPLES_PER_DEVICEBATCH = 64,  # Used to fit on an A100, but recently got an error saying 80 GiB got filled
     EFFECTIVE_BATCHES_WARMUP=0.1,
-    HARD_STOPPING_CONDITION=AfterNPackedTokens(10_000_000_000, tokens_per_packed_example=1024),  # From GEITje.
+    HARD_STOPPING_CONDITION=AfterNPackedTokens(total_tokens=10_000_000_000, max_context_length=1024),  # From GEITje.
 
     EXAMPLES_PER_EVALUATION = 2**14,
 
