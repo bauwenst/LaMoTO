@@ -57,3 +57,10 @@ To be able to use the Weights-and-Biases integration, make sure you first run `w
 on the system you want to run on.
 
 <!-- If you are me from the future: don't include the `[github]` tag, it will fuck up the editable installs for the packages I maintain. -->
+
+## Alternative packages
+There exist other libraries that abstract across training tasks in an effort to avoid heavily dedicated training scripts.
+I'm aware of the following packages (although I'm not sure how extensible they are):
+- [`jiant`](https://github.com/nyu-mll/jiant)
+- [`itrain`](https://github.com/adapter-hub/efficient-task-transfer/tree/main)
+- [`machamp`](https://github.com/machamp-nlp/machamp)

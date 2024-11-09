@@ -10,10 +10,10 @@ class MNLI(CompareSentencesGLUETask):
     differs by less than 0.5% on these. Hence, I choose to only include the harder, mismatched splits.
     """
     def __init__(self):
-        super().__init__("mnli", num_labels=3, text_field1="premise", text_field2="hypothesis")
+        super().__init__("MNLI", num_labels=3, text_field1="premise", text_field2="hypothesis")
 
     def _loadDataset(self) -> DatasetDict:
-        original_datasetdict = load_dataset("glue", self.task_name)
+        original_datasetdict = load_dataset("glue", self.task_name.lower())
         new_datasetdict      = original_datasetdict["train"].train_test_split(
             test_size=len(original_datasetdict["validation_mismatched"])/len(original_datasetdict["train"]),
             stratify_by_column="label",

@@ -4,7 +4,13 @@ TODO: Hour-long backoff wrapper around streamed datasets, to smooth over Hugging
     - Also spice it up by sending the user an email to notify them of this "hybernation mode".
     - Also save the model.
 
-TODO: SuperGLUE
+TODO: SuperGLUE:
+    - COPA is almost done
+    - ReCoRD is almost done
+    - WiC
+    - WSC
+
+TODO: For SuperGLUE, HuggingFace has dedicated evaluate metrics. Check those out. Record and MultiRC both have EM, for example.
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
 

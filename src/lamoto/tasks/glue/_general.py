@@ -14,6 +14,8 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
     Since all GLUE tasks are sequence tasks, they share a bunch of their code.
     """
 
+    BASE_REPO = "glue"
+
     def __init__(self, task_name: str, metric_config: MetricSetup, num_labels: int, is_regressive: bool=False):
         super().__init__(
             task_name=task_name,
@@ -28,7 +30,7 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
 
     def _loadDataset(self) -> DatasetDict:
         # Since GLUE tasks don't have test labels, we create our own test split from the training set, with same size as validation set.
-        original_datasetdict = load_dataset("glue", self.task_name)
+        original_datasetdict = load_dataset(self.BASE_REPO, self.task_name.lower().replace("-", ""), trust_remote_code=True)
         new_datasetdict      = original_datasetdict["train"].train_test_split(
             test_size=len(original_datasetdict["validation"])/len(original_datasetdict["train"]),
             stratify_by_column="label" if not self._is_regressive else None,
