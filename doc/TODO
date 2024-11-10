@@ -10,6 +10,8 @@ TODO: SuperGLUE:
     - WiC
     - WSC
 
+TODO: Add SWAG. https://huggingface.co/docs/transformers/tasks/multiple_choice
+
 TODO: For SuperGLUE, HuggingFace has dedicated evaluate metrics. Check those out. Record and MultiRC both have EM, for example.
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
