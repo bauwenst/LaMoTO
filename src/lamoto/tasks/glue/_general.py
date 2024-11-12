@@ -29,14 +29,23 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
         self._is_regressive = is_regressive
 
     def _loadDataset(self) -> DatasetDict:
-        # Since GLUE tasks don't have test labels, we create our own test split from the training set, with same size as validation set.
-        original_datasetdict = load_dataset(self.BASE_REPO, self.task_name.lower().replace("-", ""), trust_remote_code=True)
-        new_datasetdict      = original_datasetdict["train"].train_test_split(
-            test_size=len(original_datasetdict["validation"])/len(original_datasetdict["train"]),
+        return self._imputeTestSplit(self._loadDatasetRaw())
+
+    def _loadDatasetRaw(self) -> DatasetDict:
+        return load_dataset(self.BASE_REPO, self.task_name.lower().replace("-", ""), trust_remote_code=True)
+
+    def _imputeTestSplit(self, datasetdict: DatasetDict) -> DatasetDict:
+        """
+        GLUE tasks have a test set where all labels are -1 so that the only way to verify performance is to send
+        model predictions to a privately owned server. For experiments, we want a proper test set. So, we take a
+        sample from the train set, of the size of the validation set, and use that as the test set.
+        """
+        new_datasetdict = datasetdict["train"].train_test_split(
+            test_size=len(datasetdict["validation"])/len(datasetdict["train"]),
             stratify_by_column="label" if not self._is_regressive else None,
             seed=self.hyperparameters.SEED
         )
-        new_datasetdict["validation"] = original_datasetdict["validation"]
+        new_datasetdict["validation"] = datasetdict["validation"]
         return new_datasetdict
 
     def adjustHyperparameters(self, hp: SequenceTaskHyperparameters):

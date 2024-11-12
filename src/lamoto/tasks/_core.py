@@ -162,7 +162,8 @@ class Task(ABC, Generic[HC]):
         contains that string (but isn't equal to it, because in that case it is not HuggingFace and hence must be ArchIt)
         it comes from HuggingFace and is tailored to this task.
         """
-        return self.archit_class.head_class.hfEquivalentSuffix() in architecture_name and \
+        return self.archit_class.head_class.hfEquivalentSuffix() and \
+               self.archit_class.head_class.hfEquivalentSuffix() in architecture_name and \
                self.archit_class.head_class.hfEquivalentSuffix() != architecture_name
 
     def train(self, hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(), model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Tuple[str, Dict[str, float]]:

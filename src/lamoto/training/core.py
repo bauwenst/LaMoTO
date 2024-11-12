@@ -272,6 +272,7 @@ class TaskTrainer:
         # - Finally get args
         training_args = TrainingArguments(
             max_steps=(n_gradient_descents or -1) if n_gradient_descents or has_length(datasetdict["train"]) else 1_000_000_000_000,  # Handle a very specific illegal case according to HF. Only reason it exists is for learning rate schedules that decrease relative to the max amount of descents, but we don't use those schedules.
+            num_train_epochs=1_000_000_000_000,  # This value is used when max_steps is -1 (its default value is 3 but clearly it should be "run forever").
 
             # Optimisation (adding all of this in the TrainingArguments because apparently Trainer knows how to use HuggingFace `accelerate` whereas I only know the old optimisers)
             # optim=OptimizerNames.ADAMW_TORCH,
