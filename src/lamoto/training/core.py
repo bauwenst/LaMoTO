@@ -210,7 +210,10 @@ class TaskTrainer:
 
         # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.
         if model_augmentation:
-            model_augmentation.augment(model, task.tokenizer)
+            if hyperparameters.init_weights:
+                model_augmentation.augmentAndLoad(model, task.tokenizer, checkpoint=hyperparameters.MODEL_CONFIG_OR_CHECKPOINT)
+            else:
+                model_augmentation.augment(model, task.tokenizer)
         model.to("cuda")
 
         # Now that we have a reference to the dataset and model, build the metrics.

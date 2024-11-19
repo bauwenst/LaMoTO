@@ -1,4 +1,4 @@
-from typing import Set, TypeVar, Dict
+from typing import Set, TypeVar, Dict, Optional
 from abc import abstractmethod, ABC
 from torch import Tensor
 
@@ -28,15 +28,32 @@ class DatasetAugmentation(ABC):
 
 
 class Truncate(DatasetAugmentation):
+    """
+    Truncates a dataset to a given amount of examples.
+    Optionally shuffles the data beforehand to end up with a more diverse set of examples; shuffling is not a separate
+    dataset augmentation because the trainer already shuffles whatever data is kept after all augmentations are done.
+    """
 
-    def __init__(self, max_examples: int):
+    def __init__(self, max_examples: int, shuffle_seed: Optional[int]=None):
         self._amount = max_examples
+        self._shuffle_seed = shuffle_seed  # For IterableDatasets, this is not a fully global shuffle.
 
     def augment(self, dataset: DS) -> DS:
+        if self._shuffle_seed is not None:
+            dataset = self._shuffle(dataset)
+
         if isinstance(dataset, Dataset):
-            return dataset.select(range(self._amount))
+            return dataset.select(range(self._amount))  # Will error if self._amount > len(dataset)
         elif isinstance(dataset, IterableDataset):
             return dataset.take(self._amount)
+        else:
+            raise TypeError(f"Unrecognised dataset type: {type(dataset)}")
+
+    def _shuffle(self, dataset: DS) -> DS:
+        if isinstance(dataset, Dataset):
+            return dataset.shuffle(seed=self._shuffle_seed)
+        elif isinstance(dataset, IterableDataset):
+            return dataset.shuffle(seed=self._shuffle_seed, buffer_size=100_000)
         else:
             raise TypeError(f"Unrecognised dataset type: {type(dataset)}")
 

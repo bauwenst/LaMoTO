@@ -16,7 +16,7 @@ TODO: For SuperGLUE, HuggingFace has dedicated evaluate metrics. Check those out
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
 
-TODO: DP has an extremely niche issue where, if you train for like 12 epochs with batch size 128, GPU memory has slowly
+TODO: DP has an extremely niche issue where, if you train for like 12 epochs with device batch size 128, GPU memory has slowly
       become too fragmented due to the logit tensors of size N² with N varying per example. No idea how to fix this.
       Here's the error:
         torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 28.16 GiB.
@@ -24,12 +24,17 @@ TODO: DP has an extremely niche issue where, if you train for like 12 epochs wit
         Including non-PyTorch memory, this process has 51.44 GiB memory in use.
         Of the allocated memory 41.16 GiB is allocated by PyTorch, and 8.37 GiB is reserved by PyTorch but unallocated.
         If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation. See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+      You can sort of fix it by using a different device batch size, although no guarantees...
 
 TODO: It would be very cool if there was a callback connected to some kind of messaging
       service, where you could send a signal to kill training and the model will (after the current step) quit and save.
+      You could e.g. reply to an email that says "LaMoTO training started" and it will fetch replies to the email once
+      every X steps. Alternatively, WandB might have some kind of stopping built into the UI. https://github.com/wandb/wandb/issues/3366
 
 TODO: I would like more decoupling between evaluation and saving.
     - Be able to save more frequently than evals so that you don't lose hours of progress just because you're scared of the cost of eval.
+      You could do this by having a callback that triggers a save to a different folder (because the Trainer tracks which checkpoints exist
+      using folder names).
 
 TODO: Test the resume-from-folder functionality. It isn't properly tested.
     - Also, this is really too much manual labour. Resuming should be done automatically where possible.
