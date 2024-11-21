@@ -52,8 +52,7 @@ class TaskTuner:
         self._effective_batch_size_grid = effective_batch_sizes or []
         self._learning_rates            = learning_rates        or []
         self._decay_rates               = adamw_decay_rates     or []
-        self._model_augmentation = model_augmentation
-        self._trainer = TaskTrainer()
+        self._trainer = TaskTrainer(model_augmentation)
 
     @dataclass
     class _HyperparameterGridSample:
@@ -118,7 +117,7 @@ class TaskTuner:
             self._setSample(hp, grid_sample)
 
             log(f"\nStarting short tuning for {ordinal(n+1)} hyperparameter set:", grid_sample)
-            _, results = self._trainer.train(task, hp, self._model_augmentation)
+            _, results = self._trainer.train(task, hp)
             log(f"Finished short tuning for {ordinal(n+1)} hyperparameter set:", grid_sample)
             print("Results:")
             dprint(results, indent=1)
@@ -150,7 +149,7 @@ class TaskTuner:
         self._setSample(hp, best_sample)
         log("Starting long tuning for best hyperparameters:", best_sample)
         task.metric_config.to_rank = meta.rank_by
-        identifier, results = self._trainer.train(task, hp, self._model_augmentation)
+        identifier, results = self._trainer.train(task, hp)
         log("Finished long tuning for best hyperparameters:", best_sample)
         print("Results:")
         dprint(results, indent=1)

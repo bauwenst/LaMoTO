@@ -60,6 +60,10 @@ class Task(ABC, Generic[HC]):
         self.model_config: Optional[PretrainedConfig] = None
         self.metrics: Optional[Dict[str, Metric]] = None
 
+    def resetCaches(self):
+        self._dataset_cache_raw      = None
+        self._dataset_cache_prepared = None
+
     def resetTemporaryFields(self):
         self._setHyperparameters(None)
         self._setTokenizer(None)
@@ -166,10 +170,10 @@ class Task(ABC, Generic[HC]):
                self.archit_class.head_class.hfEquivalentSuffix() in architecture_name and \
                self.archit_class.head_class.hfEquivalentSuffix() != architecture_name
 
-    def train(self, hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(), model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Tuple[str, Dict[str, float]]:
+    def train(self, hyperparameters: TaskHyperparameters[HC], model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Tuple[str, Dict[str, float]]:
         from ..training.core import TaskTrainer  # Import happens here to prevent circular importing.
-        return TaskTrainer().train(
-            task=self, hyperparameters=hyperparameters, model_augmentation=model_augmentation, resume_from_folder=resume_from_folder
+        return TaskTrainer(model_augmentation).train(
+            task=self, hyperparameters=hyperparameters, resume_from_folder=resume_from_folder
         )
 
 

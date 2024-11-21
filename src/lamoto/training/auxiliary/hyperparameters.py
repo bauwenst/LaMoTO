@@ -1,9 +1,9 @@
 from typing import Optional, Union, Generic, Type
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 
 import warnings
-import numpy as np
 from copy import deepcopy
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedConfig
 from datasets import Dataset
@@ -207,7 +207,7 @@ class TaskHyperparameters(Generic[HC]):
     # Model configuration
     # - Initialising:
     SEED: int
-    MODEL_CONFIG_OR_CHECKPOINT: Union[str, PretrainedConfig]
+    MODEL_CONFIG_OR_CHECKPOINT: Union[str, Path, PretrainedConfig]
     archit_basemodel_class: Type[BaseModel]
     archit_head_config: HC
 

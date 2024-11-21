@@ -44,11 +44,13 @@ def showWarningsAndProgress(enabled: bool):
 
 class TaskTrainer:
 
+    def __init__(self, model_augmentation: ModelAugmentation=None):
+        self._model_augmentation = model_augmentation
+
     def train(
         self,
         task: Task,
         hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(),
-        model_augmentation: ModelAugmentation=None,
         resume_from_folder: Path=None
     ) -> Tuple[str, Dict[str, float]]:
         """
@@ -134,7 +136,7 @@ class TaskTrainer:
         else:  # We don't use the tokeniser name because it isn't directly related to the model.
             raise RuntimeError("Cannot deduce name to save model as from a config.")
 
-        global_model_identifier = model_name + ("" if not model_augmentation else ("-" + model_augmentation.name)) \
+        global_model_identifier = model_name + ("" if not self._model_augmentation else ("-" + self._model_augmentation.name)) \
                                 + f"_{task.task_name}" \
                                 + f"_{datetimeDashed()}"
 
@@ -209,11 +211,11 @@ class TaskTrainer:
         model.config.pad_token_id = task.model_config.base_model_config.pad_token_id  # task.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
 
         # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.
-        if model_augmentation:
+        if self._model_augmentation:
             if hyperparameters.init_weights:
-                model_augmentation.augmentAndLoad(model, task.tokenizer, checkpoint=hyperparameters.MODEL_CONFIG_OR_CHECKPOINT)
+                self._model_augmentation.augmentAndLoad(model, task.tokenizer, checkpoint=hyperparameters.MODEL_CONFIG_OR_CHECKPOINT)
             else:
-                model_augmentation.augment(model, task.tokenizer)
+                self._model_augmentation.augment(model, task.tokenizer)
         model.to("cuda")
 
         # Now that we have a reference to the dataset and model, build the metrics.
@@ -234,7 +236,7 @@ class TaskTrainer:
             project=hyperparameters.WANDB_PROJECT,
             group=model_name,
             name=global_model_identifier,
-            tags=[task.task_name, torch.cuda.get_device_name()] + ([model_augmentation.name] if model_augmentation else []),
+            tags=[task.task_name, torch.cuda.get_device_name()] + ([self._model_augmentation.name] if self._model_augmentation else []),
 
             dir=folder_wandb.as_posix()
         )
