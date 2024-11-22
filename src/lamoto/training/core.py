@@ -6,7 +6,8 @@ import time
 import torch
 import wandb
 import transformers
-from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer
+from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer, \
+    PreTrainedTokenizerBase
 from transformers.trainer_utils import has_length
 from transformers.utils.logging import set_verbosity_error
 from huggingface_hub.constants import HF_HUB_CACHE
@@ -16,6 +17,7 @@ from archit.util import torchPrint, parameterCountBaseVsHead
 from fiject.hooks.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
+from tktkt.builders.base import TokeniserBuilder
 from tktkt.util.printing import intsep, pluralise
 from tktkt.util.timing import datetimeDashed
 from tktkt.files.paths import PathManager
@@ -147,17 +149,20 @@ class TaskTrainer:
 
         # Set up tokeniser
         log("Loading tokeniser...")
-        if hyperparameters.TOKENISER:
-            if isinstance(hyperparameters.TOKENISER, str):
-                tokenizer = AutoTokenizer.from_pretrained(hyperparameters.TOKENISER, add_prefix_space=True)
-            elif isinstance(hyperparameters.TOKENISER, TokeniserWithFiniteTypeDomain):
-                tokenizer = TktktToHuggingFace(hyperparameters.TOKENISER)
-            else:
-                tokenizer = hyperparameters.TOKENISER
+        tokenizer = hyperparameters.TOKENISER
+        if tokenizer:
+            if isinstance(tokenizer, str):
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer, add_prefix_space=True)
+            elif isinstance(tokenizer, TokeniserWithFiniteTypeDomain):
+                tokenizer = TktktToHuggingFace(tokenizer)
+            elif isinstance(tokenizer, TokeniserBuilder):
+                tokenizer = TktktToHuggingFace(tokenizer.buildTokeniser())
+            elif not isinstance(tokenizer, PreTrainedTokenizerBase):
+                raise RuntimeError(f"Cannot handle tokeniser of type '{type(hyperparameters.TOKENISER)}'.")
         elif isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
             tokenizer = AutoTokenizer.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, add_prefix_space=True)
         else:
-            raise RuntimeError("Cannot deduce tokeniser checkpoint from config.")
+            raise RuntimeError("Cannot deduce tokeniser checkpoint from a model config.")
         task._setTokenizer(tokenizer)
 
         # - Old models like GPT-2 have no pad token, but this doesn't really matter because it's actually the attention

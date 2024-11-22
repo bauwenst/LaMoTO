@@ -8,6 +8,10 @@ the weights change, the hyperparameters change, and the head changes.
 When you want to set up training experiments from the command line, rather than having to declare the tokeniser and
 checkpoint on the command line, it's nicer to be able to just request to "train node X in lineage A" and have the backend
 load checkpoints and tokenisers for you.
+
+TODO: It's useful to have a SAVE_AS string for wandb, but it's not so useful for lookups in the lineage registry (i.e.
+      command-line identifiers). Problem is that you may want your SAVE_AS to be based on tk.getName() which is unknown
+      until train time.
 """
 from typing import Type, List, Iterable, Union, Optional, Self
 from transformers import PretrainedConfig
@@ -16,6 +20,7 @@ from pathlib import Path
 Checkpoint = Union[str,Path]
 
 from tktkt.builders.base import TokeniserBuilder
+from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from archit.instantiation.abstracts import BaseModel
 
 from .auxiliary.hyperparameters import TaskHyperparameters
@@ -37,8 +42,8 @@ class LineageNode(ABC):
                     You leave this parameter None when you run your experiment, and then fill it in when you want to
                     do follow-up experiments.
         """
-        self._handle = handle
-        self._out    = out
+        self.handle = handle
+        self.out    = out
         self._hp     = hp
 
         self._children: List[LineageNode] = []
@@ -46,7 +51,7 @@ class LineageNode(ABC):
 
     def followedBy(self, child: "LineageNode"):
         if child._parent is not None:
-            raise RuntimeError(f"Node '{child._handle}' already has a parent '{child._parent._handle}', so cannot make '{self._handle}' the parent.")
+            raise RuntimeError(f"Node '{child.handle}' already has a parent '{child._parent.handle}', so cannot make '{self.handle}' the parent.")
 
         self._children.append(child)
         child._parent = self
@@ -75,9 +80,14 @@ class LineageNode(ABC):
 
         # Copy HPs because e.g. storing the tokeniser permanently in this node's HPs is a bad idea.
         hp = self._hp.copy()
-        hp.archit_basemodel_class = lineage.base_model
-        hp.TOKENISER              = lineage.tokeniser.buildTokeniser()
-        hp.MODEL_CONFIG_OR_CHECKPOINT = self._parent._out
+        hp.MODEL_CONFIG_OR_CHECKPOINT = self._parent.out
+        hp.archit_basemodel_class = lineage.base_model or hp.archit_basemodel_class
+        hp.TOKENISER              = lineage.tokeniser or hp.TOKENISER
+        if hp.archit_basemodel_class is None:
+            raise RuntimeError(f"Lineage '{lineage.name}' has no base model set, and node '{self.handle}' doesn't have one in its hyperparameters either.")
+        if hp.TOKENISER is None:
+            raise RuntimeError(f"Lineage '{lineage.name}' has no tokeniser set, and node '{self.handle}' doesn't have one in its hyperparameters either.")
+
         return hp
 
     def __iter__(self):
@@ -94,9 +104,11 @@ class Lineage:
         [start]--> config --[training node]--> pretrained model --|---[tuning node]--> fine-tuned model
                                                                   \---[tuning node]--> fine-tuned model
     ```
+    A lineage generally (unless in certain experimental setups) shares the same tokeniser and base model architecture
+    across all its nodes.
     """
 
-    def __init__(self, name: str, tokeniser: TokeniserBuilder, base_model: Type[BaseModel],
+    def __init__(self, name: str, tokeniser: Optional[Union[str,TokeniserBuilder[TokeniserWithFiniteTypeDomain]]], base_model: Optional[Type[BaseModel]],
                  starting_config_or_checkpoint: Union[Checkpoint, PretrainedConfig], tree: LineageNode):
         self.name = name
         self.tokeniser = tokeniser
@@ -104,26 +116,26 @@ class Lineage:
 
         self._nodes = _StartingNode(self, starting_config_or_checkpoint)
         self._nodes.followedBy(tree)
-        assert len(list(self.whichHandles())) == len(set(self.whichHandles())), "Lineage contains at least two nodes with the same handle."
+        assert len(list(self.listHandles())) == len(set(self.listHandles())), "Lineage contains at least two nodes with the same handle."
 
     def __iter__(self) -> Iterable["LineageNode"]:
         yield from self._nodes.__iter__()
 
     def run(self, node_handle: str):
         for node in self:
-            if node._handle == node_handle:
+            if node.handle == node_handle:
                 node._run()
                 break
         else:
             raise ValueError(f"Handle not in lineage: {node_handle}")
 
-    def whichHandles(self) -> List[str]:
-        return [node._handle for node in self]
+    def listHandles(self) -> List[str]:
+        return [node.handle for node in self]
 
 
 class LineageRegistry:
     """
-    Collection of all the lineages in your project.
+    Collection of lineages, indexed by name.
     """
 
     def __init__(self):
@@ -134,6 +146,9 @@ class LineageRegistry:
 
     def get(self, name: str) -> Lineage:
         return self._registry.get(name)
+
+    def listNames(self) -> List[str]:
+        return [l.name for l in self]
 
     def __iter__(self) -> Iterable["Lineage"]:
         for lineage in self._registry.values():
@@ -164,7 +179,7 @@ class TrainingNode(LineageNode):
         return result
 
     def duplicate(self) -> Self:
-        return TrainingNode(self._handle, self._hp, self._trainer, self._task)
+        return TrainingNode(self.handle, self._hp, self._trainer, self._task)
 
 
 class TuningNode(LineageNode):
@@ -182,4 +197,4 @@ class TuningNode(LineageNode):
         return result
 
     def duplicate(self) -> Self:
-        return TuningNode(self._handle, self._hp, self._meta, self._tuner, self._task)
+        return TuningNode(self.handle, self._hp, self._meta, self._tuner, self._task)

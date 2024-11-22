@@ -5,11 +5,13 @@ from pathlib import Path
 
 import warnings
 from copy import deepcopy
+
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedConfig
 from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
 
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
+from tktkt.builders.base import TokeniserBuilder
 from archit.instantiation.abstracts import PC, HC, BaseModel
 
 from ...util.datasets import getDatasetSize, totalBatches
@@ -220,7 +222,7 @@ class TaskHyperparameters(Generic[HC]):
     adamw_decay_rate: float  # Not the same as L2 regularisation. That's the whole point of the AdamW paper!
 
     # Tokeniser
-    TOKENISER: Optional[Union[PreTrainedTokenizerBase, TokeniserWithFiniteTypeDomain, str]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
+    TOKENISER: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithFiniteTypeDomain, TokeniserBuilder[TokeniserWithFiniteTypeDomain]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
     ADD_SPECIAL_TOKENS: bool
 
     def copy(self) -> "TaskHyperparameters[HC]":
