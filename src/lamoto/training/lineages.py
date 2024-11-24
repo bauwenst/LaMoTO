@@ -12,7 +12,6 @@ load checkpoints and tokenisers for you.
 from typing import Type, List, Iterable, Union, Optional, Self
 from transformers import PretrainedConfig
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
 Checkpoint = Union[str,Path]
 
@@ -42,7 +41,7 @@ class LineageNode(ABC):
         """
         self.handle = handle
         self.out    = out
-        self._hp     = hp
+        self._hp    = hp
 
         self._children: List[LineageNode] = []
         self._parent: Optional[LineageNode] = None
@@ -83,22 +82,23 @@ class LineageNode(ABC):
         """
         Retrieve the node's hyperparameters while imputing the tokeniser and base model from the lineage this node belongs
         to, and imputing the checkpoint from the parent node.
-
-        FIXME: This should use a search for the first _AnchorNode that has non-None field(s) for what we are looking for.
         """
-        lineage = self._getLineage()
+        basemodel_node = self
+        while not(isinstance(basemodel_node, _AnchorNode) and basemodel_node.base_model is not None):
+            basemodel_node = basemodel_node._parent
+
+        tokeniser_node = self
+        while not(isinstance(tokeniser_node, _AnchorNode) and tokeniser_node.tokeniser is not None):
+            tokeniser_node = tokeniser_node._parent
 
         # Copy HPs because e.g. storing the tokeniser permanently in this node's HPs is a bad idea.
         hp = self._hp.copy()
         hp.MODEL_CONFIG_OR_CHECKPOINT = self._parent.out
-        hp.archit_basemodel_class = lineage.base_model or hp.archit_basemodel_class
-        hp.TOKENISER              = lineage.tokeniser or hp.TOKENISER
-        if hp.archit_basemodel_class is None:
-            raise RuntimeError(f"Lineage '{lineage.name}' has no base model set, and node '{self.handle}' doesn't have one in its hyperparameters either.")
-        if hp.TOKENISER is None:
-            raise RuntimeError(f"Lineage '{lineage.name}' has no tokeniser set, and node '{self.handle}' doesn't have one in its hyperparameters either.")
+        hp.archit_basemodel_class = basemodel_node.base_model
+        hp.TOKENISER              = tokeniser_node.tokeniser
 
         # Identify the run by the full name of the lineage.
+        lineage = self._getLineage()
         hp.SAVE_AS = lineage.name
         return hp
 
@@ -106,6 +106,36 @@ class LineageNode(ABC):
         yield self
         for node in self._children:
             yield from node.__iter__()
+
+
+class _AnchorNode(LineageNode):
+    def __init__(self, tokeniser: Optional[SerialisedTokeniser], base_model: Optional[Type[BaseModel]],
+                 config_or_checkpoint: Optional[Union[Checkpoint, PretrainedConfig]]):
+        super().__init__("", hp=None, out=config_or_checkpoint)
+        self.tokeniser: Optional[SerialisedTokeniser] = tokeniser
+        self.base_model: Optional[Type[BaseModel]]    = base_model
+
+
+class LineageAnchorNode(_AnchorNode):
+    """
+    Resets the tokeniser and/or the base model architecture for all descendant nodes in the lineage.
+    """
+    def __init__(self, tokeniser: Optional[SerialisedTokeniser], base_model: Optional[Type[BaseModel]]):
+        super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=None)
+
+    @property
+    def out(self):
+        return self._parent.out
+
+
+class LineageRootNode(_AnchorNode):
+    def __init__(self, starting_config_or_checkpoint: Union[Checkpoint, PretrainedConfig],
+                 tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
+        super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=starting_config_or_checkpoint)
+        self._lineage: Lineage = None
+
+    def _registerLineage(self, lineage: "Lineage"):
+        self._lineage = lineage
 
 
 class Lineage:
@@ -120,7 +150,7 @@ class Lineage:
     across all its nodes.
     """
 
-    def __init__(self, handle: str, name: str, root: "LineageRootNode"):
+    def __init__(self, handle: str, name: str, root: LineageRootNode):
         self.handle = handle
         self.name   = name
 
@@ -168,39 +198,9 @@ class LineageRegistry:
     def listHandles(self) -> List[str]:
         return [l.handle for l in self]
 
-    def __iter__(self) -> Iterable["Lineage"]:
+    def __iter__(self) -> Iterable[Lineage]:
         for lineage in self._registry.values():
             yield lineage
-
-
-class _AnchorNode(LineageNode):
-    def __init__(self, tokeniser: Optional[SerialisedTokeniser], base_model: Optional[Type[BaseModel]],
-                 config_or_checkpoint: Optional[Union[Checkpoint, PretrainedConfig]]):
-        super().__init__("", hp=None, out=config_or_checkpoint)
-        self.tokeniser: Optional[SerialisedTokeniser] = tokeniser
-        self.base_model: Optional[Type[BaseModel]]    = base_model
-
-
-class LineageAnchorNode(_AnchorNode):
-    """
-    Resets the tokeniser and/or the base model architecture for all descendant nodes in the lineage.
-    """
-    def __init__(self, tokeniser: Optional[SerialisedTokeniser], base_model: Optional[Type[BaseModel]]):
-        super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=None)
-
-    @property
-    def out(self):
-        return self._parent.out
-
-
-class LineageRootNode(_AnchorNode):
-    def __init__(self, starting_config_or_checkpoint: Union[Checkpoint, PretrainedConfig],
-                 tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
-        super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=starting_config_or_checkpoint)
-        self._lineage: Lineage = None
-
-    def _registerLineage(self, lineage: Lineage):
-        self._lineage = lineage
 
 
 class TrainingNode(LineageNode):
