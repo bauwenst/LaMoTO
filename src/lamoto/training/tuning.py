@@ -1,10 +1,11 @@
 """
 Tuning framework in which many models are trained for the same task with various hyperparameter sets.
 """
-import json
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict
 
+import json
+from copy import deepcopy
 import numpy.random as npr
 from tktkt.util.printing import dprint, pluralise, ordinal
 
@@ -25,6 +26,9 @@ class MetaHyperparameters:
     minmax_evals_phase_2: int
 
     rank_by: RankingMetricSpec
+
+    def copy(self) -> "MetaHyperparameters":
+        return deepcopy(self)
 
 
 class TaskTuner:
