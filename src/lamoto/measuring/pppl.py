@@ -22,7 +22,7 @@ class PseudoPerplexity(AutonomousMetric):
         p, n, t = pppl(
             model=self.environment.model,
             tokenizer=self.environment.tokeniser,
-            validation_dataset=self.environment.validation_dataset,
+            dataset=self.environment.getDatasetWithoutCollator(),
             rightward_fraction=params.right_fraction,
             device_batch_size=self.environment.hyperparameters.EXAMPLES_PER_DEVICEBATCH
         )
@@ -33,7 +33,7 @@ class PseudoPerplexity(AutonomousMetric):
         }
 
 
-def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset, device_batch_size: int,
+def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset, device_batch_size: int,
          rightward_fraction: float=0.5, tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
     """
     Masked perplexity (pseudo-perplexity). Same boundary conditions as causal perplexity apply, except the task is not to
@@ -62,15 +62,11 @@ def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_
     The implementation below supports any special token format, and any context length. The latter can be done naively
     by having equal context on the left and right, or parameterised by the proportion of left/right context. This is the
     most general version of the algorithm and I have implemented that below.
-
-    FIXME: This function crashes for long examples, because the batch we send to the model for an example of N
-          tokens with a context length of L tokens is N x min(N,L) which could e.g. be a batch of 1024 examples, sent
-          straight to the device. Normally one device handles at most 64 examples in a batch...
     """
     # Iterate over examples and keep non-averaged NLLs for each.
     nlls = []
     total_tokens = 0
-    for example in tqdm(validation_dataset, total=tqdm_dataset_size):
+    for example in tqdm(dataset, total=tqdm_dataset_size):
         if "input_ids" in example:
             encodings = torch.tensor(example["input_ids"])
         else:

@@ -1,11 +1,32 @@
 from typing import Protocol, Any, Dict, Type, Optional
 from typing_extensions import Self  # https://stackoverflow.com/a/77247460/9352077
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from torch import Tensor
 
+from transformers import PreTrainedModel, PreTrainedTokenizerBase, Trainer
+from datasets import Dataset
 import evaluate
 
-from ..training.auxiliary.hyperparameters import TaskHyperparameters, EvaluationEnvironment
+from ..training.auxiliary.hyperparameters import TaskHyperparameters
+
+
+@dataclass
+class EvaluationEnvironment:
+    model: PreTrainedModel
+    tokeniser: PreTrainedTokenizerBase
+    hyperparameters: TaskHyperparameters
+    trainer: Trainer
+
+    validation_dataset: Dataset
+    test_dataset: Dataset
+    use_test_not_validation: bool=False
+
+    def getDatasetWithoutCollator(self):
+        return self.test_dataset if self.use_test_not_validation else self.validation_dataset
+
+    def getDatasetWithCollator(self):
+        return self.trainer.get_eval_dataloader(self.getDatasetWithoutCollator())
 
 
 class MetricHyperparameters:

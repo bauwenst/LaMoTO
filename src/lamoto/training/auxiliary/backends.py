@@ -4,10 +4,13 @@ Backend classes that do the actual model training itself.
 from typing import Optional, List
 import torch
 import shutil
-from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, denumpify_detensorize, deepspeed_init, logger, has_length
+from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, denumpify_detensorize, deepspeed_init, logger, has_length, Trainer
 
 from hf_mtask_trainer import HfMultiTaskTrainer
 
+### FIXME: As long as HfMultiTaskTrainer doesn't use keyword arguments in the constructor, we can't use it. https://github.com/zipzou/hf-multitask-trainer/issues/5
+HfMultiTaskTrainer = Trainer
+###
 
 class ModelTrainer(HfMultiTaskTrainer):
     """

@@ -52,7 +52,7 @@ class BitsPerCharacter(AutonomousMetric):
 
     def computeFromEnvironment(self) -> Dict[str, float]:
         params = PPL_Parameters.extractFromTask(self.environment.hyperparameters)
-        b, c = bpc(self.environment.model, self.environment.tokeniser, self.environment.validation_dataset,
+        b, c = bpc(self.environment.model, self.environment.tokeniser, self.environment.getDatasetWithoutCollator(),
                    stride_fraction=params.stride_fraction)
         return {
             "bpc": b,
@@ -60,13 +60,13 @@ class BitsPerCharacter(AutonomousMetric):
         }
 
 
-def bpc(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset, stride_fraction: float,
+def bpc(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset, stride_fraction: float,
         tqdm_dataset_size: int=None) -> Tuple[float, int]:
-    PPL, _, N_tokens = ppl(model, tokenizer, validation_dataset, stride_fraction, tqdm_dataset_size)
+    PPL, _, N_tokens = ppl(model, tokenizer, dataset, stride_fraction, tqdm_dataset_size)
 
-    # Compute N_characters (note: this requires that the validation dataset can be iterated with the same return values both times)
+    # Compute N_characters (note: this requires that the dataset can be iterated with the same return values both times)
     N_chars = 0
-    for example in validation_dataset:
+    for example in dataset:
         text = example["text"]
         N_chars += len(text)
 

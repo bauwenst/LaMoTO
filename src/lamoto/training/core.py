@@ -1,4 +1,4 @@
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Any
 from pathlib import Path
 
 import json
@@ -7,7 +7,7 @@ import torch
 import wandb
 import transformers
 from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer, \
-    PreTrainedTokenizerBase
+    PreTrainedTokenizerBase, EvalPrediction
 from transformers.trainer_utils import has_length
 from transformers.utils.logging import set_verbosity_error
 from huggingface_hub.constants import HF_HUB_CACHE
@@ -17,23 +17,22 @@ from archit.util import torchPrint, parameterCountBaseVsHead
 from fiject.hooks.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
-from tktkt.builders.base import TokeniserBuilder
+from tktkt.interfaces.factories import TokeniserFactory
 from tktkt.util.printing import intsep, pluralise
 from tktkt.util.timing import datetimeDashed
-from tktkt.files.paths import PathManager
+from tktkt.paths import PathManager
 
 from ..tasks._core import Task, RankingMetricSpec
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring import METRICS
-from ..measuring._core import LamotoMetric
-from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType
-from .auxiliary.hyperparameters import *
-from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
+from ..measuring._core import LamotoMetric, EvaluationEnvironment
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import log, printLamotoWelcome
-
+from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType
+from .auxiliary.hyperparameters import *
+from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
 
 LamotoPaths = PathManager("lamoto")
 
@@ -138,7 +137,7 @@ class TaskTrainer:
         else:  # We don't use the tokeniser name because it isn't directly related to the model.
             raise RuntimeError("Cannot deduce name to save model as from a config.")
 
-        global_model_identifier = model_name + ("" if not self._model_augmentation else ("-" + self._model_augmentation.name)) \
+        global_model_identifier = model_name + ("" if not self._model_augmentation else ("+" + self._model_augmentation.name)) \
                                 + f"_{task.task_name}" \
                                 + f"_{datetimeDashed()}"
 
@@ -155,7 +154,7 @@ class TaskTrainer:
                 tokenizer = AutoTokenizer.from_pretrained(tokenizer, add_prefix_space=True)
             elif isinstance(tokenizer, TokeniserWithFiniteTypeDomain):
                 tokenizer = TktktToHuggingFace(tokenizer)
-            elif isinstance(tokenizer, TokeniserBuilder):
+            elif isinstance(tokenizer, TokeniserFactory):
                 tokenizer = TktktToHuggingFace(tokenizer.buildTokeniser())
             elif not isinstance(tokenizer, PreTrainedTokenizerBase):
                 raise RuntimeError(f"Cannot handle tokeniser of type '{type(hyperparameters.TOKENISER)}'.")
@@ -224,11 +223,15 @@ class TaskTrainer:
         model.to("cuda")
 
         # Now that we have a reference to the dataset and model, build the metrics.
+        # (Some need access to the ModelTrainer for collation, but since we don't know which trainer we'll instantiate
+        #  before knowing the properties of the metrics, the trainer is instantiated and linked to the env afterwards.)
         env = EvaluationEnvironment(
             model=model,
             tokeniser=task.tokenizer,
             validation_dataset=datasetdict["validation"],
-            hyperparameters=task.hyperparameters
+            test_dataset=datasetdict["test"],
+            hyperparameters=task.hyperparameters,
+            trainer=None
         )
         task._setMetrics({name: METRICS.load(name,env) for name in task.metric_config.to_compute})
 
@@ -395,6 +398,7 @@ class TaskTrainer:
             compute_metrics=task._computeMetrics,
             preprocess_logits_for_metrics=task.sneakyLogitTransform
         )
+        env.trainer = trainer
 
         # Lastly, do some prints (not logs).
         # Print the loaded model and a breakdown of its parameter counts.
@@ -453,11 +457,15 @@ class TaskTrainer:
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
             # trainer.push_to_hub()
+
             log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on validation set...")
-            validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval")
+            env.use_test_not_validation = False
+            validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="eval")
             print(validation_results)
+
             log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
-            test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test")
+            env.use_test_not_validation = True
+            test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
             print(test_results)
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
 
@@ -494,3 +502,10 @@ class TaskTrainer:
             wandb.finish(exit_code=1)
             time.sleep(1)
             raise e1
+
+    def _prefixMetrics(self, metrics: Dict[str,Any], metric_key_prefix: str) -> Dict[str,Any]:
+        metrics = metrics.copy()
+        for key in list(metrics.keys()):
+            if not key.startswith(f"{metric_key_prefix}_"):
+                metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
+        return metrics

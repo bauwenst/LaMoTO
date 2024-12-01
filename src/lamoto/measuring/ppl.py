@@ -22,7 +22,7 @@ class Perplexity(AutonomousMetric):
         p, n, t = ppl(
             model=self.environment.model,
             tokenizer=self.environment.tokeniser,
-            validation_dataset=self.environment.validation_dataset,
+            dataset=self.environment.getDatasetWithoutCollator(),
             stride_fraction=params.stride_fraction
         )
         return {
@@ -32,7 +32,7 @@ class Perplexity(AutonomousMetric):
         }
 
 
-def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_dataset: Dataset,
+def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset,
         stride_fraction: float, tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
     """
     Causal perplexity has two boundary conditions:
@@ -80,7 +80,7 @@ def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, validation_d
     # Iterate over examples and keep non-averaged NLLs for each.
     nlls = []
     total_tokens = 0
-    for example in tqdm(validation_dataset, total=tqdm_dataset_size):
+    for example in tqdm(dataset, total=tqdm_dataset_size):
         encodings = tokenizer(example["text"], return_tensors="pt")  # This is a 1 x n_tokens batch.
         n_tokens  = encodings.input_ids.size(1)
 

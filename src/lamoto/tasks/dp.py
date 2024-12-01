@@ -77,7 +77,7 @@ class DataCollatorForDependencyParsing(DataCollatorMixin):
             # "labels_rels": labels_rels
             "input_ids": ids_tensor,
             "attention_mask": attention_mask,
-            "labels": (labels_arcs, labels_rels)
+            "labels": (labels_arcs, labels_rels)  # The fact that this is a tuple is reflected in the signature for DP.sneakyLogitTransform, and in ArchIt's ForDependencyParsing.computeLoss and matches the output of DependencyParsingHead.forward.
         }
 
 
@@ -130,13 +130,13 @@ class DP(Task[DependencyParsingHeadConfig]):
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def getTagset(self) -> Counter:
-        log("Generating tagset manually...")
+        log("Generating DP tagset manually...")
         counter = Counter()
         dataset = self._loadDataset()
         for split in dataset:
             for label_sequence in dataset[split]["deprel"]:
                 counter.update(label_sequence)
-        log("Finished generating tagset.")
+        log("Finished generating DP tagset.")
         return counter
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):

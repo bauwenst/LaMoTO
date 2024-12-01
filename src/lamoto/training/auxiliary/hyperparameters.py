@@ -11,7 +11,7 @@ from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
 
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
-from tktkt.builders.base import TokeniserBuilder
+from tktkt.interfaces.factories import TokeniserFactory
 from archit.instantiation.abstracts import PC, HC, BaseModel
 
 from ...util.datasets import getDatasetSize, totalBatches
@@ -183,7 +183,10 @@ class Intervals:
 
 @dataclass
 class TaskHyperparameters(Generic[HC]):
-    SAVE_AS: Optional[str]  # Not necessary if a checkpoint name is given.
+    # Naming (not necessary in case a checkpoint name is given)
+    SAVE_AS: Optional[str]  # Results in checkpoint names of the form "partialname+augmentation_taskname+taskaugmentation_2024-01-23_01-02-03"
+
+    # Side-effects
     WANDB_PROJECT: Optional[str]
     traceless: bool  # Whether to discard any model and any graph of intermediate results and only the evaluation results, or to keep graphs and the usual two checkpoints.
     store_in_hf_cache: bool  # Whether to store model checkpoints in the HF_HOME cache folder, or just the CWD.
@@ -222,7 +225,7 @@ class TaskHyperparameters(Generic[HC]):
     adamw_decay_rate: float  # Not the same as L2 regularisation. That's the whole point of the AdamW paper!
 
     # Tokeniser
-    TOKENISER: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithFiniteTypeDomain, TokeniserBuilder[TokeniserWithFiniteTypeDomain]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
+    TOKENISER: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithFiniteTypeDomain, TokeniserFactory[TokeniserWithFiniteTypeDomain]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
     ADD_SPECIAL_TOKENS: bool
 
     def copy(self) -> "TaskHyperparameters[HC]":
@@ -271,14 +274,6 @@ def hyperparametersFromDict(hp_as_dict: dict) -> TaskHyperparameters:
     return hp
 
 
-@dataclass
-class EvaluationEnvironment:
-    model: PreTrainedModel
-    tokeniser: PreTrainedTokenizerBase
-    validation_dataset: Dataset
-    hyperparameters: TaskHyperparameters
-
-
 from archit.instantiation.basemodels import RobertaBaseModel
 
 SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
@@ -320,7 +315,7 @@ def getDefaultHyperparameters() -> TaskHyperparameters:
     return SUGGESTED_HYPERPARAMETERS.copy()
 
 
-__all__ = ["TaskHyperparameters", "Intervals", "EvaluationEnvironment",
+__all__ = ["TaskHyperparameters", "Intervals",
            "Never", "EveryNEpochs", "EveryNDescents", "EveryNDescentsOrOncePerEpoch", "NEveryEpoch", "EveryNMinutes", "EveryNPackedTokens",
            "AfterNDescents", "AfterNEpochs", "AfterNPackedTokens", "AfterNMinutes",
            "PC", "HC", "getDefaultHyperparameters"]

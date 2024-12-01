@@ -2,12 +2,14 @@
 Tuning framework in which many models are trained for the same task with various hyperparameter sets.
 """
 from dataclasses import dataclass, asdict
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple, Iterable
 
 import json
 from copy import deepcopy
+from math import prod
 import numpy.random as npr
 from tktkt.util.printing import dprint, pluralise, ordinal
+from tktkt.util.iterables import keepFirst, take
 
 from ..tasks._core import Task, RankingMetricSpec, ModelAugmentation
 from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch
@@ -105,12 +107,11 @@ class TaskTuner:
 
         # Grid setup
         rng = npr.default_rng(hp.SEED + meta.meta_seed)
-        samples = zip(
-            rng.choice(self._warmup_steps_grid,         size=meta.n_grid_samples).tolist(),
-            rng.choice(self._effective_batch_size_grid, size=meta.n_grid_samples).tolist(),
-            rng.choice(self._learning_rates,            size=meta.n_grid_samples).tolist(),
-            rng.choice(self._decay_rates,               size=meta.n_grid_samples).tolist()
-        )
+        samples = sampleGridWithoutReplacement(rng, meta.n_grid_samples,
+                                               self._warmup_steps_grid,
+                                               self._effective_batch_size_grid,
+                                               self._learning_rates,
+                                               self._decay_rates)
 
         # Grid search
         ranking_metric_name = "eval_" + meta.rank_by.fullName()
@@ -164,3 +165,15 @@ class TaskTuner:
         with open(LamotoPaths.append(LamotoPaths.pathToEvaluations(), identifier) / "tuning-config.json", "w", encoding="utf-8") as handle:
             json.dump(asdict(meta), handle)
         return results
+
+
+def sampleGridWithoutReplacement(rng: npr.Generator, n_samples: int, *domains: List[float]) -> Iterable[Tuple[float, ...]]:
+    max_n_samples = prod(len(domain) for domain in domains)
+    if n_samples > max_n_samples:
+        raise ValueError(f"Cannot take {n_samples} samples from a grid of " + " x ".join(map(str,map(len,domains))) + f" == {max_n_samples} tuples.")
+
+    def generateSamples():
+        while True:
+            yield tuple(rng.choice(domain) for domain in domains)
+
+    yield from take(n_samples, keepFirst(generateSamples()))

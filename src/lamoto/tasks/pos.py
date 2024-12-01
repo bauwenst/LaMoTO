@@ -13,7 +13,7 @@ from ..util.visuals import log
 class POS(Task[TokenClassificationHeadConfig]):
 
     def __init__(self):
-        log("Generating tagset...")
+        log("Generating PoS tagset...")
         self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"].feature.names]
         super().__init__(
             task_name="POS",

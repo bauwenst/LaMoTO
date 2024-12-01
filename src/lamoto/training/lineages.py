@@ -9,13 +9,15 @@ When you want to set up training experiments from the command line, rather than 
 checkpoint on the command line, it's nicer to be able to just request to "train node X in lineage A" and have the backend
 load checkpoints and tokenisers for you.
 """
-from typing import Type, List, Iterable, Union, Optional, Self
+from typing import Type, List, Iterable, Union, Optional
+from typing_extensions import Self
 from transformers import PretrainedConfig
 from abc import ABC, abstractmethod
 from pathlib import Path
 Checkpoint = Union[str,Path]
 
 from archit.instantiation.abstracts import BaseModel
+from tktkt.util.strings import indent
 from tktkt.builders.base import TokeniserBuilder
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 SerialisedTokeniser = Union[str,TokeniserBuilder[TokeniserWithFiniteTypeDomain]]
@@ -43,6 +45,8 @@ class LineageNode(ABC):
         self.out    = out
         self._hp    = hp
 
+        self._include_handle_in_checkpoint = False
+
         self._children: List[LineageNode] = []
         self._parent: Optional[LineageNode] = None
 
@@ -62,8 +66,13 @@ class LineageNode(ABC):
 
     @abstractmethod
     def duplicate(self) -> Self:
-        """Get an object of the same subclass that shares all its fields with the current object, but with no child/parent relationships."""
+        """Get an object of the same subclass that shares all its fields with the current object,
+           but with no child/parent/lineage relationships."""
         pass
+
+    def doIncludeHandleInOutput(self):
+        """Mention the name of the node in output created by it."""
+        self._include_handle_in_checkpoint = True
 
     @abstractmethod
     def _run(self):
@@ -83,6 +92,10 @@ class LineageNode(ABC):
         Retrieve the node's hyperparameters while imputing the tokeniser and base model from the lineage this node belongs
         to, and imputing the checkpoint from the parent node.
         """
+        lineage = self._getLineage()
+        if self._parent.out is None:
+            raise RuntimeError(f"Node '{self.handle}' of lineage '{lineage.name}' is downstream of a node without a checkpoint. Run that node first.")
+
         basemodel_node = self
         while not(isinstance(basemodel_node, _AnchorNode) and basemodel_node.base_model is not None):
             basemodel_node = basemodel_node._parent
@@ -97,15 +110,20 @@ class LineageNode(ABC):
         hp.archit_basemodel_class = basemodel_node.base_model
         hp.TOKENISER              = tokeniser_node.tokeniser
 
-        # Identify the run by the full name of the lineage.
-        lineage = self._getLineage()
-        hp.SAVE_AS = lineage.name
+        # Identify the run by the full name of the lineage and possibly the node.
+        hp.SAVE_AS = lineage.name + ("_" + self.handle)*self._include_handle_in_checkpoint
         return hp
 
     def __iter__(self):
         yield self
         for node in self._children:
             yield from node.__iter__()
+
+    def __repr__(self):
+        s = (self.handle or "{anchor}") + ": " + self.__class__.__name__ + "\n"
+        for child in self._children:
+            s += indent(1, child.__repr__(), tab="|   ")
+        return s
 
 
 class _AnchorNode(LineageNode):
@@ -114,6 +132,9 @@ class _AnchorNode(LineageNode):
         super().__init__("", hp=None, out=config_or_checkpoint)
         self.tokeniser: Optional[SerialisedTokeniser] = tokeniser
         self.base_model: Optional[Type[BaseModel]]    = base_model
+
+    def _run(self):
+        raise NotImplementedError("Anchor nodes cannot be run.")
 
 
 class LineageAnchorNode(_AnchorNode):
@@ -127,6 +148,9 @@ class LineageAnchorNode(_AnchorNode):
     def out(self):
         return self._parent.out
 
+    def duplicate(self) -> Self:
+        return LineageAnchorNode(tokeniser=self.tokeniser, base_model=self.base_model)
+
 
 class LineageRootNode(_AnchorNode):
     def __init__(self, starting_config_or_checkpoint: Union[Checkpoint, PretrainedConfig],
@@ -136,6 +160,10 @@ class LineageRootNode(_AnchorNode):
 
     def _registerLineage(self, lineage: "Lineage"):
         self._lineage = lineage
+
+    def duplicate(self) -> Self:
+        return LineageRootNode(starting_config_or_checkpoint=self.out,
+                               tokeniser=self.tokeniser, base_model=self.base_model)
 
 
 class Lineage:
@@ -163,11 +191,12 @@ class Lineage:
         yield from self._node_tree.__iter__()
 
     def run(self, node_handle: str):
-        if not node_handle:
-            raise ValueError(f"Cannot run empty node handle.")
         return self._get(node_handle)._run()
 
     def _get(self, node_handle: str) -> LineageNode:
+        if not node_handle:
+            raise ValueError(f"Cannot retrieve empty node handle.")
+
         for node in self:
             if node.handle == node_handle:
                 return node
@@ -175,7 +204,13 @@ class Lineage:
             raise ValueError(f"Handle not in lineage: {node_handle}")
 
     def listHandles(self) -> List[str]:
-        return [node.handle for node in self]
+        return [node.handle for node in self if node.handle]
+
+    def __repr__(self):
+        s = "Lineage(" + self.name + ") {\n"
+        s += indent(1, self._node_tree.__repr__(), tab="|   ")
+        s += "}"
+        return s
 
 
 class LineageRegistry:
@@ -197,6 +232,9 @@ class LineageRegistry:
 
     def listHandles(self) -> List[str]:
         return [l.handle for l in self]
+
+    def listNames(self) -> List[str]:
+        return [l.name for l in self]
 
     def __iter__(self) -> Iterable[Lineage]:
         for lineage in self._registry.values():
