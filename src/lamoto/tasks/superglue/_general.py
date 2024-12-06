@@ -1,4 +1,4 @@
-from ..glue._general import CompareSentencesGLUETask, GLUETask
+from ..glue._general import GLUETask, CompareSentencesGLUETask, ClassifySentenceGLUETask
 
 
 class SuperGLUETask(GLUETask):
@@ -6,4 +6,8 @@ class SuperGLUETask(GLUETask):
 
 
 class CompareSentencesSuperGLUETask(CompareSentencesGLUETask):
+    BASE_REPO = "aps/super_glue"
+
+
+class ClassifySentenceSuperGLUETask(ClassifySentenceGLUETask):
     BASE_REPO = "aps/super_glue"

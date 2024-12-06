@@ -67,7 +67,7 @@ class COPA(SuperGLUETask):
         return DataCollatorForMultipleChoice(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
-        return eval.predictions.squeeze().argmax(-1).tolist(), eval.label_ids.squeeze().tolist()
+        return eval.predictions.squeeze().argmax(-1).tolist(), eval.label_ids.squeeze().tolist()  # B x C x 1  --squeeze->  B x C  --argmax->  B.
 
 
 @dataclass

@@ -1,11 +1,14 @@
 TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
 
+TODO: Embedding matrix resizing when the checkpoint mismatches the vocab.
+    https://huggingface.co/docs/transformers/main/main_classes/model#transformers.PreTrainedModel.resize_token_embeddings
+    - We want this for WiC.
+
 TODO: Hour-long backoff wrapper around streamed datasets, to smooth over HuggingFace outages when streaming.
     - Also spice it up by sending the user an email to notify them of this "hybernation mode".
     - Also save the model.
 
 TODO: SuperGLUE:
-    - COPA is almost done
     - ReCoRD is almost done
     - WiC
     - WSC

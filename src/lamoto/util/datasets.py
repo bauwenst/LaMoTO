@@ -1,17 +1,21 @@
+from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any
+from abc import ABC, abstractmethod
+from enum import Enum
+from transformers import PreTrainedTokenizerBase
+
 import time
 import warnings
 from copy import deepcopy
-from typing import Iterable, Union, TypeVar, Generator, List
-from transformers import PreTrainedTokenizerBase
-from abc import ABC
-
+import numpy as np
+import numpy.random as npr
 import datasets
-from datasets import Dataset, IterableDataset
+from datasets import Dataset, IterableDataset, DatasetDict
 from datasets.arrow_dataset import DatasetInfoMixin
 
 from tktkt.util.printing import pluralise, ordinal
 
 from .schedules import Schedule
+from .exceptions import ImpossibleBranchError
 
 HuggingfaceDataset = Union[Dataset, IterableDataset]
 
@@ -66,9 +70,112 @@ def shuffleAndTruncate(dataset: DatasetInfoMixin, truncate_to: int=None, seed: i
         if truncate_to:
             dataset = dataset.take(truncate_to)
     else:
-        raise TypeError("")
+        raise TypeError(f"Cannot shuffle a {type(dataset).__name__}.")
 
     return dataset
+
+
+def imputeTestSplit(datasetdict: DatasetDict, column_for_stratification: Optional[str], seed: int) -> DatasetDict:
+    """
+    Some tasks have a test set where all labels are -1 so that the only way to verify performance is to send
+    model predictions to a privately owned server. For experiments, we want a proper test set. So, we take a
+    sample from the train set that is of the size of the validation set, and use that as the test set.
+    """
+    new_datasetdict = datasetdict["train"].train_test_split(
+        test_size=len(datasetdict["validation"]) / len(datasetdict["train"]),
+        stratify_by_column=column_for_stratification,
+        seed=seed
+    )
+    new_datasetdict["validation"] = datasetdict["validation"]
+    return new_datasetdict
+
+
+class BalancingStrategy(ABC):
+    """
+    Given for each label value the amount of examples in a dataset with that label value,
+    compute the target amounts for each label value according to some balancing strategy.
+    """
+    @abstractmethod
+    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+        pass
+
+
+class NoBalancing(BalancingStrategy):
+    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+        return label_counts
+
+
+class UpsampleToBiggest(BalancingStrategy):
+    def __init__(self, max_repeats: float=1_000_000_000_000):
+        self._max_repeats = max_repeats
+
+    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+        target = max(label_counts)
+        return [min(target, int(count*self._max_repeats)) for count in label_counts]
+
+
+class DownsampleToSmallest(BalancingStrategy):
+    def __init__(self, min_fraction: float=0.0):
+        self._min_fraction = min_fraction
+
+    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+        target = min(label_counts)
+        return [max(target, int(count*self._min_fraction)) for count in label_counts]
+
+
+class BalanceToMedian(BalancingStrategy):
+    """Balance every label to the median of all the class labels, which will include some upsampling and some downsampling."""
+    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+        return [int(np.median(label_counts))]*len(label_counts)
+
+
+Dataset_or_DatasetDict = TypeVar("Dataset_or_DatasetDict", bound=Union[Dataset,DatasetDict])
+
+def rebalanceLabels(dataset: Dataset_or_DatasetDict, label_column: str, strategy: BalancingStrategy, seed: int) -> Dataset_or_DatasetDict:
+    """
+    Per split, do the following:
+      1. Iterate over it once, separating indices by their label.
+      2. According to the balancing strategy, get the shortage/excess of each class.
+      3. For each class of size n with a shortage to get to N: duplicate N//n times and sample without replacement for the remaining N - N//n samples.
+      4. For each class of size n with an excess to get to N: sample N examples without replacement, equivalent to shuffling and truncating.
+    """
+    if isinstance(strategy, NoBalancing):
+        return dataset
+    if isinstance(dataset, DatasetDict):
+        return DatasetDict({split: rebalanceLabels(dataset[split], label_column, strategy, seed) for split in dataset})
+
+    rng = npr.default_rng(seed)
+
+    labels = dataset.with_format("numpy")[label_column]
+    unique_label_values, label_counts = np.unique(labels, return_counts=True)
+    target_counts = strategy.getTargetCounts(label_counts)
+
+    reordered_label_indices = np.argsort(labels, kind="stable")  # In this array, all indices of class 0 come before class 1 come before class 2 ... but they're still all in one array that needs to be split.
+    split_label_indices_at  = np.cumsum(label_counts)[:-1]  # cumsum ends with the total, which we don't need.
+
+    sampled_indices = []
+    for label_indices, old_count, new_count in zip(np.split(reordered_label_indices, indices_or_sections=split_label_indices_at), label_counts, target_counts):
+        assert len(label_indices) == old_count
+
+        if new_count > old_count:  # Upsample by copying the indices as many times as possible, and then sample without replacement.
+            for _ in range(new_count // old_count):
+                sampled_indices.append(label_indices)
+            sampled_indices.append(rng.choice(label_indices, size=new_count % old_count, replace=False))
+        elif new_count < old_count:  # Downsample without replacement.
+            sampled_indices.append(rng.choice(label_indices, size=new_count, replace=False))
+        else:  # Keep indices unchanged.
+            sampled_indices.append(label_indices)
+
+    return dataset.select(np.concatenate(sampled_indices))
+
+
+def getLabelCounts(dataset: Dataset_or_DatasetDict, label_column: str) -> Union[Dict[Any, int], Dict[str,Dict[Any,int]]]:
+    if isinstance(dataset, DatasetDict):
+        return {split: getLabelCounts(dataset[split], label_column) for split in dataset}
+
+    labels = dataset.with_format("numpy")[label_column]
+    unique_label_values, label_counts = np.unique(labels, return_counts=True)
+    return {label: count for label, count in zip(unique_label_values, label_counts)}
 
 
 # Timeout configuration (I tested this and it works, but it sure is a weird use of Python imports... https://github.com/huggingface/datasets/issues/6172#issuecomment-1794876229)
@@ -166,6 +273,12 @@ def IterableDatasetWithSkippingBackoff(dataset: IterableDataset, backoff_minutes
 T = TypeVar("T")
 class LossyBackoff(Iterable[T], ABC):
     """
+    FIXME: Unfortunately, this is just not how Python works. When a generator raise an error, you can't step back into it.
+           You can only smooth over exceptions if you can catch them INSIDE the loop that yields, not externally, making
+           you entirely dependent on HuggingFace.
+           Best you can do to salvage this class (but not for usage in LaMoTO) is to turn it into a None smoother, rather
+           than an exception smoother, because exception can't be smoothed over externally while Nones can.
+
     Wraps a given iterable, and when the next() raises an exception during iteration, a back-off is applied rather than
     raising the exception immediately.
 

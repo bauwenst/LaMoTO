@@ -4,7 +4,8 @@ from transformers import DataCollatorWithPadding, AutoModelForSequenceClassifica
 from archit.instantiation.heads import SequenceClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelSequenceClassification, ForSequenceRegression
 
-from lamoto.tasks._core import *
+from .._core import *
+from ...util.datasets import imputeTestSplit
 
 
 SequenceTaskHyperparameters = TaskHyperparameters[SequenceClassificationHeadConfig]
@@ -29,24 +30,14 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
         self._is_regressive = is_regressive
 
     def _loadDataset(self) -> DatasetDict:
-        return self._imputeTestSplit(self._loadDatasetRaw())
+        return imputeTestSplit(
+            self._loadDatasetRaw(),
+            column_for_stratification="label" if not self._is_regressive else None,
+            seed=self.hyperparameters.SEED
+        )
 
     def _loadDatasetRaw(self) -> DatasetDict:
         return load_dataset(self.BASE_REPO, self.task_name.lower().replace("-", ""), trust_remote_code=True)
-
-    def _imputeTestSplit(self, datasetdict: DatasetDict) -> DatasetDict:
-        """
-        GLUE tasks have a test set where all labels are -1 so that the only way to verify performance is to send
-        model predictions to a privately owned server. For experiments, we want a proper test set. So, we take a
-        sample from the train set, of the size of the validation set, and use that as the test set.
-        """
-        new_datasetdict = datasetdict["train"].train_test_split(
-            test_size=len(datasetdict["validation"])/len(datasetdict["train"]),
-            stratify_by_column="label" if not self._is_regressive else None,
-            seed=self.hyperparameters.SEED
-        )
-        new_datasetdict["validation"] = datasetdict["validation"]
-        return new_datasetdict
 
     def adjustHyperparameters(self, hp: SequenceTaskHyperparameters):
         hp.archit_head_config.num_labels = self._num_labels
