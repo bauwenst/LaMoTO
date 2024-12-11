@@ -13,7 +13,7 @@ from tktkt.util.iterables import keepFirst, take
 
 from ..tasks._core import Task, RankingMetricSpec, ModelAugmentation
 from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch
-from .core import log, TaskTrainer, LamotoPaths
+from .training import log, TaskTrainer, LamotoPaths
 
 
 @dataclass

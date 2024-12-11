@@ -15,6 +15,7 @@ from ..measuring import DependencyParsingMetrics, Metric
 from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import WordLevelPreprocessorWithDummies
 from ..util.visuals import log
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
 def relu(x):
@@ -171,9 +172,7 @@ class DP(Task[DependencyParsingHeadConfig]):
                 "attention_mask": [1]*len(tokens)  # word-level attention mask for the head
             }
 
-        dataset = dataset.map(datasetMap, batched=False)
-        dataset = dataset.remove_columns(["tokens", "idx", "text", "lemmas", "upos", "xpos", "feats", "head", "deprel", "deps", "misc"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, datasetMap)
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForDependencyParsing(self.tokenizer)

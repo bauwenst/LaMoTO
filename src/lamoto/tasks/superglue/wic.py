@@ -13,6 +13,7 @@ TODO: The architecture described by the authors is not bad. Mean-pooling the wor
 from datasets import DatasetDict
 
 from ._general import ClassifySentenceSuperGLUETask
+from ...util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
 class WiC(ClassifySentenceSuperGLUETask):
@@ -44,6 +45,4 @@ class WiC(ClassifySentenceSuperGLUETask):
                 [self.tokenizer.eos_token_id]
             return {"input_ids": input_ids, "attention_mask": [1]*len(input_ids)}
 
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns(["word", "sentence1", "sentence2", "start1", "start2", "end1", "end2", "idx"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})

@@ -18,12 +18,12 @@ Checkpoint = Union[str,Path]
 
 from archit.instantiation.abstracts import BaseModel
 from tktkt.util.strings import indent
-from tktkt.builders.base import TokeniserBuilder
+from tktkt.interfaces.factories import TokeniserFactory
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
-SerialisedTokeniser = Union[str,TokeniserBuilder[TokeniserWithFiniteTypeDomain]]
+SerialisedTokeniser = Union[str,TokeniserFactory[TokeniserWithFiniteTypeDomain]]
 
 from .auxiliary.hyperparameters import TaskHyperparameters
-from .core import TaskTrainer, Task
+from .training import TaskTrainer, Task
 from .tuning import TaskTuner, MetaHyperparameters
 
 

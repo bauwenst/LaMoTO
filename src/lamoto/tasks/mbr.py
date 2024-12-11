@@ -36,6 +36,7 @@ from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
 from ..training.auxiliary.hyperparameters import NEveryEpoch
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
 ##################################
@@ -107,16 +108,11 @@ class MBR(Task[TokenClassificationHeadConfig]):
         })
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        def preprocess(example):
-            output = self.tokenizer(example["text"], add_special_tokens=False,
-                                    # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
-                                    truncation=True, max_length=self._getMaxInputLength())
-            output["labels"] = example["labels"]
-            return output
-
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns(["text"])
-        return dataset
+        def preprocess(example: dict) -> dict:
+            return self.tokenizer(example["text"], add_special_tokens=False,
+                                  # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
+                                  truncation=True, max_length=self._getMaxInputLength())
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"labels"})
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
         hp.archit_head_config.num_labels = 2

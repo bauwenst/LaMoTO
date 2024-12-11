@@ -7,6 +7,7 @@ from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
 from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
 class NER(Task[TokenClassificationHeadConfig]):
@@ -47,9 +48,7 @@ class NER(Task[TokenClassificationHeadConfig]):
                 "labels": labels["ner_tags"]
             }
 
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns(["tokens", "id", "chunk_tags", "pos_tags", "ner_tags"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess)
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
         hp.archit_head_config.num_labels = len(self.tagset)

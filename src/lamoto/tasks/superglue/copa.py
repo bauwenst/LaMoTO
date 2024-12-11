@@ -11,6 +11,7 @@ from archit.instantiation.tasks import ForSingleAnswerMultipleChoice
 
 from ._general import SuperGLUETask
 from .._core import MetricSetup
+from ...util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
 class COPA(SuperGLUETask):
@@ -59,9 +60,7 @@ class COPA(SuperGLUETask):
             return self.tokenizer(2*[example["premise"] + " " + COPA.HARDCODED_QUESTIONS[example["question"]]], [example["choice1"], example["choice2"]],
                                   add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
 
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns(["premise", "question", "choice1", "choice2", "idx"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForMultipleChoice(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())

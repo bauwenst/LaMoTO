@@ -171,7 +171,7 @@ class Task(ABC, Generic[HC]):
                self.archit_class.head_class.hfEquivalentSuffix() != architecture_name
 
     def train(self, hyperparameters: TaskHyperparameters[HC], model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Tuple[str, Dict[str, float]]:
-        from ..training.core import TaskTrainer  # Import happens here to prevent circular importing.
+        from ..training.training import TaskTrainer  # Import happens here to prevent circular importing.
         return TaskTrainer(model_augmentation).train(
             task=self, hyperparameters=hyperparameters, resume_from_folder=resume_from_folder
         )

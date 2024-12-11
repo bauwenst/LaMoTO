@@ -1,6 +1,7 @@
 from datasets import DatasetDict
 
 from ._general import CompareSentencesSuperGLUETask
+from ...util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
 class MultiRC(CompareSentencesSuperGLUETask):
@@ -29,6 +30,4 @@ class MultiRC(CompareSentencesSuperGLUETask):
             return self.tokenizer(" ".join(example[key] for key in self._field1.split("+")), example[self._field2],
                                   add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
 
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns(self._field1.split("+") + [self._field2, "idx"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})

@@ -30,7 +30,8 @@ from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import log, printLamotoWelcome
-from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType
+from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType, \
+    SaveModelOnLinearInterval, SaveModelOnTimeInterval
 from .auxiliary.hyperparameters import *
 from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
 
@@ -274,11 +275,14 @@ class TaskTrainer:
             if isinstance(eval_interval, Never):
                 raise ValueError("You indicated that you want to track the best model, but specified no evaluation interval!")
             save_interval = eval_interval
+        backup_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.backups  # Not relevant to the TrainingArguments, but will come in later.
 
         batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
                                                                              dataset=datasetdict["train"], split_name="train"))
         batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
                                                                              dataset=datasetdict["train"], split_name="train"))
+        batches_between_backups = tryExceptNone(lambda: backup_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+                                                                                 dataset=datasetdict["train"], split_name="train"))
 
         # - Early stopping (only used if required)
         best_model_metric_handle = f"eval_{task.metric_config.to_rank.fullName()}" if hyperparameters.TRACK_BEST_MODEL else None
@@ -361,6 +365,14 @@ class TaskTrainer:
                 callbacks.append(CallbackAtTimeInterval(minutes=eval_interval.minutes, events=EventType.EVALUATE))
             if isinstance(save_interval, EveryNMinutes):
                 callbacks.append(CallbackAtTimeInterval(minutes=save_interval.minutes, events=EventType.CHECKPOINT))
+
+        if backup_interval is not None:  # => There is a backup strategy.
+            if batches_between_backups is not None:  # => It can even be expressed using linear steps.
+                callbacks.append(SaveModelOnLinearInterval(start=batches_between_backups, step=batches_between_backups))
+            elif isinstance(backup_interval, EveryNMinutes):
+                callbacks.append(SaveModelOnTimeInterval(minutes=backup_interval.minutes))
+            elif not isinstance(backup_interval, Never):
+                raise ValueError(f"Cannot handle backup interval: {backup_interval.__class__.__name__}")
 
         if not hyperparameters.traceless and not hyperparameters.WANDB_PROJECT:
             if hyperparameters.TRACK_BEST_MODEL:

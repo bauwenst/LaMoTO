@@ -8,6 +8,7 @@ from ._core import *
 from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
 from ..util.visuals import log
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
 class POS(Task[TokenClassificationHeadConfig]):
@@ -53,9 +54,7 @@ class POS(Task[TokenClassificationHeadConfig]):
                 "attention_mask": [1]*len(input_ids)
             }
 
-        dataset = dataset.map(datasetMap, batched=False)
-        dataset = dataset.remove_columns(["tokens", "idx", "text", "lemmas", "upos", "xpos", "feats", "head", "deprel", "deps", "misc"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, datasetMap)
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
         hp.archit_head_config.num_labels = len(self.tagset)

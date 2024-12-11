@@ -5,7 +5,7 @@ from archit.instantiation.heads import SequenceClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelSequenceClassification, ForSequenceRegression
 
 from .._core import *
-from ...util.datasets import imputeTestSplit
+from ...util.datasets import imputeTestSplit, replaceDatasetColumns_OneExampleToOneExample
 
 
 SequenceTaskHyperparameters = TaskHyperparameters[SequenceClassificationHeadConfig]
@@ -93,9 +93,7 @@ class CompareSentencesGLUETask(GLUETask):
             return self.tokenizer(example[self._field1], example[self._field2], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,
                                   truncation=True, max_length=self._getMaxInputLength())
 
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns([self._field1, self._field2, "idx"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
 
 
 class ClassifySentenceGLUETask(GLUETask):
@@ -124,6 +122,4 @@ class ClassifySentenceGLUETask(GLUETask):
             return self.tokenizer(example["sentence"], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,  # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
                                   truncation=True, max_length=self._getMaxInputLength())
 
-        dataset = dataset.map(preprocess, batched=False)
-        dataset = dataset.remove_columns(["sentence", "idx"])
-        return dataset
+        return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
