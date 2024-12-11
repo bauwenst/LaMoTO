@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Set
 
 import evaluate
 from ._core import LogitLabelMetric, Tensor
@@ -17,12 +17,24 @@ class MacroF1(LogitLabelMetric):
     def compute(self, predictions: Tensor, references: Tensor) -> Dict[str, float]:
         return evaluate.load("f1").compute(predictions=predictions, references=references, average="macro")
 
+    @classmethod
+    def keys(cls) -> Set[str]:
+        return {"f1"}
+
 
 class MacroRecall(LogitLabelMetric):
     def compute(self, predictions: Tensor, references: Tensor) -> Dict[str, float]:
         return evaluate.load("recall").compute(predictions=predictions, references=references, average="macro")
 
+    @classmethod
+    def keys(cls) -> Set[str]:
+        return {"recall"}
+
 
 class MacroPrecision(LogitLabelMetric):
     def compute(self, predictions: Tensor, references: Tensor) -> Dict[str, float]:
         return evaluate.load("precision").compute(predictions=predictions, references=references, average="macro")
+
+    @classmethod
+    def keys(cls) -> Set[str]:
+        return {"precision"}

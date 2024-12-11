@@ -38,9 +38,9 @@ You can express NPC in terms of PPL as
 
     BPC = \frac{N}{T} \cdot \frac{\ln(PPL)}{\ln(2)}
 """
+from typing import Tuple, Dict, Set
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from datasets import Dataset
-from typing import Tuple, Dict
 
 from math import log as ln
 
@@ -58,6 +58,10 @@ class BitsPerCharacter(AutonomousMetric):
             "bpc": b,
             "total_chars": c
         }
+
+    @classmethod
+    def keys(cls) -> Set[str]:
+        return {"bpc", "total_chars"}
 
 
 def bpc(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset, stride_fraction: float,

@@ -87,12 +87,12 @@ class MLM(Task[MaskedLMHeadConfig]):
 
         if self._use_packing:  # Train split is not tokenised here but in the packer.
             dataset["train"] = PackedDataset(dataset["train"], self.tokenizer, context_length=self._getMaxInputLength())
-            if not self._use_pppl:  # Without PPPL, you need to preprocess the validation set yourself for HuggingFace's logit calculation. As is customary, this involves truncation, which is not the case when packing.
+            if not self._use_pppl:  # Without PPPL, you need to tokenise the validation set yourself for HuggingFace's logit calculation. As is customary, this involves truncation (i.e. data is lost for examples that are too long), which is not the case when packing.
                 validation_set: IterableDataset = dataset["validation"]
                 validation_set = validation_set.map(preprocess, batched=False)
                 validation_set = validation_set.remove_columns(["text"])
                 dataset["validation"] = validation_set
-        else:  # You can just tokenise the whole corpus. Does have truncation to the context length.
+        else:  # You can just tokenise the whole corpus. Does have truncation to the context length, as per above.
             dataset = dataset.map(preprocess, batched=False)
             dataset = dataset.remove_columns(["text"])
         return dataset

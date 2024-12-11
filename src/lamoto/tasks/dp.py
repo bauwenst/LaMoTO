@@ -84,6 +84,18 @@ class DataCollatorForDependencyParsing(DataCollatorMixin):
 class DP(Task[DependencyParsingHeadConfig]):
     """
     Dependency parsing measured by UAS and LAS.
+
+    Note: this task has an extremely niche issue where, if you train for like 12 epochs with device batch size 128,
+    GPU memory has slowly become too fragmented due to the logit tensors of size N² with N varying per example. No idea
+    how to fix this. Here's the error:
+
+        torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 28.16 GiB.
+        GPU 0 has a total capacity of 79.14 GiB of which 27.70 GiB is free.
+        Including non-PyTorch memory, this process has 51.44 GiB memory in use.
+        Of the allocated memory 41.16 GiB is allocated by PyTorch, and 8.37 GiB is reserved by PyTorch but unallocated.
+        If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation. See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+    You can sort of fix it by using a different device batch size, although no guarantees...
     """
 
     def __init__(self):

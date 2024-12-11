@@ -178,7 +178,8 @@ AfterNMinutes  = EveryNMinutes
 @dataclass
 class Intervals:
     evaluation: BatchesPerTriggerStrategy
-    checkpointing: Optional[BatchesPerTriggerStrategy] = None  # Some tasks, you just want to checkpoint per eval. Sometimes there's too much space between evals though, and you don't want to lose progress.
+    checkpointing: Optional[BatchesPerTriggerStrategy] = None  # Checkpoints contain the model, the optimiser, the rng, ... so that you can resume training from them. HuggingFace allows checkpointing to differ from evaluation IF AND ONLY IF saving and evaluation are done every fixed number of steps AND a save step happens on every evaluation. That means save_steps % eval_steps == 0.
+    backups: Optional[BatchesPerTriggerStrategy] = None  # Stores the weights of the model (and nothing else!) to a permanent backup, i.e. a folder that falls outside of the "checkpoint rotation" (the system that removes older checkpoints to keep a fixed amount stored).
 
 
 @dataclass

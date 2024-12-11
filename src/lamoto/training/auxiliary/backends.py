@@ -8,9 +8,6 @@ from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, den
 
 from hf_mtask_trainer import HfMultiTaskTrainer
 
-### FIXME: As long as HfMultiTaskTrainer doesn't use keyword arguments in the constructor, we can't use it. https://github.com/zipzou/hf-multitask-trainer/issues/5
-HfMultiTaskTrainer = Trainer
-###
 
 class ModelTrainer(HfMultiTaskTrainer):
     """

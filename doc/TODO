@@ -1,33 +1,23 @@
 TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
 
+TODO: Finish implementing the QA metric.
+
+TODO: Ratcheting and Exp callbacks should be added to training.py.
+
 TODO: Embedding matrix resizing when the checkpoint mismatches the vocab.
     https://huggingface.co/docs/transformers/main/main_classes/model#transformers.PreTrainedModel.resize_token_embeddings
     - We want this for WiC.
 
-TODO: Hour-long backoff wrapper around streamed datasets, to smooth over HuggingFace outages when streaming.
-    - Also spice it up by sending the user an email to notify them of this "hybernation mode".
-    - Also save the model.
-
 TODO: SuperGLUE:
     - ReCoRD is almost done
-    - WiC
     - WSC
+    - HuggingFace has dedicated evaluate metrics. Check those out. Record and MultiRC both have EM, for example.
 
-TODO: Add SWAG. https://huggingface.co/docs/transformers/tasks/multiple_choice
-
-TODO: For SuperGLUE, HuggingFace has dedicated evaluate metrics. Check those out. Record and MultiRC both have EM, for example.
+TODO: Tokeniser parallelisation.
+    - This is actually quite easy. All the dataset.map() calls we do for non-streamed datasets can be given a num_proc argument.
+    - The real question is whether we want to abstract out the usual def preprocess(): ...; dataset.map(preprocess); dataset.remove_columns(old).
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
-
-TODO: DP has an extremely niche issue where, if you train for like 12 epochs with device batch size 128, GPU memory has slowly
-      become too fragmented due to the logit tensors of size N² with N varying per example. No idea how to fix this.
-      Here's the error:
-        torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 28.16 GiB.
-        GPU 0 has a total capacity of 79.14 GiB of which 27.70 GiB is free.
-        Including non-PyTorch memory, this process has 51.44 GiB memory in use.
-        Of the allocated memory 41.16 GiB is allocated by PyTorch, and 8.37 GiB is reserved by PyTorch but unallocated.
-        If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation. See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
-      You can sort of fix it by using a different device batch size, although no guarantees...
 
 TODO: It would be very cool if there was a callback connected to some kind of messaging
       service, where you could send a signal to kill training and the model will (after the current step) quit and save.
@@ -42,16 +32,16 @@ TODO: I would like more decoupling between evaluation and saving.
 TODO: Test the resume-from-folder functionality. It isn't properly tested.
     - Also, this is really too much manual labour. Resuming should be done automatically where possible.
 
-TODO: Tokeniser parallelisation.
-
 TODO: in the TaskTrainer.train core,
     - Should the optimisers be given as training parameters to allow the use of accelerate (and perhaps multi-GPU)?
     - I wonder if .train(resume_from_checkpoint) keeps instance-level architecture or acts like .from_pretrained() in that it resets the architecture.
-
-TODO: Implement QA. There is a head for this in ArchIt. I wonder if you need a "sneaky logit transform" for this like for DP due to
-      varying logit sizes. The Trainer tutorial for QA sidesteps this question: https://huggingface.co/docs/transformers/tasks/question_answering#evaluate
 
 TODO: I'm not happy with how metrics are set up. It really makes zero sense to embed constructor arguments inside
       the task config to then parse them implicitly (if you didn't forget them) or error (because you did forget them).
     - Also, a metric should be able to tell at declaration whether it will be able to deliver a requested result, rather
       than only being able to do a sanity check after it has been computed.
+
+TODO: Hour-long backoff wrapper around streamed datasets, to smooth over HuggingFace outages when streaming.
+    - Also spice it up by sending the user an email to notify them of this "hybernation mode".
+    - Also save the model.
+    - TURNS OUT THIS IS IMPOSSIBLE BECAUSE HF IS ASS

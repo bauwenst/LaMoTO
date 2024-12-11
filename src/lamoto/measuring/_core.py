@@ -1,4 +1,4 @@
-from typing import Protocol, Any, Dict, Type, Optional
+from typing import Protocol, Any, Dict, Type, Optional, Set
 from typing_extensions import Self  # https://stackoverflow.com/a/77247460/9352077
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -73,6 +73,12 @@ class LamotoMetric(Metric, ABC):
 
     @abstractmethod
     def isAutonomous(self) -> bool:
+        pass
+
+    @classmethod
+    @abstractmethod
+    def keys(cls) -> Set[str]:
+        """The keys to expect in the dictionary produced by .compute()."""
         pass
 
 

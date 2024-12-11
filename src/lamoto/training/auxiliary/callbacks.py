@@ -6,7 +6,7 @@ from enum import Enum
 import time
 import warnings
 
-from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl, PreTrainedTokenizerBase
+from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl, PreTrainedTokenizerBase, Trainer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 
@@ -93,6 +93,28 @@ class CallbackAtTimeInterval(CombinedCallback):
         return seconds_since_last_event >= self.seconds_between_events
 
 
+class CallbackAtLinearInterval(CombinedCallback):
+    """
+    Produces triggers that are linearly spaced. This is like the DefaultFlowCallback, except rather than taking the
+    linear step size from TrainerArguments, it is taken from the constructor.
+    """
+
+    def __init__(self, start: int, step: int, events: Union[EventType, Set[EventType]]):
+        super().__init__(events)
+        self.step = step
+        self.next_threshold = start
+
+    def on_event_happens(self):
+        pass
+
+    def should_event_happen(self, global_step: int) -> bool:
+        if global_step >= self.next_threshold:
+            self.next_threshold += self.step
+            return True
+        else:
+            return False
+
+
 class CallbackAtExpInterval(CombinedCallback):
     """
     Produces triggers that are linearly spaced on a log axis. This is equivalent to using linearly spaced values as
@@ -171,6 +193,51 @@ class SaveTokeniserWithCheckpoints(TrainerCallback):
             return
 
         self.tokenizer.save_pretrained(output_dir)
+
+
+class _SaveModelMixin:
+    def __init__(self):
+        self._trainer: Trainer = None
+
+    def setTrainer(self, trainer: Trainer):
+        self._trainer = trainer
+
+    def saveModel(self, global_step: int):
+        if self._trainer is None:
+            raise RuntimeError("You should set the Trainer to which this callback belongs first!")
+
+        output_dir = Path(self._trainer.args.output_dir) / "backups" / f"{global_step}"  # The reason we don't use the 'checkpoint-' prefix is that I suspect that HuggingFace's rotation system hunts for it with .glob(). Not sure if it searches recursively, but better safe than sorry.
+        output_dir.mkdir(parents=True, exist_ok=True)
+        self._trainer.save_model(output_dir.as_posix())
+
+
+class SaveModelOnLinearInterval(CallbackAtLinearInterval, _SaveModelMixin):
+    """
+    Saves the model weights (and nothing else!) on a linear interval, to a folder protected from the checkpoint rotation,
+    without notifying the callback system that a save has been made.
+    """
+
+    def __init__(self, start: int, step: int):
+        super().__init__(start=start, step=step, events=set())
+
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if self.should_event_happen(state.global_step):
+            self.saveModel(state.global_step)
+            self.on_event_happens()
+
+
+class SaveModelOnTimeInterval(CallbackAtTimeInterval, _SaveModelMixin):
+    """
+    Same as SaveModelOnLinearInterval except using minutes.
+    """
+
+    def __init__(self, minutes: int):
+        super().__init__(minutes=minutes, events=set())
+
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if self.should_event_happen(state.global_step):
+            self.saveModel(state.global_step)
+            self.on_event_happens()
 
 
 class CheckpointLastModel(TrainerCallback):

@@ -1,6 +1,5 @@
-from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any
+from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any, Callable
 from abc import ABC, abstractmethod
-from enum import Enum
 from transformers import PreTrainedTokenizerBase
 
 import time
@@ -9,7 +8,7 @@ from copy import deepcopy
 import numpy as np
 import numpy.random as npr
 import datasets
-from datasets import Dataset, IterableDataset, DatasetDict
+from datasets import Dataset, IterableDataset, DatasetDict, IterableDatasetDict
 from datasets.arrow_dataset import DatasetInfoMixin
 
 from tktkt.util.printing import pluralise, ordinal
@@ -17,10 +16,71 @@ from tktkt.util.printing import pluralise, ordinal
 from .schedules import Schedule
 from .exceptions import ImpossibleBranchError
 
-HuggingfaceDataset = Union[Dataset, IterableDataset]
+
+N_THREADS_DATASET_MAP = 6
+
+HuggingfaceExample     = Dict[str,Any]
+HuggingfaceBatch       = Dict[str,List[Any]]
+
+HuggingfaceDatasetSplit = Union[Dataset, IterableDataset]
+HuggingfaceDatasetDict  = Union[DatasetDict, IterableDatasetDict]
+HuggingfaceDataset      = Union[HuggingfaceDatasetSplit, HuggingfaceDatasetDict]
+
+Dataset_or_DatasetDict = TypeVar("Dataset_or_DatasetDict", bound=Union[Dataset,DatasetDict])  # Non-iterable.
 
 
-def getDatasetSize(dataset: DatasetInfoMixin, split: str="train"):  # DatasetInfoMixin is the parent class for Dataset and IterableDataset.
+class DictOfLists:
+    """
+    Utility class that helps to turn dataset of the format
+        [{}, {}, {}]
+    into
+        {[], [], []}
+    """
+
+    def __init__(self, keys: Iterable[str], append_none_for_missing_keys: bool=True):
+        self._dict: Dict[str,List[Any]] = {key: [] for key in keys}
+        self._append_none = append_none_for_missing_keys
+
+    def append(self, items: Dict[str,Any]):
+        for k,v in items.items():
+            self._dict[k].append(v)  # Will error for keys unknown at construction.
+
+        if self._append_none:
+            missing_keys = set(self._dict.keys()) - set(items.keys())
+            for k in missing_keys:
+                self._dict[k].append(None)
+
+    def toDict(self) -> Dict[str,List[Any]]:
+        return self._dict
+
+
+def replaceDatasetColumns_OneExampleToOneExample(dataset: Dataset_or_DatasetDict, mapping: Callable[[HuggingfaceExample],HuggingfaceExample], but_keep: Iterable[str]=None) -> Dataset_or_DatasetDict:
+    old_columns = getDatasetColumns(dataset)
+    if isinstance(dataset, (IterableDataset, IterableDatasetDict)):
+        dataset = dataset.map(mapping, batched=False)
+    else:
+        dataset = dataset.map(mapping, batched=False, num_proc=N_THREADS_DATASET_MAP)
+    return dataset.remove_columns([c for c in set(old_columns) - set(but_keep or [])])  # Note: Since .map doesn't remove columns, all the old columns will still be part of the new columns. We assume .map did not overwrite any columns, and otherwise, that the overwritten columns are declared by the caller.
+
+
+def replaceDatasetColumns_ManyExamplesToManyExamples(dataset: Dataset_or_DatasetDict, mapping: Callable[[HuggingfaceBatch],HuggingfaceBatch], but_keep: Iterable[str]=None) -> Dataset_or_DatasetDict:
+    old_columns = getDatasetColumns(dataset)
+    if isinstance(dataset, (IterableDataset, IterableDatasetDict)):
+        dataset = dataset.map(mapping, batched=True)
+    else:
+        dataset = dataset.map(mapping, batched=True, num_proc=N_THREADS_DATASET_MAP)
+    return dataset.remove_columns([c for c in set(old_columns) - set(but_keep or [])])  # Note: Since .map doesn't remove columns, all the old columns will still be part of the new columns. We assume .map did not overwrite any columns, and otherwise, that the overwritten columns are declared by the caller.
+
+
+def getDatasetColumns(dataset: HuggingfaceDataset) -> List[str]:
+    if isinstance(dataset, (DatasetDict, IterableDatasetDict)):
+        first_split_name = list(dataset.keys())[0]
+        return dataset.column_names[first_split_name]
+    else:
+        return dataset.column_names
+
+
+def getDatasetSize(dataset: HuggingfaceDatasetSplit, split: str= "train") -> int:
     """
     Get the amount of examples in a HuggingFace dataset, whether it is a regular Dataset or a streamed IterableDataset.
     """
@@ -129,8 +189,6 @@ class BalanceToMedian(BalancingStrategy):
         return [int(np.median(label_counts))]*len(label_counts)
 
 
-Dataset_or_DatasetDict = TypeVar("Dataset_or_DatasetDict", bound=Union[Dataset,DatasetDict])
-
 def rebalanceLabels(dataset: Dataset_or_DatasetDict, label_column: str, strategy: BalancingStrategy, seed: int) -> Dataset_or_DatasetDict:
     """
     Per split, do the following:
@@ -221,7 +279,7 @@ def packedDatasetGenerator(dataset: Iterable[dict], tokenizer: PreTrainedTokeniz
             cache = cache[context_length:]
 
 
-def transferDatasetMetadata(source: HuggingfaceDataset, target: HuggingfaceDataset):
+def transferDatasetMetadata(source: HuggingfaceDatasetSplit, target: HuggingfaceDatasetSplit):
     info = source._info.copy()
     info.features = None  # Otherwise the target will ignore the generated dictionaries and instead give {"text": None} for all examples.
     target._info = info
@@ -235,7 +293,7 @@ def PackedDataset(dataset: Iterable[dict], tokenizer: PreTrainedTokenizerBase, c
                     "tokenizer": tokenizer,
                     "context_length": context_length}
     )
-    if isinstance(dataset, HuggingfaceDataset):  # Set the DatasetInfoMixin fields.
+    if isinstance(dataset, (Dataset,IterableDataset)):  # Set the DatasetInfoMixin fields.
         transferDatasetMetadata(dataset, iterable_dataset)
 
     return iterable_dataset

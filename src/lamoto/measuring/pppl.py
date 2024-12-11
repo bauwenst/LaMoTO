@@ -1,4 +1,4 @@
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Set
 from tqdm.auto import tqdm
 from dataclasses import dataclass
 
@@ -31,6 +31,10 @@ class PseudoPerplexity(AutonomousMetric):
             "nll": n,
             "total_tokens": t
         }
+
+    @classmethod
+    def keys(cls) -> Set[str]:
+        return {"pppl", "nll", "total_tokens"}
 
 
 def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset, device_batch_size: int,

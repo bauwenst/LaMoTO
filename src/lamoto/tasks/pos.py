@@ -44,7 +44,7 @@ class POS(Task[TokenClassificationHeadConfig]):
                                       add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,
                                       pooling_mode=LabelPooling.LAST)
 
-        def datasetMap(example: dict):
+        def datasetMap(example: dict) -> dict:
             words, _, _, pos = sanitiser.preprocess(words=example["tokens"], heads=example["head"], pos_tags=example["upos"])
             input_ids, labels = flattener.preprocess(words, {"pos": pos})
             return {

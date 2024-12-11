@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lamoto"
-version = "2024.11.01"  # Don't forget to change to change the lamoto.__version__ variable.
+version = "2024.12.01"  # Don't forget to change to change the lamoto.__version__ variable.
 requires-python = ">= 3.10"
 authors = [
   {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
@@ -27,18 +27,18 @@ dependencies = [
     "pyfiglet >= 1.0.2",
     "wandb",
     "scikit-learn",  # Technically a dependency of evaluate, but they refuse to add it to their metadata.
-    "conllu",
-
-    "supar            @ git+https://github.com/yzhangcs/parser",
-    "hf_mtask_trainer @ git+https://github.com/zipzou/hf-multitask-trainer"
+    "conllu"
 ]
 
 # These GitHub dependencies aren't optional, but if you already have them installed as editable, pip will override
 # that installation with an installation in site-packages. Hence, if this is the case for you, install these manually.
 [project.optional-dependencies]
 github = [
-    "archit[github] @ git+https://github.com/bauwenst/ArchIt",
-    "tktkt[github]  @ git+https://github.com/bauwenst/TkTkT",
-    "modest[github] @ git+https://github.com/bauwenst/MoDeST",
-    "fiject         @ git+https://github.com/bauwenst/fiject"
+    "archit[github]   @ git+https://github.com/bauwenst/ArchIt",
+    "tktkt[github]    @ git+https://github.com/bauwenst/TkTkT",
+    "modest[github]   @ git+https://github.com/bauwenst/MoDeST",
+    "fiject           @ git+https://github.com/bauwenst/fiject",
+
+    "hf_mtask_trainer @ git+https://github.com/bauwenst/hf-multitask-trainer",
+    "supar            @ git+https://github.com/bauwenst/supar"
 ]

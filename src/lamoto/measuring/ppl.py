@@ -1,4 +1,4 @@
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Set
 from dataclasses import dataclass
 import torch
 from datasets import Dataset
@@ -30,6 +30,10 @@ class Perplexity(AutonomousMetric):
             "nll": n,
             "total_tokens": t
         }
+
+    @classmethod
+    def keys(cls) -> Set[str]:
+        return {"ppl", "nll", "total_tokens"}
 
 
 def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset,

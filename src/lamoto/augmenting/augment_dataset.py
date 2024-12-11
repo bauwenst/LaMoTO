@@ -8,9 +8,9 @@ from tktkt.util.printing import roundHuman
 
 from ..tasks._core import *
 from ..tasks._core import HC
-from ..util.datasets import HuggingfaceDataset, sortSplits
+from ..util.datasets import HuggingfaceDatasetSplit, sortSplits
 
-DS = TypeVar("DS", bound=HuggingfaceDataset)
+DS = TypeVar("DS", bound=HuggingfaceDatasetSplit)
 
 
 class DatasetAugmentation(ABC):

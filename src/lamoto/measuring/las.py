@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Set
 
 import torch
 from supar.utils.metric import AttachmentMetric
@@ -28,6 +28,10 @@ class DependencyParsingMetrics(LogitLabelMetric):
         }
         self.content = AttachmentMetric()
         return summary
+
+    @classmethod
+    def keys(cls) -> Set[str]:
+        return {"uas", "las", "ucm", "lcm"}
 
     @staticmethod
     def logitsAndLabelsToMetric(logits: Tuple[torch.LongTensor,torch.LongTensor], labels: Tuple[torch.LongTensor,torch.LongTensor],
