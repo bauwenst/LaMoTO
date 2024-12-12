@@ -1,7 +1,7 @@
-from typing import Dict, Set
+from typing import Dict, Set, Union
 
 import evaluate
-from ._core import LogitLabelMetric, Tensor
+from ._core import LogitLabelMetric, ndarray
 
 
 class MacroF1(LogitLabelMetric):
@@ -14,7 +14,7 @@ class MacroF1(LogitLabelMetric):
     The average is unweighted, meaning the individual F1 scores of the small and big classes have the exact same
     contribution. This is clearly better than a weighted macro-F1. https://stackoverflow.com/a/78163857/9352077
     """
-    def compute(self, predictions: Tensor, references: Tensor) -> Dict[str, float]:
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:
         return evaluate.load("f1").compute(predictions=predictions, references=references, average="macro")
 
     @classmethod
@@ -23,7 +23,7 @@ class MacroF1(LogitLabelMetric):
 
 
 class MacroRecall(LogitLabelMetric):
-    def compute(self, predictions: Tensor, references: Tensor) -> Dict[str, float]:
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:
         return evaluate.load("recall").compute(predictions=predictions, references=references, average="macro")
 
     @classmethod
@@ -32,7 +32,7 @@ class MacroRecall(LogitLabelMetric):
 
 
 class MacroPrecision(LogitLabelMetric):
-    def compute(self, predictions: Tensor, references: Tensor) -> Dict[str, float]:
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:
         return evaluate.load("precision").compute(predictions=predictions, references=references, average="macro")
 
     @classmethod

@@ -4,10 +4,10 @@ import torch
 from supar.utils.metric import AttachmentMetric
 from supar.models.dep.biaffine.model import CoNLL, MatrixTree, DependencyCRF
 
-from ._core import LogitLabelMetric
+from ._core import StreamedMetric
 
 
-class DependencyParsingMetrics(LogitLabelMetric):
+class DependencyParsingMetrics(StreamedMetric):
 
     def __init__(self, _):
         super().__init__(None)
@@ -16,7 +16,7 @@ class DependencyParsingMetrics(LogitLabelMetric):
     def add(self, other: AttachmentMetric):
         self.content += other
 
-    def compute(self, predictions: Any, references: Any) -> Dict[str,Any]:
+    def computeFromMemory(self) -> Dict[str, float]:
         """
         Ignore the input (because we know it's empty) and output your own internal metrics.
         """

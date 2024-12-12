@@ -1,12 +1,12 @@
-from typing import Protocol, Any, Dict, Type, Optional, Set
+from typing import Protocol, Any, Dict, Type, Optional, Set, Union
 from typing_extensions import Self  # https://stackoverflow.com/a/77247460/9352077
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from torch import Tensor
+from numpy import ndarray
 
-from transformers import PreTrainedModel, PreTrainedTokenizerBase, Trainer
-from datasets import Dataset
 import evaluate
+from datasets import Dataset
+from transformers import PreTrainedModel, PreTrainedTokenizerBase, Trainer
 
 from ..training.auxiliary.hyperparameters import TaskHyperparameters
 
@@ -68,7 +68,7 @@ class LamotoMetric(Metric, ABC):
         self.environment = environment
 
     @abstractmethod
-    def compute(self, predictions: Tensor, references: Tensor) -> Dict[str, float]:  # LaMoTO's type signature is more predictable.
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:  # LaMoTO's type signature is more predictable.
         pass
 
     @abstractmethod
@@ -91,12 +91,28 @@ class LogitLabelMetric(LamotoMetric):
         return False
 
 
+class StreamedMetric(LamotoMetric):
+    """
+    Metric to which data are added at runtime, so there is no point passing any predictions to it at compute time.
+    """
+
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:
+        return self.computeFromMemory()
+
+    @abstractmethod
+    def computeFromMemory(self) -> Dict[str, float]:
+        pass
+
+    def isAutonomous(self) -> bool:
+        return False
+
+
 class AutonomousMetric(LamotoMetric):
     """
     Metric that generates its own data, rather than just using logits and labels.
     """
 
-    def compute(self, predictions: Any, references: Any) -> Dict[str, Any]:
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:
         return self.computeFromEnvironment()
 
     @abstractmethod
