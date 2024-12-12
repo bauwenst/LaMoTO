@@ -12,6 +12,7 @@ hp.MODEL_CONFIG_OR_CHECKPOINT = "haisongzhang/roberta-tiny-cased"  # 4 layers, 5
 hp.archit_basemodel_class = RobertaBaseModel
 # hp.MODEL_CONFIG_OR_CHECKPOINT = "microsoft/deberta-base"
 # hp.archit_basemodel_class = DebertaBaseModel
+hp.traceless = True
 
 
 def tst_pos():
@@ -29,19 +30,21 @@ def tst_ner():
 
 
 def tst_dp():
-    hp.archit_head_config = DependencyParsingHeadConfig(extended_model_config=BaseModelExtendedConfig())  # Filled in automatically.
+    hp.archit_head_config = DependencyParsingHeadConfig(extended_model_config=PoolingAndStridingConfig())  # Filled in automatically.
     task = DP()
     task.train(hp)
 
 
 def tst_cola():
     hp.archit_head_config = SequenceClassificationHeadConfig()
+    hp.HARD_STOPPING_CONDITION = Never()
 
     task = CoLA()
     task.train(hp)
 
 
 def tst_sts():
+    hp.HARD_STOPPING_CONDITION = Never()
     hp.archit_head_config = SequenceClassificationHeadConfig()
 
     task = STSB()
@@ -70,12 +73,33 @@ def tst_qqp():
     task.train(hp)
 
 
+def tst_copa():
+    hp.HARD_STOPPING_CONDITION = Never()
+    hp.EVAL_VS_SAVE_INTERVALS = Intervals(
+        evaluation=EveryNDescents(descents=256),
+        checkpointing=None
+    )
+    hp.EVALS_OF_PATIENCE = 5
+
+    hp.archit_head_config = SequenceClassificationHeadConfig()
+    task = COPA()
+    task.train(hp)
+
+
+def tst_record():
+    hp.archit_head_config = SequenceClassificationHeadConfig()
+    task = ReCoRD_Binary()
+    task.train(hp)
+
+
 if __name__ == "__main__":
     # tst_glue()
     # tst_qnli()
     # tst_sts()
     # tst_pos()
     # tst_ner()
-    # tst_cola()
-    tst_dp()
+    tst_cola()
+    # tst_dp()
     # tst_qqp()
+    # tst_copa()
+    # tst_record()
