@@ -121,7 +121,7 @@ class TaskTrainer:
         config_or_str = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
         if not isinstance(config_or_str, str):  # It's an object.
             if isinstance(config_or_str, CombinedConfig):
-                raise ValueError("When instantiating a new model from a config, it must only parameterise the base model. The head is parameterised in the hyperparameters.")
+                raise ValueError("When instantiating a new model from a config, it must only parameterise the base model. The head has its own config.")
             model_config = CombinedConfig(base_model_config=config_or_str,
                                           head_config=hyperparameters.archit_head_config,
                                           base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # This call pretends to be CombinedConfig(**json).

@@ -1,9 +1,10 @@
+from abc import abstractmethod
 from dataclasses import dataclass
-
-import datasets
 from datasets import IterableDatasetDict, IterableDataset
-from transformers import AutoModelForMaskedLM, DataCollatorForLanguageModeling
+
 import torch
+import datasets
+from transformers import AutoModelForMaskedLM, DataCollatorForLanguageModeling
 
 from archit.instantiation.basemodels import RobertaBaseModel
 from archit.instantiation.heads import MaskedLMHeadConfig
@@ -61,7 +62,7 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
 
 class MLM(Task[MaskedLMHeadConfig]):
 
-    def __init__(self, packing: bool=False, use_pppl: bool=False):
+    def __init__(self, packing: bool=False, drop_train_examples: int=0, use_pppl: bool=False):
         super().__init__(
             task_name="MLM",
             metric_config=MetricSetup(  # This is quite computation-heavy.
@@ -78,8 +79,19 @@ class MLM(Task[MaskedLMHeadConfig]):
             automodel_class=AutoModelForMaskedLM
         )
         self.hyperparameters: MlmHyperparameters = None
+        self._drop_train = drop_train_examples
         self._use_packing = packing
         self._use_pppl = use_pppl
+
+    @abstractmethod
+    def _loadIterableDataset(self) -> IterableDatasetDict:
+        pass
+
+    def _loadDataset(self) -> IterableDatasetDict:
+        datasetdict = self._loadIterableDataset()
+        if self._drop_train:
+            datasetdict["train"] = datasetdict["train"].skip(self._drop_train)
+        return datasetdict
 
     def _prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
         def preprocess(example):
@@ -118,12 +130,12 @@ class MLM(Task[MaskedLMHeadConfig]):
 
 
 class MLM_C4(MLM):
-    def _loadDataset(self) -> IterableDatasetDict:
-        dataset: datasets.IterableDatasetDict = datasets.load_dataset("allenai/c4", "en", streaming=True)
+    def _loadIterableDataset(self) -> IterableDatasetDict:
+        dataset: IterableDatasetDict = datasets.load_dataset("allenai/c4", "en", streaming=True)
         return dataset.remove_columns(["timestamp", "url"])
 
 
 class MLM_SlimPajama(MLM):
-    def _loadDataset(self) -> IterableDatasetDict:
-        dataset: datasets.IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True, trust_remote_code=True)
+    def _loadIterableDataset(self) -> IterableDatasetDict:
+        dataset: IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True, trust_remote_code=True)
         return dataset.remove_columns(["meta"])
