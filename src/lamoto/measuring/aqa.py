@@ -48,9 +48,9 @@ In total, I compute 18 metrics:
     - 14 for unanswerability, which is a binary task:
         - TP, TN, FP, FN
         - Accuracy
+        - Re+, Pr+, F1+ and Re-, Pr-, F1-, where especially Re- and F1- are informative since SQuADv2 has a 67% class skew towards positives.
         - Class-macro Re, Pr, F1. Note that class-macro Re is also called "balanced accuracy", i.e. the mean accuracy
           across the sets of only positives and only negatives. https://scikit-learn.org/stable/modules/model_evaluation.html#balanced-accuracy-score
-        - Re+, Pr+, F1+ and Re-, Pr-, F1-, where especially Re- and F1- are informative since SQuADv2 has a 67% class skew towards positives.
     - 2 for answerable examples:
         - Exact span match (EM): among the answerable questions, of those that you decide to predict a span for, how often is the full span correct?
                                  That is, EM == P(correct span | answerable AND predict answerable).
@@ -63,17 +63,16 @@ In total, I compute 18 metrics:
         - A correctness metric:
               P(correct) = P(correct, answerable) + P(correct, unanswerable)
                          = P(correct | answerable)P(answerable) + P(correct | unanswerable)P(unanswerable)
+                         = P(correct span, predict ans | answerable)P(answerable) + P(predict unans | unanswerable)P(unanswerable)
                          = P(correct span | ans, predict ans)*P(predict ans | ans)*P(ans) + P(predict unans | unans)P(unans)
-                         = EM_ans*recall_ans*skew + recall_unans*(1-skew)
-                         = EM_ans*(tp/p)*(p/N) + (tn/n)*(1-p/N)
-                         = EM_ans*(tp/N) + 1*(tn/N)
+                         = EM_tp*recall_ans*skew + recall_unans*(1-skew)
         - Span EM adjusted for correct prediction of answerability:
-              P(correct span | ans) = P(correct span | predict ans, ans)*P(predict ans | ans)
-                                    + P(correct span | predict unans, ans)*P(predict unans | ans)
-                                    = EM*recall_ans + 0*(1-recall_ans)
-                                    = EM*recall_ans = EM*tp/p
-              This is equivalent to EM for a system which defaults to always predicting a wrong span when the
-              answerability classifier wrongfully assumes there is no answer.
+              P(correct | ans) = P(correct span, predict ans | ans)
+                               = P(correct span | ans, predict ans)*P(predict ans | ans)
+                               = EM_tp*recall_ans
+          This is equivalent to EM for a system which defaults to always predicting a wrong span when the
+          answerability classifier wrongfully assumes there is no answer, which is never the case in SQuAD v1 and hence
+          P(correct | ans) == EM == EM_tp in SQuAD v1.
 """
 from typing import Dict, Set
 

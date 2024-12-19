@@ -187,7 +187,8 @@ class TaskTrainer:
         collator = task.getCollator()
 
         # Get the model...  FIXME: Somehow, the DP head uses an operation that doesn't exist for bfloat16. Temporary fix below.
-        task.automodel_args["torch_dtype"] = torch.bfloat16 if torch.cuda.is_bf16_supported() and not task.task_name.lower().startswith("dp") else torch.float32
+        do_bf16 = torch.cuda.is_bf16_supported(including_emulation=False)  # Argument needed due to https://github.com/pytorch/pytorch/issues/124996
+        task.automodel_args["torch_dtype"] = torch.bfloat16 if do_bf16 and not task.task_name.lower().startswith("dp") else torch.float32
 
         hf_checkpoint_classname = task.model_config.architectures[0] if task.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
         is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and task._isHfCheckpointForThisTask(hf_checkpoint_classname)
@@ -230,7 +231,7 @@ class TaskTrainer:
             model=model,
             tokeniser=task.tokenizer,
             validation_dataset=datasetdict["validation"],
-            test_dataset=datasetdict["test"],
+            test_dataset=tryExceptNone(lambda: datasetdict["test"]),  # MLM doesn't have this, for example.
             hyperparameters=task.hyperparameters,
             trainer=None
         )
@@ -306,7 +307,7 @@ class TaskTrainer:
 
             # Style of computations
             gradient_checkpointing=model.supports_gradient_checkpointing,  # Only if you have the VRAM though. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
-            bf16=torch.cuda.is_bf16_supported(),
+            bf16=do_bf16,
 
             # Evaluation
             eval_on_start=not isinstance(eval_interval, Never),  # Always do an evaluation at the start, unless you wanted to avoid all evaluations.
@@ -475,10 +476,11 @@ class TaskTrainer:
             validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="eval")
             print(validation_results)
 
-            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
-            env.use_test_not_validation = True
-            test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
-            print(test_results)
+            if "test" in datasetdict:
+                log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
+                env.use_test_not_validation = True
+                test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
+                print(test_results)
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
 
             # Save results
