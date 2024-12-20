@@ -31,7 +31,7 @@ from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import log, printLamotoWelcome
 from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType, \
-    SaveModelOnLinearInterval, SaveModelOnTimeInterval
+    SaveModelOnLinearInterval, SaveModelOnTimeInterval, _SaveModelMixin
 from .auxiliary.hyperparameters import *
 from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
 
@@ -411,7 +411,12 @@ class TaskTrainer:
             compute_metrics=task._computeMetrics,
             preprocess_logits_for_metrics=task.sneakyLogitTransform
         )
+
+        # Bidirectional associations with the trainer
         env.trainer = trainer
+        for cb in callbacks:
+            if isinstance(cb, _SaveModelMixin):
+                cb.setTrainer(trainer)
 
         # Lastly, do some prints (not logs).
         # Print the loaded model and a breakdown of its parameter counts.

@@ -12,12 +12,13 @@ from datasets import Dataset, IterableDataset, DatasetDict, IterableDatasetDict
 from datasets.arrow_dataset import DatasetInfoMixin
 
 from tktkt.util.printing import pluralise, ordinal
+from tktkt.util.environment import IS_NOT_LINUX
 
 from .schedules import Schedule
 from .exceptions import ImpossibleBranchError
 
 
-N_THREADS_DATASET_MAP = 6
+N_THREADS_DATASET_MAP = 1 if IS_NOT_LINUX else 6
 
 HuggingfaceExample     = Dict[str,Any]
 HuggingfaceBatch       = Dict[str,List[Any]]
@@ -265,7 +266,7 @@ def packedDatasetGenerator(dataset: Iterable[dict], tokenizer: PreTrainedTokeniz
     for row in dataset:  # NOTE: This can be affected by a network error if the given iterable is streamed. Wrap it in a IterableDatasetWithSkippingBackoff if HF doesn't fix their retries. https://github.com/huggingface/datasets/pull/6844
         # Add extra IDs to cache
         new_ids = tokenizer(row[key], max_length=1_000_000, truncation=True, add_special_tokens=True)['input_ids']  # max_length=None will give a warning because it assumes tokeniser output is passed to the model without further processing.
-        if not new_ids[-1] == tokenizer.eos_token_id:  # You need an EOS between examples.
+        if not new_ids[-1] == tokenizer.eos_token_id:  # You need an EOS between examples. TODO: Not good if your tokeniser uses [SEP]. Same problem as WiC has.
             new_ids.append(tokenizer.eos_token_id)
         cache.extend(new_ids)
 

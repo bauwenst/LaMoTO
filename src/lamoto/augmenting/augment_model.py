@@ -58,3 +58,19 @@ class ModelAugmentationSequence(ModelAugmentation):
 
     def _load_pretrained(self, augmented_model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, checkpoint: str):
         pass
+
+
+########################################################################################################################
+
+
+class FreezeBackbone(ModelAugmentation):
+
+    def __init__(self):
+        super().__init__(name="frozen")
+
+    def augment(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase):
+        for param in model.base_model.parameters():
+            param.requires_grad = False
+
+    def _load_pretrained(self, augmented_model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, checkpoint: str):
+        pass

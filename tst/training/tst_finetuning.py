@@ -4,15 +4,27 @@ from archit.instantiation.heads import *
 from archit.instantiation.basemodels import RobertaBaseModel, DebertaBaseModel
 from lamoto.tasks import *
 from lamoto.training.auxiliary.hyperparameters import *
+from lamoto.training.training import LamotoPaths
 
 
 hp = getDefaultHyperparameters()
 hp.SEED = 0
-hp.MODEL_CONFIG_OR_CHECKPOINT = "haisongzhang/roberta-tiny-cased"  # 4 layers, 512 hidden size
-hp.archit_basemodel_class = RobertaBaseModel
-# hp.MODEL_CONFIG_OR_CHECKPOINT = "microsoft/deberta-base"
-# hp.archit_basemodel_class = DebertaBaseModel
+hp.store_in_hf_cache = False
 hp.traceless = True
+
+
+def setModel(id: int=1):
+    if id == 1:
+        hp.MODEL_CONFIG_OR_CHECKPOINT = "haisongzhang/roberta-tiny-cased"  # 4 layers, 512 hidden size
+        hp.archit_basemodel_class = RobertaBaseModel
+    elif id == 2:
+        hp.MODEL_CONFIG_OR_CHECKPOINT = "microsoft/deberta-base"
+        hp.archit_basemodel_class = DebertaBaseModel
+    elif id == 3:  # Will only work on my local machine.
+        hp.MODEL_CONFIG_OR_CHECKPOINT = LamotoPaths.pathToCheckpoints() / "roberta-tiny-cased_DP_2024-12-17_02-17-40" / "checkpoint-3072"
+        hp.archit_basemodel_class = RobertaBaseModel
+    else:
+        raise RuntimeError()
 
 
 def tst_pos():
@@ -77,7 +89,8 @@ def tst_copa():
     hp.HARD_STOPPING_CONDITION = Never()
     hp.EVAL_VS_SAVE_INTERVALS = Intervals(
         evaluation=EveryNDescents(descents=256),
-        checkpointing=None
+        checkpointing=None,
+        backups=EveryNDescents(descents=512)  # Good test to see if this works.
     )
     hp.EVALS_OF_PATIENCE = 5
 
@@ -93,13 +106,15 @@ def tst_record():
 
 
 if __name__ == "__main__":
+    setModel(id=1)
+
     # tst_glue()
     # tst_qnli()
     # tst_sts()
     # tst_pos()
     # tst_ner()
-    tst_cola()
-    # tst_dp()
+    # tst_cola()
+    tst_dp()
     # tst_qqp()
     # tst_copa()
     # tst_record()

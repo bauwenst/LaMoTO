@@ -1,6 +1,5 @@
-TODO: MLM and CLM need to tie weights to be fully equivalent to HuggingFace.
-
-TODO: Finish implementing the QA metric.
+TODO: Fix "Matplotlib's TeX implementation searched for a file named 'cmss10.tfm' in your texmf tree, but could not find it"
+      on some Linux implementations.
 
 TODO: Ratcheting and Exp callbacks should be added to training.py.
 
@@ -12,10 +11,6 @@ TODO: SuperGLUE:
     - ReCoRD is almost done
     - WSC
     - HuggingFace has dedicated evaluate metrics. Check those out. Record and MultiRC both have EM, for example.
-
-TODO: Tokeniser parallelisation.
-    - This is actually quite easy. All the dataset.map() calls we do for non-streamed datasets can be given a num_proc argument.
-    - The real question is whether we want to abstract out the usual def preprocess(): ...; dataset.map(preprocess); dataset.remove_columns(old).
 
 TODO: MNLI validation and test set should be switched (now test set comes from train and that's easier)
 

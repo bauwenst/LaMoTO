@@ -1,10 +1,10 @@
-from typing import Set, TypeVar, Dict, Optional
+from typing import Set, TypeVar, Optional
 from abc import abstractmethod, ABC
-from torch import Tensor
 
 from datasets.iterable_dataset import IterableDataset, Dataset
-from tktkt.preparation.mappers import TextMapper
+from tktkt.interfaces.preparation import TextMapper
 from tktkt.util.printing import roundHuman
+from tktkt.preparation.perturbers import ConstantSampler, ParallelPerturber, Substitute, Insert, Pop
 
 from ..tasks._core import *
 from ..tasks._core import HC
@@ -95,6 +95,23 @@ class MapWords(MappingDatasetAugmentation):
         return self._mapping_name
 
 
+class TyposLevenshtein1(MapWords):
+    def __init__(self, text_field_name: str, p: float):
+        sampler = ConstantSampler(n=1)
+        super().__init__(
+            text_field_name=text_field_name,
+            mapping=ParallelPerturber(
+                p=p,
+                perturbations=[
+                    Substitute(0, sampler=sampler),
+                    Insert(0, sampler=sampler),
+                    Pop(0, sampler=sampler)
+                ]
+            ),
+            mapping_name="typosLD1"
+        )
+
+
 ########################################################################################################################
 
 
@@ -113,3 +130,21 @@ class TaskWithAugmentedDataset(TaskWrapper):
         for split_name in self._splits:
             splits[split_name] = self._augmentation.augment(splits[split_name])
         return splits
+
+
+class TaskWithTypos(TaskWithAugmentedDataset):
+
+    def __init__(self, task: Task, text_fields: Set[str], splits: Set[str], p: float):
+        text_fields = set(text_fields)
+        if text_fields:
+            field = text_fields.pop()
+            if text_fields:
+                super().__init__(TaskWithTypos(task, text_fields, splits=splits, p=p),
+                                 augmentation=TyposLevenshtein1(field, p),
+                                 splits=splits)
+            else:
+                super().__init__(task,
+                                 augmentation=TyposLevenshtein1(field, p),
+                                 splits=splits)
+        else:
+            raise ValueError("At least one text field is required to apply typos to.")

@@ -197,7 +197,7 @@ class SaveTokeniserWithCheckpoints(TrainerCallback):
 
 class _SaveModelMixin:
     def __init__(self):
-        self._trainer: Trainer = None
+        self._trainer: Trainer = None  # Not set at construction so that you can construct a Trainer with a callback of this class first.
 
     def setTrainer(self, trainer: Trainer):
         self._trainer = trainer
@@ -219,6 +219,7 @@ class SaveModelOnLinearInterval(CallbackAtLinearInterval, _SaveModelMixin):
 
     def __init__(self, start: int, step: int):
         super().__init__(start=start, step=step, events=set())
+        _SaveModelMixin.__init__(self)  # This constructor isn't run by default in multiple inheritance.
 
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if self.should_event_happen(state.global_step):
@@ -233,6 +234,7 @@ class SaveModelOnTimeInterval(CallbackAtTimeInterval, _SaveModelMixin):
 
     def __init__(self, minutes: int):
         super().__init__(minutes=minutes, events=set())
+        _SaveModelMixin.__init__(self)
 
     def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if self.should_event_happen(state.global_step):
