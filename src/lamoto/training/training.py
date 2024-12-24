@@ -505,11 +505,8 @@ class TaskTrainer:
         except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
             log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.")
             try:
-                # We don't use trainer._save_checkpoint() because ._maybe_log_save_evaluate() does this + callback handling, and we don't want to copy that code.
-                trainer.control.should_save     = True
-                trainer.control.should_evaluate = False
-                trainer.control.should_log      = False
-                trainer._maybe_log_save_evaluate(tr_loss=None, grad_norm=None, model=None, trial=None, epoch=None, ignore_keys_for_eval=None, start_time=None)  # These arguments are imputed anyway.
+                trainer._save_checkpoint(model, trial=None)
+                trainer.callback_handler.on_save(trainer.args, trainer.state, trainer.control)
                 log("Save successful. Now raising the exception. Bye bye!")
             except Exception as e2:
                 log("Save FAILED. Something is broken. Raising all exceptions.")

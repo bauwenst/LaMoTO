@@ -163,6 +163,15 @@ class LineageAnchorNode(_AnchorNode):
     def duplicate(self) -> Self:
         return LineageAnchorNode(tokeniser=self.tokeniser, base_model=self.base_model)
 
+    def _repr__args(self) -> str:
+        fields_reset = []
+        if self.tokeniser:
+            fields_reset.append("tokeniser")
+        if self.base_model:
+            fields_reset.append("basemodel")
+
+        return ",".join(fields_reset)
+
 
 class LineageRootNode(_AnchorNode):
     def __init__(self, starting_config_or_checkpoint: Union[Checkpoint, PretrainedConfig],
@@ -204,7 +213,7 @@ class Lineage:
         self._node_tree._registerLineage(self)
 
     def __iter__(self) -> Iterable[_LineageNode]:
-        yield from self._node_tree.__iter__()
+        yield from filter(lambda node: node.handle != "", self._node_tree.__iter__())
 
     def run(self, node_handle: str):
         return self._get(node_handle)._run()

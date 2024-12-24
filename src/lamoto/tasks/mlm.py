@@ -63,6 +63,15 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
 class MLM(Task[MaskedLMHeadConfig]):
 
     def __init__(self, packing: bool=False, drop_train_examples: int=0, use_pppl: bool=False):
+        """
+        :param packing: Whether to concatenate tokens from multiple dataset examples to fill up the model's context length.
+        :param use_pppl: Whether to evaluate with PPPL. Note that this takes way more time than the usual evaluation, which is
+                         just computing NLL on masked evaluation examples.
+        :param drop_train_examples: How many training examples to advance by before starting training.
+                                    Note: a *training example* is not the same as a *dataset example*. Training examples
+                                    is what the batch size is measured in. If the dataset consists of very long articles,
+                                    then one training example is a fraction of one dataset example. The reverse is also possible.
+        """
         super().__init__(
             task_name="MLM",
             metric_config=MetricSetup(  # This is quite computation-heavy.
@@ -79,7 +88,7 @@ class MLM(Task[MaskedLMHeadConfig]):
             automodel_class=AutoModelForMaskedLM
         )
         self.hyperparameters: MlmHyperparameters = None
-        self._drop_train = drop_train_examples
+        self._drop_train = max(0,drop_train_examples)
         self._use_packing = packing
         self._use_pppl = use_pppl
 
@@ -88,10 +97,7 @@ class MLM(Task[MaskedLMHeadConfig]):
         pass
 
     def _loadDataset(self) -> IterableDatasetDict:
-        datasetdict = self._loadIterableDataset()
-        if self._drop_train:
-            datasetdict["train"] = datasetdict["train"].skip(self._drop_train)
-        return datasetdict
+        return self._loadIterableDataset()
 
     def _prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
         def preprocess(example):
@@ -107,6 +113,10 @@ class MLM(Task[MaskedLMHeadConfig]):
         else:  # You can just tokenise the whole corpus. Does have truncation to the context length, as per above.
             dataset = dataset.map(preprocess, batched=False)
             dataset = dataset.remove_columns(["text"])
+
+        if self._drop_train:
+            dataset["train"] = dataset["train"].skip(self._drop_train)
+
         return dataset
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[MaskedLMHeadConfig]):
