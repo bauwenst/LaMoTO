@@ -485,11 +485,13 @@ class TaskTrainer:
                 log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
                 env.use_test_not_validation = True
                 test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
+                all_results = validation_results | test_results
                 print(test_results)
+            else:
+                all_results = validation_results
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
 
             # Save results
-            all_results = validation_results | test_results
             results_path = LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_model_identifier) / f"metrics-{trainer.state.global_step}.json"
             log(f"Saving results to {results_path.as_posix()} ...")
             with open(results_path, "w", encoding="utf-8") as handle:

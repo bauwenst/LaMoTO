@@ -1,25 +1,77 @@
 """
 Backend classes that do the actual model training itself.
 """
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple, Callable, Union, Any
 import torch
 import shutil
-from transformers.trainer import DataLoader, EvalLoopOutput, EvalPrediction, denumpify_detensorize, deepspeed_init, logger, has_length, Trainer
 
-from hf_mtask_trainer import HfMultiTaskTrainer
+from torch import Tensor
+from torch.nn import Module
+from transformers.data.data_collator import DataCollator
+from torch.optim.lr_scheduler import LambdaLR
+from torch.optim.optimizer import Optimizer as Optimizer
+from torch.utils.data import Dataset, IterableDataset
+from transformers.modeling_utils import PreTrainedModel
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
+from transformers.trainer import Trainer, DataLoader, EvalLoopOutput, denumpify_detensorize, deepspeed_init, logger, has_length
+from transformers.trainer_callback import TrainerCallback
+from transformers.trainer_utils import EvalPrediction
+from transformers.training_args import TrainingArguments
+
+from archit.instantiation.mixins import LoggingState, ReportDiagnosticsMixin
 
 
-class ModelTrainer(HfMultiTaskTrainer):
+class ModelTrainer(Trainer):
     """
-    By using this as the parent class (a subclass of Trainer), a model is equipped with a self.report_metrics() method
-    before training that is linked back to the Trainer. This allows it to collect extra metrics inside its modules. To
-    make use of this, your architecture would contain something like
-    ```
-        if hasattr(self, "report_metrics"):
-            self.report_metrics(key1=val1, key2=val2, ...)
-    ```
-    Also, it adds a method to delete checkpoints.
+    Adds two features on top of Trainer:
+        1. Modules that extend ArchIt's ReportDiagnosticsMixin can call .report() to log any runtime value, e.g. to make it
+           show up in WandB aside from metrics.
+        2. Adds a method to delete checkpoints.
     """
+    def __init__(
+        self,
+        model: Optional[Union[PreTrainedModel, Module]] = None,
+        args: Optional[TrainingArguments] = None,
+        data_collator: Optional[DataCollator] = None,
+        train_dataset: Optional[Union[Dataset, IterableDataset, Any]] = None,
+        eval_dataset: Optional[Union[Dataset, Dict[str, Dataset], Any]] = None,
+        tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        model_init: Optional[Callable[[], PreTrainedModel]] = None,
+        compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
+        callbacks: Optional[List[TrainerCallback]] = None,
+        optimizers: Optional[Tuple[Optimizer, LambdaLR]] = (None, None),
+        preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None
+    ):
+        # super() interface with processing_class rather than tokenizer, which exists since October 2024 https://github.com/huggingface/transformers/pull/32385.
+        super().__init__(
+            model=model,
+            args=args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=tokenizer,
+            model_init=model_init,
+            compute_metrics=compute_metrics,
+            callbacks=callbacks,
+            optimizers=optimizers,
+            preprocess_logits_for_metrics=preprocess_logits_for_metrics
+        )
+        self._extra_log = LoggingState(self.args)
+        if model is not None:
+            self._activateExtraLog(model)
+
+    def _activateExtraLog(self, model: Module):
+        # Define function that registers the above object in every relevant module.
+        def f(module: Module):
+            if isinstance(module, ReportDiagnosticsMixin):
+                module.registerLog(self._extra_log)
+
+        # Apply it recursively.
+        model.apply(f)
+
+    def log(self, logs: Dict[str, float], start_time: Optional[float]=None):
+        extra_logs = self._extra_log.compute(tensor_gathering_function=self._nested_gather, round_digits=None)
+        super().log(logs | extra_logs)# , start_time)  # TODO: start_time is not yet supported in v4.46.3, the version we run on.
 
     def deleteCheckpointsInOrder(self, amount: int):
         assert amount > 0
@@ -35,6 +87,8 @@ class ModelTrainerWithoutEvaluationLoop(ModelTrainer):
     getting speed metrics and of logging.
 
     We basically cut out everything to do with logits/labels, while keeping the acceleration setup.
+
+    TODO: Needs to be updated to a more recent version of transformers.
     """
 
     def evaluation_loop(self,

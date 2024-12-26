@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lamoto"
-version = "2024.12.01"  # Don't forget to change to change the lamoto.__version__ variable.
+version = "2025.01.01"  # Don't forget to change to change the lamoto.__version__ variable.
 requires-python = ">= 3.10"
 authors = [
   {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
@@ -39,6 +39,5 @@ github = [
     "modest[github]   @ git+https://github.com/bauwenst/MoDeST",
     "fiject           @ git+https://github.com/bauwenst/fiject",
 
-    "hf_mtask_trainer @ git+https://github.com/bauwenst/hf-multitask-trainer",
     "supar            @ git+https://github.com/bauwenst/supar"
 ]
