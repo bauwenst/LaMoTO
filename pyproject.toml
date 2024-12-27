@@ -21,13 +21,14 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "transformers >= 4.45.1",
+    "transformers >= 4.45.1",  # Note: training is unstable between >4.45.2 and at least 4.48.0.
     "datasets >= 2.18.0",
     "evaluate >= 0.4.1",
     "pyfiglet >= 1.0.2",
     "wandb",
     "scikit-learn",  # Technically a dependency of evaluate, but they refuse to add it to their metadata.
-    "conllu"
+    "conllu",
+    "zstandard"  # Needed for SlimPajama dataset. HuggingFace won't tell you, of course. Instead, SentencePiece will complain that your corpus has 0 sentences.
 ]
 
 # These GitHub dependencies aren't optional, but if you already have them installed as editable, pip will override

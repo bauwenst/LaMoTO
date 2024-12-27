@@ -42,20 +42,35 @@ class ModelTrainer(Trainer):
         optimizers: Optional[Tuple[Optimizer, LambdaLR]] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None
     ):
-        # super() interface with processing_class rather than tokenizer, which exists since October 2024 https://github.com/huggingface/transformers/pull/32385.
-        super().__init__(
-            model=model,
-            args=args,
-            data_collator=data_collator,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            processing_class=tokenizer,
-            model_init=model_init,
-            compute_metrics=compute_metrics,
-            callbacks=callbacks,
-            optimizers=optimizers,
-            preprocess_logits_for_metrics=preprocess_logits_for_metrics
-        )
+        try:  # super() interface with processing_class rather than tokenizer, which has existed since about transformers 4.46. https://github.com/huggingface/transformers/pull/32385.
+            super().__init__(
+                model=model,
+                args=args,
+                data_collator=data_collator,
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
+                processing_class=tokenizer,
+                model_init=model_init,
+                compute_metrics=compute_metrics,
+                callbacks=callbacks,
+                optimizers=optimizers,
+                preprocess_logits_for_metrics=preprocess_logits_for_metrics
+            )
+        except TypeError:
+            super().__init__(
+                model=model,
+                args=args,
+                data_collator=data_collator,
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
+                tokenizer=tokenizer,
+                model_init=model_init,
+                compute_metrics=compute_metrics,
+                callbacks=callbacks,
+                optimizers=optimizers,
+                preprocess_logits_for_metrics=preprocess_logits_for_metrics
+            )
+
         self._extra_log = LoggingState(self.args)
         if model is not None:
             self._activateExtraLog(model)
@@ -71,7 +86,10 @@ class ModelTrainer(Trainer):
 
     def log(self, logs: Dict[str, float], start_time: Optional[float]=None):
         extra_logs = self._extra_log.compute(tensor_gathering_function=self._nested_gather, round_digits=None)
-        super().log(logs | extra_logs)# , start_time)  # TODO: start_time is not yet supported in v4.46.3, the version we run on.
+        try:
+            super().log(logs | extra_logs, start_time)
+        except TypeError:  # The start_time argument is not yet supported in transformers v4.46.3, the last version with stable DeBERTa.
+            super().log(logs | extra_logs)
 
     def deleteCheckpointsInOrder(self, amount: int):
         assert amount > 0

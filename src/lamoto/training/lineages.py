@@ -9,7 +9,7 @@ When you want to set up training experiments from the command line, rather than 
 checkpoint on the command line, it's nicer to be able to just request to "train node X in lineage A" and have the backend
 load checkpoints and tokenisers for you.
 """
-from typing import Type, List, Iterable, Union, Optional
+from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator
 from typing_extensions import Self
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -28,6 +28,7 @@ from .training import TaskTrainer, Task
 from .tuning import TaskTuner, MetaHyperparameters
 
 
+LN = TypeVar("LN", bound="_LineageNode")
 class _LineageNode(ABC):
     """
     One operation that advances a lineage.
@@ -55,7 +56,7 @@ class _LineageNode(ABC):
     def out(self):
         return self._out
 
-    def followUp(self, child: "_LineageNode") -> "_LineageNode":
+    def followUp(self, child: LN) -> LN:
         """Add a node to the list of nodes that use the output of this node as their starting checkpoint.
            This method returns that node, to allow writing code like node.followUp(Node(...)).followUp(Node(...))."""
         if child._parent is not None:
@@ -81,7 +82,7 @@ class _LineageNode(ABC):
 
     @abstractmethod
     def _run(self):
-        """Do what this node should do to generate its output checkpoint."""
+        """Do what this node should do to generate its output checkpoint. (Protected method so that users building lineages don't have it suggested to them.)"""
         pass
 
     def _getLineage(self) -> "Lineage":
@@ -104,12 +105,14 @@ class _LineageNode(ABC):
         basemodel_node = self
         while not(isinstance(basemodel_node, _AnchorNode) and basemodel_node.base_model is not None):
             basemodel_node = basemodel_node._parent
+        assert basemodel_node.base_model is not None
 
         tokeniser_node = self
         while not(isinstance(tokeniser_node, _AnchorNode) and tokeniser_node.tokeniser is not None):
             tokeniser_node = tokeniser_node._parent
+        assert tokeniser_node.base_model is not None
 
-        # Copy HPs because e.g. storing the built tokeniser permanently in this node's HPs is a bad idea.
+        # Copy HPs because e.g. storing the built tokeniser permanently in this node's HPs would be a memory leak in case we want to run multiple lineage nodes back-to-back in the same runtime session.
         hp = self._hp.copy()
         hp.MODEL_CONFIG_OR_CHECKPOINT = self._parent.out
         hp.archit_basemodel_class = basemodel_node.base_model
@@ -120,7 +123,7 @@ class _LineageNode(ABC):
         hp.SAVE_AS = lineage.name + ("_" + self.handle)*self._include_handle_in_checkpoint
         return hp
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator["_LineageNode"]:
         yield self
         for node in self._children:
             yield from node.__iter__()
@@ -135,7 +138,11 @@ class _LineageNode(ABC):
         return ""
 
 
-class _AnchorNode(_LineageNode):
+class _AnchorNode(_LineageNode, ABC):
+    """
+    Node from which each property (e.g. the tokeniser) that isn't None is copied by all descendants for which there is
+    no anchor node between this and them with the same property not None.
+    """
     def __init__(self, tokeniser: Optional[SerialisedTokeniser], base_model: Optional[Type[BaseModel]],
                  config_or_checkpoint: Optional[Union[Checkpoint, PretrainedConfig]]):
         super().__init__("", hp=None, out=config_or_checkpoint)
@@ -212,7 +219,7 @@ class Lineage:
 
         self._node_tree._registerLineage(self)
 
-    def __iter__(self) -> Iterable[_LineageNode]:
+    def __iter__(self) -> Iterator[_LineageNode]:
         yield from filter(lambda node: node.handle != "", self._node_tree.__iter__())
 
     def run(self, node_handle: str):
@@ -284,7 +291,7 @@ class TrainingNode(_LineageNode):
         return TrainingNode(self.handle, self._hp, self._trainer, self._task)
 
     def _repr__args(self) -> str:
-        return self._task.__class__.__name__
+        return self._task.task_name
 
 
 class TuningNode(_LineageNode):
