@@ -269,14 +269,14 @@ class TaskTrainer:
             n_descents_of_warmup = int(n_gradient_descents*wu)
 
         # - Intervals
-        eval_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.evaluation
+        eval_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.evaluation or Never()
         if not hyperparameters.TRACK_BEST_MODEL:
-            save_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.checkpointing
+            save_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.checkpointing or Never()
         else:  # Ignore it and sync with eval interval.
             if isinstance(eval_interval, Never):
                 raise ValueError("You indicated that you want to track the best model, but specified no evaluation interval!")
             save_interval = eval_interval
-        backup_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.backups  # Not relevant to the TrainingArguments, but will come in later.
+        backup_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.backups or Never()  # Not relevant to the TrainingArguments, but will come in later.
 
         batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
                                                                              dataset=datasetdict["train"], split_name="train"))
@@ -375,24 +375,42 @@ class TaskTrainer:
             elif not isinstance(backup_interval, Never):
                 raise ValueError(f"Cannot handle backup interval: {backup_interval.__class__.__name__}")
 
+        # Note that training is always done by computing a loss, so it's always implemented to compute evaluation loss.
+        # There is only one situation in which you don't do any evaluation at all, namely when you don't track the best
+        # model and you have no evaluation schedule.
+        # Of the other situations, there are some where you will use the eval loss and some where you won't.
+        at_least_one_traditional_metric = any(
+            not isinstance(m, LamotoMetric) or (isinstance(m, LamotoMetric) and not m.isAutonomous())
+            for m in task.metrics.values()
+        )
+
+        compute_eval_loss = not isinstance(eval_interval, Never) and (
+            at_least_one_traditional_metric or (
+                hyperparameters.TRACK_BEST_MODEL and best_model_metric_handle == "eval_loss"  # eval loss doesn't show up as a 'traditional metric' because it isn't one; other models for tracking do.
+            ) or (
+                not hyperparameters.TRACK_BEST_MODEL and not task.metric_config.to_track  # => You asked to evaluate on an interval, yet you didn't ask for any metrics to evaluate, so it must be loss.
+            )
+        )
+
         if not hyperparameters.traceless and not hyperparameters.WANDB_PROJECT:
             if hyperparameters.TRACK_BEST_MODEL:
                 callbacks.append(FijectCallback(global_model_identifier + "_eval_goal", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
-            callbacks.append(
-                FijectCallback(global_model_identifier + "_eval_tracked",
-                               evals_between_commits=4,
-                               metric_names_with_formatting={(metric_name + "_" + result_name): formatting
-                                                             for metric_name, result_formats in
-                                                             task.metric_config.to_track.items()
-                                                             for result_name, formatting in result_formats.items()})
-            )
+
+            metrics_to_track = task.metric_config.to_track
+            if not hyperparameters.TRACK_BEST_MODEL and compute_eval_loss:  # => eval loss will be included in the results even though it isn't captured by the above callback.
+                metrics_to_track = metrics_to_track | {"eval": {"loss": "loss"}}
+
+            if metrics_to_track:
+                callbacks.append(
+                    FijectCallback(global_model_identifier + "_eval_tracked",
+                                   evals_between_commits=4,
+                                   metric_names_with_formatting={(metric_name + "_" + result_name): formatting
+                                                                 for metric_name, result_formats in task.metric_config.to_track.items()
+                                                                 for result_name, formatting in result_formats.items()})
+                )
 
         # At last, the Trainer object.
-        if hyperparameters.TRACK_BEST_MODEL and best_model_metric_handle == "eval_loss":
-            no_traditional_metrics = False  # A "traditional metric" is a metric that (1) uses prediction logits that (2) can come from naive iteration over the evaluation set (unlike strided PPL, for example, which iterates in a special manner).
-        else:
-            no_traditional_metrics = all(isinstance(m, LamotoMetric) and m.isAutonomous() for m in task.metrics.values())
-        TrainerClass = ModelTrainerWithoutEvaluationLoop if no_traditional_metrics else ModelTrainer
+        TrainerClass = ModelTrainer if compute_eval_loss else ModelTrainerWithoutEvaluationLoop
         trainer = TrainerClass(
             model=model,
             # tokenizer=task.tokenizer,  # Don't pass it if you don't want to save it and have other wacky shit extracted from it to influence training.
@@ -404,7 +422,7 @@ class TaskTrainer:
 
             # Data
             train_dataset=datasetdict["train"],
-            eval_dataset=[] if no_traditional_metrics else datasetdict["validation"],
+            eval_dataset=datasetdict["validation"] if compute_eval_loss else [],
             data_collator=collator,
 
             # Evaluation
@@ -473,18 +491,18 @@ class TaskTrainer:
         try:
             log(f"Training model {model.__class__.__name__} on task {task.task_name} on device {model.device}...")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
-            # trainer.save_model()  # 1. We already checkpoint the last model with a callback, 2. LM pretraining basically never gets to convergence, and 3. we don't have a metric configured because we're not doing traditional eval (although this is probably not a problem since compute_metrics might be where you get your metric anyway).
+            # trainer.save_model()  # Not needed since we already checkpoint the last model with a callback.
             # trainer.push_to_hub()
 
             log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on validation set...")
             env.use_test_not_validation = False
-            validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="eval")
+            validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="eval")
             print(validation_results)
 
             if "test" in datasetdict:
                 log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
                 env.use_test_not_validation = True
-                test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if not no_traditional_metrics else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
+                test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
                 all_results = validation_results | test_results
                 print(test_results)
             else:
