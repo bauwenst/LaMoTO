@@ -187,7 +187,7 @@ class TaskTrainer:
         collator = task.getCollator()
 
         # Get the model...  FIXME: Somehow, the DP head uses an operation that doesn't exist for bfloat16. Temporary fix below.
-        do_bf16 = torch.cuda.is_bf16_supported(including_emulation=False)  # Argument needed due to https://github.com/pytorch/pytorch/issues/124996
+        do_bf16 = torch.cuda.is_bf16_supported(including_emulation=False)  # including_emulation keyword arg needed due to https://github.com/pytorch/pytorch/issues/124996
         task.automodel_args["torch_dtype"] = torch.bfloat16 if do_bf16 and not task.task_name.lower().startswith("dp") else torch.float32
 
         hf_checkpoint_classname = task.model_config.architectures[0] if task.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
@@ -197,7 +197,6 @@ class TaskTrainer:
             log("Instantiating an ArchIt model.")
             torch.set_default_dtype(task.automodel_args["torch_dtype"])
             if hyperparameters.init_weights:
-                # FIXME: This branch may be broken in case the checkpoint is an ArchIt checkpoint, see the FIXME under .from_pretrained().
                 model: PreTrainedModel = task.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
             else:
                 assert hyperparameters.archit_head_config is not None, "You forgot to set the head config in the hyperparameters!"

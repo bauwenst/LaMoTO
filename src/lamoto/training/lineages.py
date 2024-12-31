@@ -117,7 +117,7 @@ class _LineageNode(ABC):
         hp.MODEL_CONFIG_OR_CHECKPOINT = self._parent.out
         hp.archit_basemodel_class = basemodel_node.base_model
         hp.TOKENISER              = tokeniser_node.tokeniser
-        hp.init_weights           = isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, str)  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
+        hp.init_weights           = isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path))  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
 
         # Identify the run by the full name of the lineage and possibly the node.
         hp.SAVE_AS = lineage.name + ("_" + self.handle)*self._include_handle_in_checkpoint
