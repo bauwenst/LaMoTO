@@ -3,6 +3,7 @@ Tuning framework in which many models are trained for the same task with various
 """
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Tuple, Iterable
+from pathlib import Path
 
 import json
 from copy import deepcopy
@@ -81,7 +82,7 @@ class TaskTuner:
 
         # Sanity checks and imputations
         assert meta.n_grid_samples >= 1, "At least one hyperparameter sample must be taken."
-        assert isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, str), "Can only tune starting from a pre-trained checkpoint."
+        assert isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path)), "Can only tune starting from a pre-trained checkpoint."
         hp.init_weights = True
 
         # Find best hp changes
@@ -172,8 +173,14 @@ def sampleGridWithoutReplacement(rng: npr.Generator, n_samples: int, *domains: L
     if n_samples > max_n_samples:
         raise ValueError(f"Cannot take {n_samples} samples from a grid of " + " x ".join(map(str,map(len,domains))) + f" == {max_n_samples} tuples.")
 
+    def denumpyify(x):
+        try:
+            return x.item()
+        except:
+            return x
+
     def generateSamples():
         while True:
-            yield tuple(rng.choice(domain) for domain in domains)
+            yield tuple(denumpyify(rng.choice(domain)) for domain in domains)
 
     yield from take(n_samples, keepFirst(generateSamples()))

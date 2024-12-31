@@ -170,6 +170,13 @@ class TaskTrainer:
         if task.tokenizer.pad_token is None:
             task.tokenizer.pad_token                         = task.tokenizer.eos_token
             task.model_config.base_model_config.pad_token_id = task.tokenizer.eos_token_id
+        assert task.tokenizer.pad_token is not None
+
+        # - When the model is instantiated from scratch and the config disagrees with the tokeniser vocabulary about the
+        #   pad token, the tokeniser gets precedent and overwrites the config.
+        if not hyperparameters.init_weights and task.tokenizer.pad_token_id != task.model_config.base_model_config.pad_token_id:
+            print(f"Note: Found mismatch between tokeniser pad token ({task.tokenizer.pad_token_id}) and config pad token ({task.model_config.base_model_config.pad_token_id}). The latter will be overwritten.")
+            task.model_config.base_model_config.pad_token_id = task.tokenizer.pad_token_id
 
         # Now that you have the tokeniser, tokenise the dataset.
         log("Loading dataset...")
@@ -213,7 +220,6 @@ class TaskTrainer:
                 model: PreTrainedModel = task.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **task.automodel_args)
             else:
                 raise ImpossibleBranchError()
-        model.config.pad_token_id = task.model_config.base_model_config.pad_token_id  # task.model_config might have been changed since AutoConfig.from_pretrained() was called, whereas model.config is the result of a fresh AutoConfig call.
 
         # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.
         if self._model_augmentation:
@@ -222,6 +228,22 @@ class TaskTrainer:
             else:
                 self._model_augmentation.augment(model, task.tokenizer)
         model.to("cuda")
+
+        # ...and verify that after all of this, the model, the config and the tokeniser all agree about the pad token.
+        pad_tk = task.tokenizer.pad_token_id
+        pad_model = model.config.pad_token_id
+        pad_config = task.model_config.base_model_config.pad_token_id
+        print("Verifying that padding indices match:")
+        print("\t    Model:", pad_model)
+        print("\t   Config:", pad_config)
+        print("\tTokeniser:", pad_tk)
+        print()
+        if pad_model != pad_tk:
+            raise RuntimeError("Mismatch between padding token in the model and the tokeniser!")
+        if pad_model != pad_config:
+            raise RuntimeError("Mismatch between padding token in the model and in the loaded model config!")
+        if pad_config != pad_tk:
+            raise RuntimeError("Mismatch between padding token in the loaded model config and the tokeniser!")
 
         # Now that we have a reference to the dataset and model, build the metrics.
         # (Some need access to the ModelTrainer for collation, but since we don't know which trainer we'll instantiate
@@ -258,13 +280,13 @@ class TaskTrainer:
         wu = hyperparameters.EFFECTIVE_BATCHES_WARMUP  # Alias to shorten this long name.
         if isinstance(wu, int):
             if wu < 0:
-                raise ValueError("The amount of warmup batches has to be a positive integer or a float in [0,1].")
+                raise ValueError(f"The amount of warmup batches ({wu}) has to be a positive integer or a float in [0,1].")
             n_descents_of_warmup = wu
         else:  # Fractional warmup in [0,1]
             if wu < 0 or wu > 1:
-                raise ValueError("The amount of warmup batches has to be a positive integer or a float in [0,1].")
+                raise ValueError(f"The amount of warmup batches ({wu}) has to be a positive integer or a float in [0,1].")
             if not n_gradient_descents:
-                raise ValueError(f"Amount of warmup batches was given as a fraction of the total amount of training batches, but we don't know what that is for stopping condition {hyperparameters.HARD_STOPPING_CONDITION.__class__.__name__}")
+                raise ValueError(f"Amount of warmup batches ({wu}) was given as a fraction of the total amount of training batches, but we don't know what that is for stopping condition {hyperparameters.HARD_STOPPING_CONDITION.__class__.__name__}")
             n_descents_of_warmup = int(n_gradient_descents*wu)
 
         # - Intervals

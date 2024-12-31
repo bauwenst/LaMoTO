@@ -10,7 +10,7 @@ import torch
 from datasets import DatasetDict
 from transformers import DataCollator, PreTrainedTokenizerBase, PretrainedConfig, EvalPrediction
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
-from archit.instantiation.abstracts import ModelWithHead
+from archit.instantiation.abstracts import ModelWithHead, CombinedConfig
 
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric
@@ -57,7 +57,7 @@ class Task(ABC, Generic[HC]):
         # Temporary fields only instantiated during training. These are effectively hidden method arguments.
         self.hyperparameters: Optional[TaskHyperparameters[HC]] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
-        self.model_config: Optional[PretrainedConfig] = None
+        self.model_config: Optional[CombinedConfig] = None
         self.metrics: Optional[Dict[str, Metric]] = None
 
     def resetCaches(self):
@@ -128,7 +128,7 @@ class Task(ABC, Generic[HC]):
 
     def _setHyperparameters(self, hp: Optional[TaskHyperparameters[HC]]):
         self.hyperparameters = hp
-    def _setModelConfig(self, mc: Optional[PretrainedConfig]):
+    def _setModelConfig(self, mc: Optional[CombinedConfig]):
         self.model_config = mc
     def _setMetrics(self, m: Optional[Dict[str, Metric]]):
         self.metrics = m
