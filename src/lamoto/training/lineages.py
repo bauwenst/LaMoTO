@@ -8,6 +8,10 @@ the weights change, the hyperparameters change, and the head changes.
 When you want to set up training experiments from the command line, rather than having to declare the tokeniser and
 checkpoint on the command line, it's nicer to be able to just request to "train node X in lineage A" and have the backend
 load checkpoints and tokenisers for you.
+
+If I'd redesign this again, I would perhaps have nodes be checkpoints rather than the arcs between them being checkpoints,
+and I would also perhaps let Lineage and LineageRootNode be the same class, rather than one wrapping the other. The only
+real benefit you get from this wrapping is that you don't get a ".run()" method suggested while building a node tree.
 """
 from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator
 from typing_extensions import Self
@@ -15,7 +19,6 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
 from transformers import PretrainedConfig
-Checkpoint = Union[str,Path]
 
 from archit.instantiation.abstracts import BaseModel
 from tktkt.util.strings import indent
@@ -28,13 +31,22 @@ from .training import TaskTrainer, Task
 from .tuning import TaskTuner, MetaHyperparameters
 
 
+class ConfigFactory(ABC):
+    @abstractmethod
+    def buildConfig(self, serial_tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]) -> PretrainedConfig:
+        pass
+
+Checkpoint = Union[str,Path]
+Config     = Union[PretrainedConfig,ConfigFactory]
+NodeOutput = Union[Config,Checkpoint]
+
 LN = TypeVar("LN", bound="_LineageNode")
 class _LineageNode(ABC):
     """
     One operation that advances a lineage.
     """
 
-    def __init__(self, handle: str, hp: TaskHyperparameters, out: Optional[Checkpoint]=None):
+    def __init__(self, handle: str, hp: TaskHyperparameters, out: Optional[NodeOutput]=None):
         """
         Some of the given hyperparameters will be ignored, e.g. the base model type and the tokeniser, and for
         finetuning, every hyperparameter in the grid.
@@ -43,9 +55,9 @@ class _LineageNode(ABC):
                     You leave this parameter None when you run your experiment, and then fill it in when you want to
                     do follow-up experiments.
         """
-        self.handle = handle
-        self._out   = out
-        self._hp    = hp
+        self.handle        = handle
+        self._out_as_field = out
+        self._hp           = hp
 
         self._include_handle_in_checkpoint = False
 
@@ -53,8 +65,8 @@ class _LineageNode(ABC):
         self._parent: Optional[_LineageNode] = None
 
     @property
-    def out(self):
-        return self._out
+    def _out(self) -> NodeOutput:
+        return self._out_as_field
 
     def followUp(self, child: LN) -> LN:
         """Add a node to the list of nodes that use the output of this node as their starting checkpoint.
@@ -75,6 +87,13 @@ class _LineageNode(ABC):
         """Get an object of the same subclass that shares all its fields with the current object,
            but with no child/parent/lineage relationships."""
         pass
+
+    def duplicateTree(self) -> Self:
+        """Same as duplicate() except you append duplicates of all the descendants too."""
+        this_copy = self.duplicate()
+        for child in self._children:
+            this_copy.followUp(child.duplicateTree())
+        return this_copy
 
     def doIncludeHandleInOutput(self):
         """Mention the name of the node in output created by it."""
@@ -99,24 +118,28 @@ class _LineageNode(ABC):
         to, and imputing the checkpoint from the parent node.
         """
         lineage = self._getLineage()
-        if self._parent.out is None:
+        if self._parent._out is None:
             raise RuntimeError(f"Node '{self.handle}' of lineage '{lineage.name}' is downstream of a node without a checkpoint. Run that node first.")
 
         basemodel_node = self
-        while not(isinstance(basemodel_node, _AnchorNode) and basemodel_node.base_model is not None):
+        while not(isinstance(basemodel_node, _AnchorNode) and basemodel_node._base_model is not None):
             basemodel_node = basemodel_node._parent
-        assert basemodel_node.base_model is not None
+        assert basemodel_node._base_model is not None
 
         tokeniser_node = self
-        while not(isinstance(tokeniser_node, _AnchorNode) and tokeniser_node.tokeniser is not None):
+        while not(isinstance(tokeniser_node, _AnchorNode) and tokeniser_node._tokeniser is not None):
             tokeniser_node = tokeniser_node._parent
-        assert tokeniser_node.base_model is not None
+        assert tokeniser_node._tokeniser is not None
+
+        parent_out = self._parent._out
+        base_model = basemodel_node._base_model
+        tokeniser  = tokeniser_node._tokeniser
 
         # Copy HPs because e.g. storing the built tokeniser permanently in this node's HPs would be a memory leak in case we want to run multiple lineage nodes back-to-back in the same runtime session.
         hp = self._hp.copy()
-        hp.MODEL_CONFIG_OR_CHECKPOINT = self._parent.out
-        hp.archit_basemodel_class = basemodel_node.base_model
-        hp.TOKENISER              = tokeniser_node.tokeniser
+        hp.MODEL_CONFIG_OR_CHECKPOINT = parent_out if not isinstance(parent_out, ConfigFactory) else parent_out.buildConfig(serial_tokeniser=tokeniser, base_model=base_model)
+        hp.archit_basemodel_class = base_model
+        hp.TOKENISER              = tokeniser
         hp.init_weights           = isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path))  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
 
         # Identify the run by the full name of the lineage and possibly the node.
@@ -144,15 +167,15 @@ class _AnchorNode(_LineageNode, ABC):
     no anchor node between this and them with the same property not None.
     """
     def __init__(self, tokeniser: Optional[SerialisedTokeniser], base_model: Optional[Type[BaseModel]],
-                 config_or_checkpoint: Optional[Union[Checkpoint, PretrainedConfig]]):
+                 config_or_checkpoint: Optional[NodeOutput]):
         super().__init__("", hp=None, out=config_or_checkpoint)
-        self.tokeniser: Optional[SerialisedTokeniser] = tokeniser
-        self.base_model: Optional[Type[BaseModel]]    = base_model
+        self._tokeniser: Optional[SerialisedTokeniser] = tokeniser
+        self._base_model: Optional[Type[BaseModel]]    = base_model
 
     def _run(self):
         raise NotImplementedError("Anchor nodes cannot be run.")
 
-    def _buildHyperparameters(self) -> TaskHyperparameters:  # This also prevents root nodes from needing to access self._parent.out.
+    def _buildHyperparameters(self) -> TaskHyperparameters:  # This also prevents root nodes from needing to access self._parent._out.
         raise NotImplementedError("Anchor nodes have no hyperparameters.")
 
 
@@ -164,24 +187,24 @@ class LineageAnchorNode(_AnchorNode):
         super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=None)
 
     @property
-    def out(self):
-        return self._parent.out
+    def _out(self):
+        return self._parent._out
 
     def duplicate(self) -> Self:
-        return LineageAnchorNode(tokeniser=self.tokeniser, base_model=self.base_model)
+        return LineageAnchorNode(tokeniser=self._tokeniser, base_model=self._base_model)
 
     def _repr__args(self) -> str:
         fields_reset = []
-        if self.tokeniser:
+        if self._tokeniser:
             fields_reset.append("tokeniser")
-        if self.base_model:
+        if self._base_model:
             fields_reset.append("basemodel")
 
         return ",".join(fields_reset)
 
 
 class LineageRootNode(_AnchorNode):
-    def __init__(self, starting_config_or_checkpoint: Union[Checkpoint, PretrainedConfig],
+    def __init__(self, starting_config_or_checkpoint: NodeOutput,
                  tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
         super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=starting_config_or_checkpoint)
         self._lineage: Lineage = None
@@ -190,8 +213,8 @@ class LineageRootNode(_AnchorNode):
         self._lineage = lineage
 
     def duplicate(self) -> Self:
-        return LineageRootNode(starting_config_or_checkpoint=self.out,
-                               tokeniser=self.tokeniser, base_model=self.base_model)
+        return LineageRootNode(starting_config_or_checkpoint=self._out,
+                               tokeniser=self._tokeniser, base_model=self._base_model)
 
 
 class Lineage:
@@ -321,3 +344,43 @@ class TuningNode(_LineageNode):
         meta = self._meta.copy()
         meta.meta_seed += abs(hash(lineage.name)) + abs(hash(self.handle))
         return meta
+
+
+########################################################################################################################
+
+
+class LineageDeclaration:
+    """
+    Declare a collection of lineages without having any underlying nodes instantiated for them.
+
+    TODO: There's not really any point to having a belated getConfig method if you're going to have to invoke it before
+          getting anything you can build with... You're literally instantiating in order to build an uninstantiated lineage bruh.
+    """
+
+    def __init__(self, builder: Type["LineageBuilder"]):
+        self.builder = builder
+        self.declarations = dict()
+
+    def declare(self, name: str, tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
+        self.declarations[name] = (tokeniser, base_model)
+
+    def finish(self) -> "LineageBuilder":
+        return self.builder([LineageRootNode(self.getConfig(d[0], d[1]), d[0], d[1]) for n,d in self.declarations.items()])
+
+    @abstractmethod
+    def getConfig(self, tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
+        pass
+
+
+class LineageBuilder:
+
+    def __init__(self, starting_nodes: List[_LineageNode]):
+        self._nodes = {0: starting_nodes}
+
+    def followUp(self, node: _LineageNode, handle: int=0) -> int:
+        new_id = max(self._nodes) + 1
+        self._nodes[new_id] = []
+        for n in self._nodes[handle]:
+            new_node = n.followUp(node.duplicate())
+            self._nodes[new_id].append(new_node)
+        return new_id
