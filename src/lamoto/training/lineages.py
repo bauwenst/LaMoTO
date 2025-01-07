@@ -68,7 +68,14 @@ class _LineageNode(ABC):
     def _out(self) -> NodeOutput:
         return self._out_as_field
 
-    def followUp(self, child: LN) -> LN:
+    def out(self, node_output: NodeOutput) -> Self:
+        """Sets the output of this node in-place. If a file path, we enforce that it already exists."""
+        if isinstance(node_output, (str, Path)) and not Path(node_output).exists():
+            raise ValueError("Can only set the output of a lineage node to a file/folder path once it exists.")
+        self._out_as_field = node_output
+        return self
+
+    def next(self, child: LN) -> LN:
         """Add a node to the list of nodes that use the output of this node as their starting checkpoint.
            This method returns that node, to allow writing code like node.followUp(Node(...)).followUp(Node(...))."""
         if child._parent is not None:
@@ -78,9 +85,9 @@ class _LineageNode(ABC):
         child._parent = self
         return child
 
-    def followUps(self, children: List["_LineageNode"]):
+    def nextInParalllel(self, children: List["_LineageNode"]):
         for child in children:
-            self.followUp(child)
+            self.next(child)
 
     @abstractmethod
     def duplicate(self) -> Self:
@@ -92,7 +99,7 @@ class _LineageNode(ABC):
         """Same as duplicate() except you append duplicates of all the descendants too."""
         this_copy = self.duplicate()
         for child in self._children:
-            this_copy.followUp(child.duplicateTree())
+            this_copy.next(child.duplicateTree())
         return this_copy
 
     def doIncludeHandleInOutput(self):
@@ -235,6 +242,7 @@ class Lineage:
 
         self._node_tree = root
         assert isinstance(self._node_tree, LineageRootNode)
+        assert all(not isinstance(node, LineageRootNode) or i == 0 for i,node in enumerate(self._node_tree))
 
         duplicate_handles = [k for k,v in Counter(self.listHandles()).items() if v > 1]
         if duplicate_handles:
@@ -349,38 +357,55 @@ class TuningNode(_LineageNode):
 ########################################################################################################################
 
 
-class LineageDeclaration:
+class BulkLineageNode:
     """
-    Declare a collection of lineages without having any underlying nodes instantiated for them.
+    Multiple lineage trees built in parallel. When you add a node to one tree, it is added to all other trees in the
+    same location.
 
-    TODO: There's not really any point to having a belated getConfig method if you're going to have to invoke it before
-          getting anything you can build with... You're literally instantiating in order to build an uninstantiated lineage bruh.
+    TODO: I'm not entirely sure if it's warranted to not just use a _LineageNode tree internally,
+          rather than a new _BulkLineageNode. Or perhaps it should be a subclass of _LineageNode?
+          Basically a rootless node.
+
+    TODO: We need to decide on is how we declare the 4-tuple of
+            (name, BaseModelClass, SerialisedTokeniser, NodeOutput)
+        A separate class, or just a LineageRootNode? You definitely want to define this 4-tuple on one line, in any case.
     """
 
-    def __init__(self, builder: Type["LineageBuilder"]):
-        self.builder = builder
-        self.declarations = dict()
+    class _BulkLineageNode:
 
-    def declare(self, name: str, tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
-        self.declarations[name] = (tokeniser, base_model)
+        def __init__(self, wrapped_node: _LineageNode):
+            self._internal: _LineageNode = wrapped_node
+            self._children: List[BulkLineageNode._BulkLineageNode] = []
 
-    def finish(self) -> "LineageBuilder":
-        return self.builder([LineageRootNode(self.getConfig(d[0], d[1]), d[0], d[1]) for n,d in self.declarations.items()])
+        def next(self, node: _LineageNode) -> "BulkLineageNode._BulkLineageNode":
+            child = BulkLineageNode._BulkLineageNode(node)
+            self._children.append(child)
+            return child
 
-    @abstractmethod
-    def getConfig(self, tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
-        pass
+        def _build(self) -> _LineageNode:
+            actual_parent = self._internal.duplicate()  # TODO: The top internal is None and if it has multiple children, you need to not use followUp on this but followUps.
+            for child in self._children:
+                actual_child = child._build()
+                actual_parent.next(actual_child)
+            return actual_parent
 
+    def __init__(self):
+        self.root = BulkLineageNode._BulkLineageNode(None)
 
-class LineageBuilder:
+    def concatenateTrees(self, starting_nodes: List[_LineageNode]) -> List[_LineageNode]:
+        """
+        Concatenates a copy of the stored node tree to each of the given nodes in-place.
+        Also returns a reference to the roots of those copies.
+        """
+        new_nodes = []
+        for node in starting_nodes:
+            new_nodes.append(node.next(self.root._build()))
+        return new_nodes
 
-    def __init__(self, starting_nodes: List[_LineageNode]):
-        self._nodes = {0: starting_nodes}
-
-    def followUp(self, node: _LineageNode, handle: int=0) -> int:
-        new_id = max(self._nodes) + 1
-        self._nodes[new_id] = []
-        for n in self._nodes[handle]:
-            new_node = n.followUp(node.duplicate())
-            self._nodes[new_id].append(new_node)
-        return new_id
+    def buildRegistry(self, starting_nodes: List[_LineageNode]) -> LineageRegistry:
+        # TODO: Big problem with this method is that you don't have a name yet for each lineage.
+        #       You could solve this by having lineages get their name from their trees...
+        registry = LineageRegistry()
+        for i,tree in enumerate(self.concatenateTrees(starting_nodes)):
+            registry.add(Lineage(handle=f"{i+1}", name=f"{i+1}", root=tree))
+        return registry
