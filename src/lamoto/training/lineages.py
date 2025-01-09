@@ -10,30 +10,34 @@ checkpoint on the command line, it's nicer to be able to just request to "train 
 load checkpoints and tokenisers for you.
 
 If I'd redesign this again, I would perhaps have nodes be checkpoints rather than the arcs between them being checkpoints,
-and I would also perhaps let Lineage and LineageRootNode be the same class, rather than one wrapping the other. The only
-real benefit you get from this wrapping is that you don't get a ".run()" method suggested while building a node tree.
+and I would also perhaps let Lineage and LineageRootNode be the same class, rather than one wrapping the other.
+The only real benefit you get from this wrapping is that you don't get a ".run()" method suggested while building a node tree.
 """
-from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator
+from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator, Tuple, Callable
 from typing_extensions import Self
 from abc import ABC, abstractmethod
 from collections import Counter
 from pathlib import Path
 from transformers import PretrainedConfig
 
+import itertools
+
 from archit.instantiation.abstracts import BaseModel
-from tktkt.util.strings import indent
 from tktkt.interfaces.factories import TokeniserFactory
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
+from tktkt.util.strings import indent
+from tktkt.util.iterables import filterOptionals
 SerialisedTokeniser = Union[str,TokeniserFactory[TokeniserWithFiniteTypeDomain]]
 
 from .auxiliary.hyperparameters import TaskHyperparameters
 from .training import TaskTrainer, Task
 from .tuning import TaskTuner, MetaHyperparameters
+from ..util.exceptions import tryExceptNone
 
 
 class ConfigFactory(ABC):
     @abstractmethod
-    def buildConfig(self, serial_tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]) -> PretrainedConfig:
+    def buildConfig(self, base_model: Type[BaseModel], serialised_tokeniser: SerialisedTokeniser) -> PretrainedConfig:
         pass
 
 Checkpoint = Union[str,Path]
@@ -77,9 +81,13 @@ class _LineageNode(ABC):
 
     def next(self, child: LN) -> LN:
         """Add a node to the list of nodes that use the output of this node as their starting checkpoint.
-           This method returns that node, to allow writing code like node.followUp(Node(...)).followUp(Node(...))."""
+           This method returns that node, to allow writing code like node.next(Node(...)).next(Node(...))."""
         if child._parent is not None:
-            raise RuntimeError(f"Node '{child.handle}' already has a parent '{child._parent.handle}', so cannot make '{self.handle}' the parent.")
+            raise RuntimeError(f"Node '{child.handle}' already has a parent '{child._parent.handle}', so cannot make node '{self.handle}' the parent.")
+        elif child == self:
+            raise RuntimeError(f"Tried to make node '{child.handle}' a child of itself.")
+        elif self._parent is not None and any(node == self for node in child):  # If the current node has no parent, then obviously it can't be in the tree under the new node. Also, no descendant of the current node could be in that tree, because then that descendant would have two parents at the same time.
+            raise RuntimeError(f"Tried to make node '{child.handle}' a child of node '{self.handle}' even though the latter is one of its descendants.")
 
         self._children.append(child)
         child._parent = self
@@ -111,13 +119,16 @@ class _LineageNode(ABC):
         """Do what this node should do to generate its output checkpoint. (Protected method so that users building lineages don't have it suggested to them.)"""
         pass
 
-    def _getLineage(self) -> "Lineage":
-        """Find the lineage by tracing back up to the starting node."""
+    def _getRoot(self) -> Optional["LineageRootNode"]:
+        """Find the one root node in this node's tree by tracing back up to the starting node."""
         node = self
-        while not isinstance(node, LineageRootNode):
+        while node is not None and not isinstance(node, LineageRootNode):
             node = node._parent
-        assert isinstance(node, LineageRootNode)
-        return node._lineage
+        return node
+
+    def _getLineage(self) -> Optional["Lineage"]:
+        root = self._getRoot()
+        return None if root is None else root._lineage
 
     def _buildHyperparameters(self) -> TaskHyperparameters:
         """
@@ -125,6 +136,7 @@ class _LineageNode(ABC):
         to, and imputing the checkpoint from the parent node.
         """
         lineage = self._getLineage()
+        assert lineage is not None
         if self._parent._out is None:
             raise RuntimeError(f"Node '{self.handle}' of lineage '{lineage.name}' is downstream of a node without a checkpoint. Run that node first.")
 
@@ -144,7 +156,7 @@ class _LineageNode(ABC):
 
         # Copy HPs because e.g. storing the built tokeniser permanently in this node's HPs would be a memory leak in case we want to run multiple lineage nodes back-to-back in the same runtime session.
         hp = self._hp.copy()
-        hp.MODEL_CONFIG_OR_CHECKPOINT = parent_out if not isinstance(parent_out, ConfigFactory) else parent_out.buildConfig(serial_tokeniser=tokeniser, base_model=base_model)
+        hp.MODEL_CONFIG_OR_CHECKPOINT = parent_out if not isinstance(parent_out, ConfigFactory) else parent_out.buildConfig(serialised_tokeniser=tokeniser, base_model=base_model)
         hp.archit_basemodel_class = base_model
         hp.TOKENISER              = tokeniser
         hp.init_weights           = isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path))  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
@@ -173,11 +185,11 @@ class _AnchorNode(_LineageNode, ABC):
     Node from which each property (e.g. the tokeniser) that isn't None is copied by all descendants for which there is
     no anchor node between this and them with the same property not None.
     """
-    def __init__(self, tokeniser: Optional[SerialisedTokeniser], base_model: Optional[Type[BaseModel]],
+    def __init__(self, base_model: Optional[Type[BaseModel]], tokeniser: Optional[SerialisedTokeniser],
                  config_or_checkpoint: Optional[NodeOutput]):
         super().__init__("", hp=None, out=config_or_checkpoint)
-        self._tokeniser: Optional[SerialisedTokeniser] = tokeniser
         self._base_model: Optional[Type[BaseModel]]    = base_model
+        self._tokeniser: Optional[SerialisedTokeniser] = tokeniser
 
     def _run(self):
         raise NotImplementedError("Anchor nodes cannot be run.")
@@ -190,7 +202,7 @@ class LineageAnchorNode(_AnchorNode):
     """
     Resets the tokeniser and/or the base model architecture for all descendant nodes in the lineage.
     """
-    def __init__(self, tokeniser: Optional[SerialisedTokeniser]=None, base_model: Optional[Type[BaseModel]]=None):
+    def __init__(self, base_model: Optional[Type[BaseModel]]=None, tokeniser: Optional[SerialisedTokeniser]=None):
         super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=None)
 
     @property
@@ -202,26 +214,82 @@ class LineageAnchorNode(_AnchorNode):
 
     def _repr__args(self) -> str:
         fields_reset = []
-        if self._tokeniser:
-            fields_reset.append("tokeniser")
         if self._base_model:
             fields_reset.append("basemodel")
+        if self._tokeniser:
+            fields_reset.append("tokeniser")
 
         return ",".join(fields_reset)
 
 
 class LineageRootNode(_AnchorNode):
-    def __init__(self, starting_config_or_checkpoint: NodeOutput,
-                 tokeniser: SerialisedTokeniser, base_model: Type[BaseModel]):
+    def __init__(self, name: str, starting_config_or_checkpoint: NodeOutput,
+                 base_model: Type[BaseModel], tokeniser: SerialisedTokeniser):
         super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=starting_config_or_checkpoint)
         self._lineage: Lineage = None
+        self.name = name
 
     def _registerLineage(self, lineage: "Lineage"):
         self._lineage = lineage
 
     def duplicate(self) -> Self:
-        return LineageRootNode(starting_config_or_checkpoint=self._out,
+        return LineageRootNode(name=self.name, starting_config_or_checkpoint=self._out,
                                tokeniser=self._tokeniser, base_model=self._base_model)
+
+
+class LineagePlaceholderNode(_LineageNode):
+    """
+    Multiple lineage trees built in parallel. When you add a node to one tree, it is added to all other trees in the
+    same location.
+    """
+
+    def __init__(self):
+        super().__init__(handle="", hp=None, out=None)
+
+    def _run(self):
+        raise NotImplementedError
+
+    def _buildHyperparameters(self) -> TaskHyperparameters:
+        raise NotImplementedError
+
+    def _out(self) -> NodeOutput:
+        raise NotImplementedError
+
+    def _getLineage(self) -> "Lineage":
+        raise NotImplementedError
+
+    def doIncludeHandleInOutput(self):
+        raise NotImplementedError
+
+    def duplicate(self) -> Self:
+        return LineagePlaceholderNode()
+
+    def after(self, parent: _LineageNode) -> _LineageNode:
+        """
+        Concatenates a copy of this node tree to the given node in-place, but without the placeholder node.
+        a.next(b) is roughly equivalent to b.after(a) except the placeholder node itself disappears.
+        Returns the given node, which now has the same descendants as this placeholder.
+        """
+        for child_tree in self.duplicateTree()._children:
+            parent.next(child_tree)
+        return parent
+
+    def afterMany(self, parents: List[_LineageNode]):
+        """Same as after() except in bulk."""
+        for parent in parents:
+            self.after(parent)
+
+    def buildRegistry(self, starting_nodes: List[_LineageNode]) -> "LineageRegistry":
+        """
+        Append this node tree to each of the given nodes, and then turn the resulting trees into lineages
+        stored in a registry.
+        """
+        self.afterMany(starting_nodes)
+
+        registry = LineageRegistry()
+        for i,node in enumerate(starting_nodes):
+            registry.add(Lineage(handle=f"{i+1}", root=node._getRoot()))
+        return registry
 
 
 class Lineage:
@@ -229,25 +297,25 @@ class Lineage:
     Ancestral tree of checkpoints. A basic tree may look something like:
     ```
                                                                   /---[tuning node]--> fine-tuned model
-        [start]--> config --[training node]--> pretrained model --|---[tuning node]--> fine-tuned model
+         [root]--> config --[training node]--> pretrained model --|---[tuning node]--> fine-tuned model
                                                                   \---[tuning node]--> fine-tuned model
     ```
     A lineage generally (unless in certain experimental setups) shares the same tokeniser and base model architecture
     across all its nodes.
     """
 
-    def __init__(self, handle: str, name: str, root: LineageRootNode):
-        self.handle = handle
-        self.name   = name
+    def __init__(self, handle: str, root: LineageRootNode):
+        # Safety checks
+        assert isinstance(root, LineageRootNode), "The top of a lineage must be a root node."
+        assert all(not isinstance(node, (LineageRootNode, LineagePlaceholderNode)) or i == 0 for i,node in enumerate(root)), "The lineage cannot contain placeholders or more than one root."
 
-        self._node_tree = root
-        assert isinstance(self._node_tree, LineageRootNode)
-        assert all(not isinstance(node, LineageRootNode) or i == 0 for i,node in enumerate(self._node_tree))
-
-        duplicate_handles = [k for k,v in Counter(self.listHandles()).items() if v > 1]
+        duplicate_handles = [k for k,v in Counter(filter(lambda handle: handle != "", map(lambda node: node.handle, root))).items() if v > 1]
         if duplicate_handles:
             raise ValueError(f"Lineage contains at least two nodes with the same handle: {duplicate_handles}")
 
+        # Store arguments and set bidirectional association
+        self.handle = handle
+        self._node_tree = root
         self._node_tree._registerLineage(self)
 
     def __iter__(self) -> Iterator[_LineageNode]:
@@ -267,12 +335,16 @@ class Lineage:
             raise ValueError(f"Handle not in lineage: {node_handle}")
 
     def listHandles(self) -> List[str]:
-        return [node.handle for node in self if node.handle]  # Don't include the anchors.
+        return [node.handle for node in self]
 
     def __repr__(self):
         s = "Lineage(" + self.name + ")\n"
         s += indent(1, self._node_tree.__repr__(), tab="|   ")
         return s
+
+    @property
+    def name(self):
+        return self._node_tree.name
 
 
 class LineageRegistry:
@@ -286,6 +358,8 @@ class LineageRegistry:
     def add(self, lineage: Lineage):
         if lineage.handle in self._registry:
             raise ValueError(f"Lineage handle already in registry: {lineage.handle}")
+        if lineage.name in {l.name for l in self}:
+            raise ValueError(f"Lineage name already in registry (under handle '{lineage.handle}'): {lineage.name}")
         self._registry[lineage.handle] = lineage
 
     def get(self, handle: str) -> Lineage:
@@ -303,6 +377,22 @@ class LineageRegistry:
     def __iter__(self) -> Iterable[Lineage]:
         for lineage in self._registry.values():
             yield lineage
+
+    def mapNodeHandles(self, f: Callable[[str,str],str]) -> Iterable[List[str]]:
+        """
+        Attempts to align the nodes of all the lineages in the registry and then for each stack of aligned nodes returns
+        the list of results for applying f(lineage handle, node handle) to the nodes in that stack.
+        """
+        pair_generators: List[Iterator[Tuple[Lineage,_LineageNode]]] = [zip(itertools.repeat(l), reversed(list(l))) for l in self]
+        results = []
+        while True:
+            pairs = [tryExceptNone(lambda: next(g)) for g in pair_generators]
+            new_results = [f(l.handle,n.handle) for l,n in filterOptionals(pairs)]
+            if not new_results:
+                break
+            results.append(new_results)
+
+        return reversed(results)
 
 
 class TrainingNode(_LineageNode):
@@ -348,64 +438,8 @@ class TuningNode(_LineageNode):
     def _buildMetaHyperparameters(self) -> MetaHyperparameters:
         """Adjust meta-hyperparameters so that the seed for taking grid samples is unique per lineage, per node."""
         lineage = self._getLineage()
+        assert lineage is not None
 
         meta = self._meta.copy()
         meta.meta_seed += abs(hash(lineage.name)) + abs(hash(self.handle))
         return meta
-
-
-########################################################################################################################
-
-
-class BulkLineageNode:
-    """
-    Multiple lineage trees built in parallel. When you add a node to one tree, it is added to all other trees in the
-    same location.
-
-    TODO: I'm not entirely sure if it's warranted to not just use a _LineageNode tree internally,
-          rather than a new _BulkLineageNode. Or perhaps it should be a subclass of _LineageNode?
-          Basically a rootless node.
-
-    TODO: We need to decide on is how we declare the 4-tuple of
-            (name, BaseModelClass, SerialisedTokeniser, NodeOutput)
-        A separate class, or just a LineageRootNode? You definitely want to define this 4-tuple on one line, in any case.
-    """
-
-    class _BulkLineageNode:
-
-        def __init__(self, wrapped_node: _LineageNode):
-            self._internal: _LineageNode = wrapped_node
-            self._children: List[BulkLineageNode._BulkLineageNode] = []
-
-        def next(self, node: _LineageNode) -> "BulkLineageNode._BulkLineageNode":
-            child = BulkLineageNode._BulkLineageNode(node)
-            self._children.append(child)
-            return child
-
-        def _build(self) -> _LineageNode:
-            actual_parent = self._internal.duplicate()  # TODO: The top internal is None and if it has multiple children, you need to not use followUp on this but followUps.
-            for child in self._children:
-                actual_child = child._build()
-                actual_parent.next(actual_child)
-            return actual_parent
-
-    def __init__(self):
-        self.root = BulkLineageNode._BulkLineageNode(None)
-
-    def concatenateTrees(self, starting_nodes: List[_LineageNode]) -> List[_LineageNode]:
-        """
-        Concatenates a copy of the stored node tree to each of the given nodes in-place.
-        Also returns a reference to the roots of those copies.
-        """
-        new_nodes = []
-        for node in starting_nodes:
-            new_nodes.append(node.next(self.root._build()))
-        return new_nodes
-
-    def buildRegistry(self, starting_nodes: List[_LineageNode]) -> LineageRegistry:
-        # TODO: Big problem with this method is that you don't have a name yet for each lineage.
-        #       You could solve this by having lineages get their name from their trees...
-        registry = LineageRegistry()
-        for i,tree in enumerate(self.concatenateTrees(starting_nodes)):
-            registry.add(Lineage(handle=f"{i+1}", name=f"{i+1}", root=tree))
-        return registry
