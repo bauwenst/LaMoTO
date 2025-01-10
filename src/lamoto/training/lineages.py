@@ -47,7 +47,7 @@ NodeOutput = Union[Config,Checkpoint]
 LN = TypeVar("LN", bound="_LineageNode")
 class _LineageNode(ABC):
     """
-    One operation that advances a lineage.
+    Tree node representing one operation that advances a lineage.
     """
 
     def __init__(self, handle: str, hp: TaskHyperparameters, out: Optional[NodeOutput]=None):
@@ -84,10 +84,13 @@ class _LineageNode(ABC):
            This method returns that node, to allow writing code like node.next(Node(...)).next(Node(...))."""
         if child._parent is not None:
             raise RuntimeError(f"Node '{child.handle}' already has a parent '{child._parent.handle}', so cannot make node '{self.handle}' the parent.")
-        elif child == self:
-            raise RuntimeError(f"Tried to make node '{child.handle}' a child of itself.")
-        elif self._parent is not None and any(node == self for node in child):  # If the current node has no parent, then obviously it can't be in the tree under the new node. Also, no descendant of the current node could be in that tree, because then that descendant would have two parents at the same time.
-            raise RuntimeError(f"Tried to make node '{child.handle}' a child of node '{self.handle}' even though the latter is one of its descendants.")
+        elif any(ancestor in child for ancestor in self._getAncestors()):
+            if self == child:
+                raise RuntimeError(f"Tried to make node '{child.handle}' a child of itself.")
+            elif self in child:
+                raise RuntimeError(f"Tried to make node '{child.handle}' a child of node '{self.handle}' even though the latter is one of its descendants.")
+            else:
+                raise RuntimeError(f"Failed to concatenate node trees: one of the ancestors of node '{self.handle}' is a descendant of '{child.handle}', causing a loop in the tree.")
 
         self._children.append(child)
         child._parent = self
@@ -119,12 +122,17 @@ class _LineageNode(ABC):
         """Do what this node should do to generate its output checkpoint. (Protected method so that users building lineages don't have it suggested to them.)"""
         pass
 
+    def _getAncestors(self) -> List["_LineageNode"]:
+        """Trace back the parent relationship until the top of the tree."""
+        nodes = [self]
+        while nodes[-1]._parent is not None:  # When this condition triggers, nodes[-1] is the top of the tree.
+            nodes.append(nodes[-1]._parent)
+        return nodes
+
     def _getRoot(self) -> Optional["LineageRootNode"]:
-        """Find the one root node in this node's tree by tracing back up to the starting node."""
-        node = self
-        while node is not None and not isinstance(node, LineageRootNode):
-            node = node._parent
-        return node
+        """Returns the top of the tree if it is a root node, else None."""
+        top = self._getAncestors()[-1]
+        return top if isinstance(top, LineageRootNode) else None
 
     def _getLineage(self) -> Optional["Lineage"]:
         root = self._getRoot()
