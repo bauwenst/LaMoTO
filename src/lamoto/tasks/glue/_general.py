@@ -1,3 +1,4 @@
+from typing import List
 from datasets import load_dataset
 from transformers import DataCollatorWithPadding, AutoModelForSequenceClassification
 
@@ -17,9 +18,11 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
 
     BASE_REPO = "glue"
 
-    def __init__(self, task_name: str, metric_config: MetricSetup, num_labels: int, is_regressive: bool=False):
+    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: List[str], num_labels: int, is_regressive: bool=False):
         super().__init__(
             task_name=task_name,
+            text_fields=text_fields,
+            label_field="label",
             metric_config=metric_config,
             archit_class=ForSingleLabelSequenceClassification if not is_regressive else ForSequenceRegression,
             automodel_class=AutoModelForSequenceClassification,
@@ -58,6 +61,7 @@ class CompareSentencesGLUETask(GLUETask):
     def __init__(self, task_name: str, num_labels: int, text_field1: str="sentence1", text_field2: str="sentence2", is_regressive: bool=False):
         super().__init__(
             task_name=task_name,
+            text_fields=[text_field1, text_field2],
             metric_config=MetricSetup(
                 to_compute=["precision", "recall", "f1", "accuracy"],
                 to_track={
@@ -104,6 +108,7 @@ class ClassifySentenceGLUETask(GLUETask):
     def __init__(self, task_name: str):
         super().__init__(
             task_name=task_name,
+            text_fields=["sentence"],
             metric_config=MetricSetup(
                 to_compute=["precision", "recall", "f1", "accuracy", "matthews_correlation"],
                 to_track={

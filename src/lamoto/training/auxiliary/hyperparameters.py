@@ -232,6 +232,11 @@ class TaskHyperparameters(Generic[HC]):
     def copy(self) -> "TaskHyperparameters[HC]":
         return deepcopy(self)
 
+    def withHeadConfig(self, config: HC):
+        hp = self.copy()
+        hp.archit_head_config = config
+        return hp
+
     def toDict(self) -> dict:
         """
         Convert this object to a dictionary that is safe for being stored as a JSON file.

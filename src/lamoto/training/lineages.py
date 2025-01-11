@@ -15,11 +15,12 @@ The only real benefit you get from this wrapping is that you don't get a ".run()
 """
 from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator, Tuple, Callable
 from typing_extensions import Self
-from abc import ABC, abstractmethod
-from collections import Counter
 from pathlib import Path
+from collections import Counter
+from abc import ABC, abstractmethod
 from transformers import PretrainedConfig
 
+import warnings
 import itertools
 
 from archit.instantiation.abstracts import BaseModel
@@ -73,9 +74,9 @@ class _LineageNode(ABC):
         return self._out_as_field
 
     def out(self, node_output: NodeOutput) -> Self:
-        """Sets the output of this node in-place. If a file path, we enforce that it already exists."""
+        """Sets the output of this node in-place. (If a file path, we warn about its inexistence, but don't error on it.)"""
         if isinstance(node_output, (str, Path)) and not Path(node_output).exists():
-            raise ValueError("Can only set the output of a lineage node to a file/folder path once it exists.")
+            warnings.warn(f"Output of lineage node does not exist yet: {Path(node_output)}")
         self._out_as_field = node_output
         return self
 
@@ -279,6 +280,7 @@ class LineagePlaceholderNode(_LineageNode):
         Returns the given node, which now has the same descendants as this placeholder.
         """
         for child_tree in self.duplicateTree()._children:
+            child_tree._parent = None
             parent.next(child_tree)
         return parent
 
@@ -441,7 +443,7 @@ class TuningNode(_LineageNode):
         return TuningNode(self.handle, self._hp, self._meta, self._tuner, self._task)
 
     def _repr__args(self) -> str:
-        return self._task.__class__.__name__
+        return self._task.task_name
 
     def _buildMetaHyperparameters(self) -> MetaHyperparameters:
         """Adjust meta-hyperparameters so that the seed for taking grid samples is unique per lineage, per node."""

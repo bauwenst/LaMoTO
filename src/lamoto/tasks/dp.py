@@ -15,7 +15,7 @@ from ..measuring import DependencyParsingMetrics, Metric
 from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import WordLevelPreprocessorWithDummies
 from ..util.visuals import log
-from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, WordIndex
 
 
 def relu(x):
@@ -106,6 +106,8 @@ class DP(Task[DependencyParsingHeadConfig]):
         self.reltag_to_id = {tag: i for i, tag in enumerate(self.tagset)}
         super().__init__(
             task_name="DP",
+            text_fields=["tokens"],
+            label_field=["deprel", WordIndex("head", "tokens")],
             metric_config=MetricSetup(
                 to_compute=["attachment"],
                 to_track={
@@ -143,13 +145,12 @@ class DP(Task[DependencyParsingHeadConfig]):
         return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
 
     def getTagset(self) -> Counter:
-        log("Generating DP tagset manually...")
+        log("Generating DP tagset...")
         counter = Counter()
         dataset = self._loadDataset()
         for split in dataset:
             for label_sequence in dataset[split]["deprel"]:
                 counter.update(label_sequence)
-        log("Finished generating DP tagset.")
         return counter
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):

@@ -8,7 +8,7 @@ from tktkt.preparation.perturbers import ConstantSampler, ParallelPerturber, Sub
 
 from ..tasks._core import *
 from ..tasks._core import HC
-from ..util.datasets import HuggingfaceDatasetSplit, sortSplits
+from ..util.datasets import HuggingfaceDatasetSplit, sortSplits, TextField, CharacterIndex, SubstringLabel
 
 DS = TypeVar("DS", bound=HuggingfaceDatasetSplit)
 
@@ -134,12 +134,19 @@ class TaskWithAugmentedDataset(TaskWrapper):
 
 class TaskWithTypos(TaskWithAugmentedDataset):
 
-    def __init__(self, task: Task, text_fields: Set[str], splits: Set[str], p: float):
+    def __init__(self, task: Task, p: float, splits: Set[str], text_fields: Set[str]=None):
+        if any(isinstance(f, (CharacterIndex,SubstringLabel)) for f in task.dataset_metadata.label_fields):
+            raise NotImplementedError("Cannot yet apply typos to datasets where the labels refer to characters in the input.")
+        if text_fields is None:
+            text_fields = task.dataset_metadata.text_fields
+            assert all(isinstance(field,TextField) for field in text_fields)
+            text_fields = {field.field_name for field in text_fields}
+
         text_fields = set(text_fields)
         if text_fields:
             field = text_fields.pop()
             if text_fields:
-                super().__init__(TaskWithTypos(task, text_fields, splits=splits, p=p),
+                super().__init__(TaskWithTypos(task, p=p, text_fields=text_fields, splits=splits),
                                  augmentation=TyposLevenshtein1(field, p),
                                  splits=splits)
             else:

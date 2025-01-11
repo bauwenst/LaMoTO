@@ -67,6 +67,8 @@ class CLM(Task[CausalLMHeadConfig]):
     def __init__(self):
         super().__init__(
             task_name="CLM",
+            text_fields=["text"],
+            label_field=[],
             metric_config=MetricSetup(
                 to_compute=["ppl"],
                 to_track={

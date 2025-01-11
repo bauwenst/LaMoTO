@@ -74,6 +74,8 @@ class MLM(Task[MaskedLMHeadConfig]):
         """
         super().__init__(
             task_name="MLM",
+            text_fields=["text"],
+            label_field=[],
             metric_config=MetricSetup(  # This is quite computation-heavy.
                 to_compute=["pppl"],
                 to_track={

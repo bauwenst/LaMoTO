@@ -13,7 +13,8 @@ from archit.instantiation.heads import ExtractiveQAHeadConfig, ExtractiveAQAHead
 
 from ._core import Task, MetricSetup
 from ..util.datasets import imputeTestSplit, DictOfLists, \
-    replaceDatasetColumns_OneExampleToOneExample, replaceDatasetColumns_ManyExamplesToManyExamples
+    replaceDatasetColumns_OneExampleToOneExample, replaceDatasetColumns_ManyExamplesToManyExamples, ImplicitLabel, \
+    TextField, ForeignField, CharacterIndex
 from ..measuring import AQA
 
 
@@ -71,7 +72,11 @@ class _SquadTask(Task):
                                no more context tokens.
         """
         super().__init__(
-            task_name="SQuAD2" if with_answerability else "SQuAD1.1",
+            task_name="SQuAD2" if with_answerability else "SQuAD1",
+            text_fields=["question", "context"],
+            label_field=[CharacterIndex(ImplicitLabel(lambda ex: ex["answers"]["answer_start"][0] if ex["answers"]["answer_start"] else -1), "context"),  # Why we need this: CharacterIndex to tell us "this indexes into another field" and ImplicitLabel to tell us "this is where it is". That's all you need when e.g. applying typos to the referent.
+                         ForeignField(ImplicitLabel(lambda ex: ex["answers"]["text"][0] if ex["answers"]["text"] else ""), TextField("context"))]
+                        + with_answerability*[ImplicitLabel(lambda ex: int(len(ex["answers"]["answer_start"]) > 0))],
             metric_config=MetricSetup(
                 to_compute=["aqa"],
                 to_track={"aqa": {name: name.replace("_", "-") for name in AQA.keys()}}

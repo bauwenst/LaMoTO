@@ -24,6 +24,8 @@ class SWAG(Task[SequenceClassificationHeadForNestedBatches]):
     def __init__(self):
         super().__init__(
             task_name="SWAG",
+            text_fields=["sent1", "sent2"] + SWAG.ENDING_FIELDS,
+            label_field="label",
             metric_config=MetricSetup(
                 to_compute=["precision", "recall", "f1", "accuracy"],
                 to_track={

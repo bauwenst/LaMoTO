@@ -55,6 +55,8 @@ class MBR(Task[TokenClassificationHeadConfig]):
     def __init__(self, dataset_out_of_context: bool=True):
         super().__init__(
             task_name="MBR" + "-" + DATASET._language.to_tag(),
+            text_fields=["text"],
+            label_field="labels",
             metric_config=MetricSetup(
                 to_compute=["accuracy", "precision", "recall", "f1"],
                 to_track={

@@ -40,6 +40,7 @@ class COPA(SuperGLUETask):
     def __init__(self):
         super().__init__(
             task_name="COPA",
+            text_fields=["premise", "question", "choice1", "choice2"],
             metric_config=MetricSetup(
                 to_compute=["precision", "recall", "f1", "accuracy"],
                 to_track={

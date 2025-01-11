@@ -1,7 +1,7 @@
 """
 Core fine-tuning script for any task.
 """
-from typing import Any, Dict, Type, List, Tuple, Generic, Optional
+from typing import Any, Dict, Type, List, Tuple, Generic, Optional, Union
 from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -16,6 +16,7 @@ from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric
 from ..training.auxiliary.hyperparameters import TaskHyperparameters, getDefaultHyperparameters, PC, HC
 from ..util.visuals import warn, log
+from ..util.datasets import DatasetMetadata, TextField, ClassLabel, FieldType
 
 
 @dataclass
@@ -42,10 +43,14 @@ class Task(ABC, Generic[HC]):
     certain downstream task.
     """
 
-    def __init__(self, task_name: str, metric_config: MetricSetup,
+    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: List[Union[str,FieldType]], label_field: Union[Union[str,FieldType], List[Union[str,FieldType]]],
                  archit_class: Type[ModelWithHead[PC,HC]], automodel_class: Type[_BaseAutoModelClass], **automodel_args):
         self.task_name       = task_name
         self.metric_config   = metric_config
+        self.dataset_metadata = DatasetMetadata(
+            text_fields=[(TextField(f) if isinstance(f,str) else f) for f in text_fields],
+            label_fields=[ClassLabel(label_field)] if isinstance(label_field, str) else label_field if not isinstance(label_field, list) else [(ClassLabel(f) if isinstance(f,str) else f) for f in label_field]
+        )
         self.archit_class    = archit_class
         self.automodel_class = automodel_class
         self.automodel_args  = automodel_args
@@ -185,6 +190,8 @@ class TaskWrapper(Task[HC]):
     def __init__(self, task: Task[HC], wrapper_name: str):
         super().__init__(
             task_name=task.task_name + "+" + wrapper_name,
+            text_fields=task.dataset_metadata.text_fields,
+            label_field=task.dataset_metadata.label_fields,
             metric_config=task.metric_config,
             archit_class=task.archit_class,
             automodel_class=task.automodel_class,

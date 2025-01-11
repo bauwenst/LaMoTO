@@ -18,6 +18,8 @@ class POS(Task[TokenClassificationHeadConfig]):
         self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"].feature.names]
         super().__init__(
             task_name="POS",
+            text_fields=["tokens"],
+            label_field="upos",
             metric_config=MetricSetup(
                 to_compute=["seqeval"],
                 to_track={

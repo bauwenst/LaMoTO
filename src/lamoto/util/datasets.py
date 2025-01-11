@@ -1,4 +1,4 @@
-from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any, Callable
+from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any, Callable, Generic, Tuple
 from abc import ABC, abstractmethod
 from transformers import PreTrainedTokenizerBase
 
@@ -7,6 +7,7 @@ import warnings
 from copy import deepcopy
 import numpy as np
 import numpy.random as npr
+from collections import Counter
 import datasets
 from datasets import Dataset, IterableDataset, DatasetDict, IterableDatasetDict
 from datasets.arrow_dataset import DatasetInfoMixin
@@ -28,6 +29,7 @@ HuggingfaceDatasetDict  = Union[DatasetDict, IterableDatasetDict]
 HuggingfaceDataset      = Union[HuggingfaceDatasetSplit, HuggingfaceDatasetDict]
 
 Dataset_or_DatasetDict = TypeVar("Dataset_or_DatasetDict", bound=Union[Dataset,DatasetDict])  # Non-iterable.
+T = TypeVar("T")
 
 
 class DictOfLists:
@@ -56,7 +58,7 @@ class DictOfLists:
 
 
 def replaceDatasetColumns_OneExampleToOneExample(dataset: Dataset_or_DatasetDict, mapping: Callable[[HuggingfaceExample],HuggingfaceExample], but_keep: Iterable[str]=None) -> Dataset_or_DatasetDict:
-    old_columns = getDatasetColumns(dataset)
+    old_columns = getDatasetColumnNames(dataset)
     if isinstance(dataset, (IterableDataset, IterableDatasetDict)):
         dataset = dataset.map(mapping, batched=False)
     else:
@@ -65,7 +67,7 @@ def replaceDatasetColumns_OneExampleToOneExample(dataset: Dataset_or_DatasetDict
 
 
 def replaceDatasetColumns_ManyExamplesToManyExamples(dataset: Dataset_or_DatasetDict, mapping: Callable[[HuggingfaceBatch],HuggingfaceBatch], but_keep: Iterable[str]=None) -> Dataset_or_DatasetDict:
-    old_columns = getDatasetColumns(dataset)
+    old_columns = getDatasetColumnNames(dataset)
     if isinstance(dataset, (IterableDataset, IterableDatasetDict)):
         dataset = dataset.map(mapping, batched=True)
     else:
@@ -73,7 +75,7 @@ def replaceDatasetColumns_ManyExamplesToManyExamples(dataset: Dataset_or_Dataset
     return dataset.remove_columns([c for c in set(old_columns) - set(but_keep or [])])  # Note: Since .map doesn't remove columns, all the old columns will still be part of the new columns. We assume .map did not overwrite any columns, and otherwise, that the overwritten columns are declared by the caller.
 
 
-def getDatasetColumns(dataset: HuggingfaceDataset) -> List[str]:
+def getDatasetColumnNames(dataset: HuggingfaceDataset) -> List[str]:
     if isinstance(dataset, (DatasetDict, IterableDatasetDict)):
         first_split_name = list(dataset.keys())[0]
         return dataset.column_names[first_split_name]
@@ -84,6 +86,7 @@ def getDatasetColumns(dataset: HuggingfaceDataset) -> List[str]:
 def getDatasetSize(dataset: HuggingfaceDatasetSplit, split: str= "train") -> int:
     """
     Get the amount of examples in a HuggingFace dataset, whether it is a regular Dataset or a streamed IterableDataset.
+    TODO: I wonder if .num_rows works even better.
     """
     if isinstance(dataset, dict):
         try:
@@ -98,6 +101,12 @@ def getDatasetSize(dataset: HuggingfaceDatasetSplit, split: str= "train") -> int
             return dataset.info.splits[split].num_examples
         except:
             raise ValueError(f"Could not resolve size of dataset split '{split}'.")  # This is e.g. the case for the SlimPajama dataset.
+
+
+def getRowCount(dataset: Dataset_or_DatasetDict) -> Union[int, Dict[str,int]]:
+    if isinstance(dataset, DatasetDict):
+        return {split: getRowCount(dataset[split]) for split in dataset}
+    return dataset.num_rows
 
 
 def sortSplits(splits: Iterable[str]) -> List[str]:
@@ -228,18 +237,108 @@ def rebalanceLabels(dataset: Dataset_or_DatasetDict, label_column: str, strategy
     return dataset.select(np.concatenate(sampled_indices))
 
 
-def getLabelCounts(dataset: Dataset_or_DatasetDict, label_column: str) -> Union[Dict[Any, int], Dict[str,Dict[Any,int]]]:
-    if isinstance(dataset, DatasetDict):
-        return {split: getLabelCounts(dataset[split], label_column) for split in dataset}
-
-    labels = dataset.with_format("numpy")[label_column]
-    unique_label_values, label_counts = np.unique(labels, return_counts=True)
-    return {label: count for label, count in zip(unique_label_values, label_counts)}
+def applyPerSplit(dataset_dict: Union[DatasetDict, Dict[str,Dataset]], function: Callable[[Dataset], T]) -> Dict[str,T]:
+    return {name: function(split) for name,split in dataset_dict.items()}
 
 
-# Timeout configuration (I tested this and it works, but it sure is a weird use of Python imports... https://github.com/huggingface/datasets/issues/6172#issuecomment-1794876229)
-datasets.config.STREAMING_READ_RETRY_INTERVAL = 60   # Seconds between retries; ideally this would work with exponential backoff, but it doesn't, because... HuggingFace engineers.
-datasets.config.STREAMING_READ_MAX_RETRIES    = 120  # Retry for up to 2 hours.
+class FieldType(ABC, Generic[T]):
+    @abstractmethod
+    def extract(self, example: dict) -> T:
+        pass
+
+class _ExplicitField(FieldType[T]):
+    """Field that can be looked up as a column in a dataset."""
+    def __init__(self, field: str):
+        self.field_name = field
+
+    def extract(self, example: dict) -> T:
+        return example[self.field_name]
+
+class TextField(_ExplicitField[str]):
+    pass
+
+class ClassLabel(_ExplicitField[int]):
+    pass
+
+class RegressiveLabel(_ExplicitField[float]):
+    pass
+
+class UnboundedIntegerLabel(_ExplicitField[int]):
+    pass
+
+class ForeignField(FieldType[T]):
+    """Field that somehow refers to another field. E.g.: in extractive QA, you have 'context' field which is just text,
+       and then you could have a field that refers to the starting character of the answer IN that context and/or the full answer string itself.
+       This means that you should never modify these fields, except you should always modify them when their referent is modified."""
+    def __init__(self, field: FieldType[T], referent: FieldType):
+        self.field_itself = field
+        self.referent     = referent
+
+    def extract(self, example: dict) -> T:
+        return self.field_itself.extract(example)
+
+class SubstringLabel(ForeignField[str]):
+    """E.g.: answer text in SQuAD."""
+    def __init__(self, field: Union[str,FieldType[str]], referent: str):
+        super().__init__(TextField(field) if isinstance(field, str) else field, TextField(referent))
+
+class _IndexLabel(ForeignField[int]):
+    def __init__(self, field: Union[str,FieldType[int]], referent: str):
+        super().__init__(UnboundedIntegerLabel(field) if isinstance(field, str) else field, TextField(referent))
+
+class CharacterIndex(_IndexLabel):
+    pass
+
+class WordIndex(_IndexLabel):
+    pass
+
+class SpanLabel(FieldType[Tuple[int,int]]):
+    def __init__(self, label_start: _IndexLabel, label_end: _IndexLabel):
+        assert type(label_start) == type(label_end)
+        # assert label_start.target.field == label_end.target.field
+
+        self.start = label_start
+        self.end   = label_end
+
+    def extract(self, example: dict):
+        return self.start.extract(example), self.end.extract(example)
+
+class ImplicitLabel(FieldType[T]):
+    """E.g.: answerability in SQuAD v2."""
+    def __init__(self, from_example: Callable[[dict],T]):
+        self.extraction_function = from_example
+
+    def extract(self, example: dict) -> T:
+        return self.extraction_function(example)
+
+class NestedLabel(ImplicitLabel[T]):
+    """E.g.: span start index in SQuAD v1."""
+    def __init__(self, field: str, nested_field_type: FieldType[T]):
+        super().__init__(lambda ex: nested_field_type.extract(ex[field]))
+
+
+class DatasetMetadata:
+
+    def __init__(self, text_fields: List[FieldType], label_fields: List[FieldType]):
+        self.text_fields  = text_fields
+        self.label_fields = label_fields
+
+    def getLabelCounts(self, dataset: Dataset) -> Dict[str,Dict[Any, int]]:
+        field_to_valuecounts = dict()
+        for label_field in self.label_fields:
+            labels = dataset.with_format("numpy")[label_field]
+            unique_label_values, label_counts = np.unique(labels, return_counts=True)
+            field_to_valuecounts[label_field] = dict(zip(unique_label_values, label_counts))
+
+        return field_to_valuecounts
+
+    def getLabelDistribution(self, dataset: Dataset) -> Dict[str, Dict[Any, float]]:
+        field_to_valuefractions = dict()
+        for label_field in self.label_fields:
+            c = Counter(dataset[label_field])
+            field_to_valuefractions[label_field] = {k: v/c.total() for k,v in c.items()}
+
+        return field_to_valuefractions
 
 
 def packedDatasetGenerator(dataset: Iterable[dict], tokenizer: PreTrainedTokenizerBase, context_length: int, key='text'):
@@ -300,6 +399,12 @@ def PackedDataset(dataset: Iterable[dict], tokenizer: PreTrainedTokenizerBase, c
     return iterable_dataset
 
 
+########################################################################################################################
+
+# Timeout configuration (I tested this and it works, but it sure is a weird use of Python imports... https://github.com/huggingface/datasets/issues/6172#issuecomment-1794876229)
+datasets.config.STREAMING_READ_RETRY_INTERVAL = 60   # Seconds between retries; ideally this would work with exponential backoff, but it doesn't, because... HuggingFace engineers.
+datasets.config.STREAMING_READ_MAX_RETRIES    = 120  # Retry for up to 2 hours.
+
 def IterableDatasetWithSkippingBackoff(dataset: IterableDataset, backoff_minutes: Schedule) -> IterableDataset:
     """
     HuggingFace datasets has a two-tiered back-off system and neither of them works to protect against hub outages
@@ -329,7 +434,6 @@ def IterableDatasetWithSkippingBackoff(dataset: IterableDataset, backoff_minutes
     return safe_iterable
 
 
-T = TypeVar("T")
 class LossyBackoff(Iterable[T], ABC):
     """
     FIXME: Unfortunately, this is just not how Python works. When a generator raise an error, you can't step back into it.
