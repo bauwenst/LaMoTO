@@ -1,13 +1,13 @@
 from datasets import DatasetDict
 
-from ._general import ClassifySentenceGLUETask
+from ._general import ClassifySentenceGLUETask, RankingMetricSpec
 from ...util.datasets import BalancingStrategy, UpsampleToBiggest, rebalanceLabels
 
 
 class CoLA(ClassifySentenceGLUETask):
     """Detection of erroneously formed sentences. Note that the actual dataset has a 70-30 positive-negative skew."""
     def __init__(self, balancing: BalancingStrategy=UpsampleToBiggest()):
-        super().__init__("CoLA")
+        super().__init__("CoLA", rank_by=RankingMetricSpec("matthews_correlation", "matthews_correlation", True))
         self._balancing = balancing
 
     def _loadDataset(self) -> DatasetDict:

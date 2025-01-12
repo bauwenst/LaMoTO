@@ -37,7 +37,8 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
 
     EXAMPLES_PER_EVALUATION = 2**14,
 
-    TRACK_BEST_MODEL=False,
+    track_best_checkpoint=False,
+    rank_checkpoints_using_loss=False,
     EVALS_OF_PATIENCE=None,
     EVAL_VS_SAVE_INTERVALS=Intervals(
         evaluation=EveryNDescents(descents=128),

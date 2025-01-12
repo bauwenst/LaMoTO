@@ -117,7 +117,8 @@ class DP(Task[DependencyParsingHeadConfig]):
                         "ucm": "UCM",
                         "lcm": "LCM"
                     }
-                }
+                },
+                to_rank=RankingMetricSpec("attachment", "lcm", True)
             ),
             archit_class=ForDependencyParsing,
             automodel_class=None,  # Technically there is no HuggingFace-compatible AutoModelForDP. Best we have is supar, but it can only load from a base model checkpoint, not from a supar checkpoint!

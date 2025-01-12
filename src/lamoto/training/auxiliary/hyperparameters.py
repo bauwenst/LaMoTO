@@ -207,7 +207,8 @@ class TaskHyperparameters(Generic[HC]):
     EXAMPLES_PER_EVALUATION: Optional[int]  # If None, use the entire validation set.
     EVALS_OF_PATIENCE: Optional[int]  # Don't necessary need early stopping. You never know what's around the corner!
 
-    TRACK_BEST_MODEL: bool
+    track_best_checkpoint: bool
+    rank_checkpoints_using_loss: bool
     EVAL_VS_SAVE_INTERVALS: Intervals  # Second one will be ignored if the above option is true.
 
     # Model configuration
@@ -299,7 +300,8 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
         checkpointing=None
     ),
     EVALS_OF_PATIENCE=5,
-    TRACK_BEST_MODEL=True,
+    track_best_checkpoint=True,
+    rank_checkpoints_using_loss=True,
 
     SEED=69420,
     init_weights=True,

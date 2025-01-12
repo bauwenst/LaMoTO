@@ -28,7 +28,7 @@ class MetaHyperparameters:
     max_examples_phase_2: int
     minmax_evals_phase_2: int
 
-    rank_by: RankingMetricSpec
+    rank_by: Optional[RankingMetricSpec] = None  # If None, the task's default ranking metric will be used in tuning.
 
     def copy(self) -> "MetaHyperparameters":
         return deepcopy(self)
@@ -55,10 +55,10 @@ class TaskTuner:
         ###
         model_augmentation: Optional[ModelAugmentation]=None
     ):
-        self._warmup_steps_grid         = warmup_steps          or []
-        self._effective_batch_size_grid = effective_batch_sizes or []
-        self._learning_rates            = learning_rates        or []
-        self._decay_rates               = adamw_decay_rates     or []
+        self._warmup_steps_grid         = warmup_steps
+        self._effective_batch_size_grid = effective_batch_sizes
+        self._learning_rates            = learning_rates
+        self._decay_rates               = adamw_decay_rates
         self._trainer = TaskTrainer(model_augmentation)
 
     @dataclass
@@ -79,11 +79,13 @@ class TaskTuner:
 
     def tune(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters):
         hp = hp.copy()
+        meta = meta.copy()
 
         # Sanity checks and imputations
         assert meta.n_grid_samples >= 1, "At least one hyperparameter sample must be taken."
         assert isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path)), "Can only tune starting from a pre-trained checkpoint."
         hp.init_weights = True
+        meta.rank_by    = meta.rank_by or task.metric_config.to_rank
 
         # Find best hp changes
         original_stopping_condition = hp.HARD_STOPPING_CONDITION
@@ -101,7 +103,8 @@ class TaskTuner:
         """
         # Hyperparameter setup
         hp.traceless = True
-        hp.TRACK_BEST_MODEL = True
+        hp.track_best_checkpoint = True
+        hp.rank_checkpoints_using_loss = True
         hp.HARD_STOPPING_CONDITION = AfterNExamples(meta.max_examples_phase_1)  # Independent of batch size.
         hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_1 // meta.minmax_evals_phase_1)
         hp.EXAMPLES_PER_EVALUATION = None  # Inference should be fast enough to process anything in GLUE quickly enough.
@@ -109,10 +112,10 @@ class TaskTuner:
         # Grid setup
         rng = npr.default_rng(hp.SEED + meta.meta_seed)
         samples = sampleGridWithoutReplacement(rng, meta.n_grid_samples,
-                                               self._warmup_steps_grid,
-                                               self._effective_batch_size_grid,
-                                               self._learning_rates,
-                                               self._decay_rates)
+                                               self._warmup_steps_grid         or [hp.EFFECTIVE_BATCHES_WARMUP],
+                                               self._effective_batch_size_grid or [hp.EXAMPLES_PER_EFFECTIVE_BATCH],
+                                               self._learning_rates            or [hp.learning_rate],
+                                               self._decay_rates               or [hp.adamw_decay_rate])
 
         # Grid search
         ranking_metric_name = "eval_" + meta.rank_by.fullName()
@@ -151,10 +154,13 @@ class TaskTuner:
         """
         hp.HARD_STOPPING_CONDITION = AfterNExamples(meta.max_examples_phase_2)
         hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_2 // meta.minmax_evals_phase_2)
+        hp.track_best_checkpoint       = True
+        hp.rank_checkpoints_using_loss = False
+        if meta.rank_by is not None:  # => Override the task's usual to_rank metric with a custom one.
+            task.metric_config.to_rank = meta.rank_by
 
         self._setSample(hp, best_sample)
         log("Starting long tuning for best hyperparameters:", best_sample)
-        task.metric_config.to_rank = meta.rank_by
         identifier, results = self._trainer.train(task, hp)
         log("Finished long tuning for best hyperparameters:", best_sample)
         print("Results:")

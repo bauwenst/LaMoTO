@@ -58,7 +58,7 @@ class CompareSentencesGLUETask(GLUETask):
     For all the NLI and similarity tasks in GLUE.
     """
 
-    def __init__(self, task_name: str, num_labels: int, text_field1: str="sentence1", text_field2: str="sentence2", is_regressive: bool=False):
+    def __init__(self, task_name: str, num_labels: int, rank_by: RankingMetricSpec=RankingMetricSpec("accuracy", "accuracy", True), text_field1: str="sentence1", text_field2: str="sentence2", is_regressive: bool=False):
         super().__init__(
             task_name=task_name,
             text_fields=[text_field1, text_field2],
@@ -69,21 +69,28 @@ class CompareSentencesGLUETask(GLUETask):
                     "recall":    {"recall": "Re"},
                     "f1":        {"f1": "$F_1$"},
                     "accuracy":  {"accuracy": "Acc"}
-                }
-            ) if not is_regressive and num_labels == 2 else MetricSetup(
+                },
+                to_rank=rank_by
+            )
+            if not is_regressive and num_labels == 2 else
+            MetricSetup(
                 to_compute=["precision_macro", "recall_macro", "f1_macro", "accuracy"],
                 to_track={
                     "precision_macro": {"precision": "Macro Pr"},
                     "recall_macro": {"recall": "Macro Re"},
                     "f1_macro": {"f1": "Macro $F_1$"},
                     "accuracy": {"accuracy": "Acc"}
-                }
-            ) if not is_regressive else MetricSetup(
+                },
+                to_rank=rank_by
+            )
+            if not is_regressive else
+            MetricSetup(
                 to_compute=["pearsonr", "spearmanr"],
                 to_track={
                     "pearsonr": {"pearsonr": "Pearson"},
                     "spearmanr": {"spearmanr": "Spearman"}
-                }
+                },
+                to_rank=RankingMetricSpec("spearmanr", "spearmanr", True)
             ),
             num_labels=num_labels,
             is_regressive=is_regressive
@@ -105,7 +112,7 @@ class ClassifySentenceGLUETask(GLUETask):
     For the binary single-sentence classification tasks in GLUE.
     """
 
-    def __init__(self, task_name: str):
+    def __init__(self, task_name: str, rank_by: RankingMetricSpec):
         super().__init__(
             task_name=task_name,
             text_fields=["sentence"],
@@ -117,7 +124,8 @@ class ClassifySentenceGLUETask(GLUETask):
                     "f1":        {"f1": "$F_1$"},
                     "accuracy":  {"accuracy": "Acc"},
                     "matthews_correlation": {"matthews_correlation": "MCC"}
-                }
+                },
+                to_rank=rank_by
             ),
             num_labels=2
         )

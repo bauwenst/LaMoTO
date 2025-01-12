@@ -9,7 +9,7 @@ class STSB(CompareSentencesGLUETask):
     """
 
     def __init__(self):
-        super().__init__(task_name="STS-B", num_labels=1, is_regressive=True)
+        super().__init__(task_name="STS-B", num_labels=1, is_regressive=True)  # Defaults to ranking by Spearman correlation.
 
     def getPredictionsAndReferences(self, eval: EvalPrediction):
         predictions, labels = eval.predictions.squeeze(), eval.label_ids

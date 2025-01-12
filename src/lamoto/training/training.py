@@ -7,7 +7,7 @@ import torch
 import wandb
 import transformers
 from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer, \
-    PreTrainedTokenizerBase, EvalPrediction
+    PreTrainedTokenizerBase, EvalPrediction, PretrainedConfig
 from transformers.trainer_utils import has_length
 from transformers.utils.logging import set_verbosity_error
 from huggingface_hub.constants import HF_HUB_CACHE
@@ -68,8 +68,10 @@ class TaskTrainer:
         # Imputations and sanity checks
         if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, Path):
             hyperparameters.MODEL_CONFIG_OR_CHECKPOINT = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT.as_posix()  # FIXME: Possibly have to make it a relative path due to HF restrictions.
-        if task.metric_config.to_rank is None:
-            task.metric_config.to_rank = RankingMetricSpec(metric_name="", result_name="loss", higher_is_better=False)
+        if task.metric_config.to_rank is None or hyperparameters.rank_checkpoints_using_loss:
+            metric_to_rank = RankingMetricSpec(metric_name="", result_name="loss", higher_is_better=False)
+        else:
+            metric_to_rank = task.metric_config.to_rank
 
         if hyperparameters.init_weights and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
             raise ValueError("You said you wanted to initialise model weights from the checkpoint, but didn't give a checkpoint path!")
@@ -77,8 +79,12 @@ class TaskTrainer:
             raise ValueError("In order to parse model configs, the archit_basemodel_class hyperparameter cannot be None.")
         if hyperparameters.archit_head_config is None and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):  # Note: there is another failure case: when the checkpoint *is* a string, but *isn't* an ArchIt checkpoint. It errors below.
             raise ValueError("Without a checkpoint, a head config must be provided to instantiate a new head.")
-        if hyperparameters.TRACK_BEST_MODEL and task.metric_config.to_rank.fullName() != "loss" and task.metric_config.to_rank.metric_name not in task.metric_config.to_compute:
-            raise ValueError(f"Cannot rank models based on metric {task.metric_config.to_rank.metric_name} since it isn't computed.")
+        if not hyperparameters.track_best_checkpoint and hyperparameters.rank_checkpoints_using_loss:
+            raise ValueError("Asked to rank models with loss, but also to not track the best model.")
+        if hyperparameters.track_best_checkpoint and metric_to_rank.fullName() == "loss" and not hyperparameters.rank_checkpoints_using_loss:
+            raise ValueError("Asked to NOT rank models with loss, but no ranking metric is configured for this task meaning models would be ranked by loss.")
+        if hyperparameters.track_best_checkpoint and metric_to_rank.fullName() != "loss" and metric_to_rank.metric_name not in task.metric_config.to_compute:
+            raise ValueError(f"Cannot rank models based on metric {metric_to_rank.metric_name} since it isn't computed.")
         for metric_name in task.metric_config.to_track.keys():
             if metric_name not in task.metric_config.to_compute:
                 raise ValueError(f"Requested tracking results for metrics {sorted(task.metric_config.to_track)} yet you are only computing metrics {sorted(task.metric_config.to_compute)}.")
@@ -119,16 +125,17 @@ class TaskTrainer:
 
         log("Loading model config...")
         config_or_str = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
-        if not isinstance(config_or_str, str):  # It's an object.
+        if isinstance(config_or_str, str):  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
+            model_config = CombinedConfig.from_pretrained(config_or_str,
+                                                          head_config=hyperparameters.archit_head_config,
+                                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
+        else:  # It's an object.
+            assert isinstance(config_or_str, PretrainedConfig)
             if isinstance(config_or_str, CombinedConfig):
                 raise ValueError("When instantiating a new model from a config, it must only parameterise the base model. The head has its own config.")
             model_config = CombinedConfig(base_model_config=config_or_str,
                                           head_config=hyperparameters.archit_head_config,
                                           base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # This call pretends to be CombinedConfig(**json).
-        else:  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
-            model_config = CombinedConfig.from_pretrained(config_or_str,
-                                                          head_config=hyperparameters.archit_head_config,
-                                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
         task._setModelConfig(model_config)
 
         if hyperparameters.SAVE_AS:
@@ -291,7 +298,7 @@ class TaskTrainer:
 
         # - Intervals
         eval_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.evaluation or Never()
-        if not hyperparameters.TRACK_BEST_MODEL:
+        if not hyperparameters.track_best_checkpoint:
             save_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.checkpointing or Never()
         else:  # Ignore it and sync with eval interval.
             if isinstance(eval_interval, Never):
@@ -307,7 +314,7 @@ class TaskTrainer:
                                                                                  dataset=datasetdict["train"], split_name="train"))
 
         # - Early stopping (only used if required)
-        best_model_metric_handle = f"eval_{task.metric_config.to_rank.fullName()}" if hyperparameters.TRACK_BEST_MODEL else None
+        best_model_metric_handle = f"eval_{metric_to_rank.fullName()}" if hyperparameters.track_best_checkpoint else None
 
         # - Finally get args
         training_args = TrainingArguments(
@@ -343,9 +350,9 @@ class TaskTrainer:
 
             output_dir=folder_to_this_models_checkpoints.as_posix(),
 
-            load_best_model_at_end=hyperparameters.TRACK_BEST_MODEL,  # Will take the best model out of its checkpoint directory and load it into task.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
+            load_best_model_at_end=hyperparameters.track_best_checkpoint,  # Will take the best model out of its checkpoint directory and load it into task.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
             metric_for_best_model=best_model_metric_handle,
-            greater_is_better=task.metric_config.to_rank.higher_is_better,
+            greater_is_better=metric_to_rank.higher_is_better,
             save_total_limit=1,  # This will keep the last model stored plus the best model if those aren't the same, allowing you to have the best model and continue training from last if you need to. https://stackoverflow.com/a/67615225/9352077
 
             # Logging
@@ -371,7 +378,7 @@ class TaskTrainer:
 
         # - Build callbacks
         callbacks = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(task.tokenizer)]
-        if hyperparameters.TRACK_BEST_MODEL and hyperparameters.EVALS_OF_PATIENCE is not None:
+        if hyperparameters.track_best_checkpoint and hyperparameters.EVALS_OF_PATIENCE is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.EVALS_OF_PATIENCE))  # Patience is the amount of eval calls you can tolerate worsening loss.
 
         # if not isinstance(eval_interval, NeverInterval):  # Didn't work, but has since become an option that works. https://discuss.huggingface.co/t/how-to-evaluate-before-first-training-step/18838
@@ -407,18 +414,18 @@ class TaskTrainer:
 
         compute_eval_loss = not isinstance(eval_interval, Never) and (
             at_least_one_traditional_metric or (
-                hyperparameters.TRACK_BEST_MODEL and best_model_metric_handle == "eval_loss"  # eval loss doesn't show up as a 'traditional metric' because it isn't one; other models for tracking do.
+                hyperparameters.track_best_checkpoint and best_model_metric_handle == "eval_loss"  # eval loss doesn't show up as a 'traditional metric' because it isn't one; other models for tracking do.
             ) or (
-                not hyperparameters.TRACK_BEST_MODEL and not task.metric_config.to_track  # => You asked to evaluate on an interval, yet you didn't ask for any metrics to evaluate, so it must be loss.
+                    not hyperparameters.track_best_checkpoint and not task.metric_config.to_track  # => You asked to evaluate on an interval, yet you didn't ask for any metrics to evaluate, so it must be loss.
             )
         )
 
         if not hyperparameters.traceless and not hyperparameters.WANDB_PROJECT:
-            if hyperparameters.TRACK_BEST_MODEL:
+            if hyperparameters.track_best_checkpoint:
                 callbacks.append(FijectCallback(global_model_identifier + "_eval_goal", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
 
             metrics_to_track = task.metric_config.to_track
-            if not hyperparameters.TRACK_BEST_MODEL and compute_eval_loss:  # => eval loss will be included in the results even though it isn't captured by the above callback.
+            if not hyperparameters.track_best_checkpoint and compute_eval_loss:  # => eval loss will be included in the results even though it isn't captured by the above callback.
                 metrics_to_track = metrics_to_track | {"eval": {"loss": "loss"}}
 
             if metrics_to_track:
@@ -510,18 +517,18 @@ class TaskTrainer:
 
         # Train, and evaluate afterwards.
         try:
-            log(f"Training model {model.__class__.__name__} on task {task.task_name} on device {model.device}...")
+            log(f"Training starting with:\n\tModel: {model.__class__.__name__}\n\tTask: {task.task_name}\n\tRanking metric: {best_model_metric_handle if hyperparameters.track_best_checkpoint else 'None'}\n\tDevice: {model.device}...")
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # Not needed since we already checkpoint the last model with a callback.
             # trainer.push_to_hub()
 
-            log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on validation set...")
+            log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on validation set...")
             env.use_test_not_validation = False
             validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="eval")
             print(validation_results)
 
             if "test" in datasetdict:
-                log("Evaluation of " + ("best" if hyperparameters.TRACK_BEST_MODEL else "last") + " model on test set...")
+                log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on test set...")
                 env.use_test_not_validation = True
                 test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
                 all_results = validation_results | test_results

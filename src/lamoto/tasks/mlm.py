@@ -34,7 +34,8 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     HARD_STOPPING_CONDITION=AfterNDescents(500_000),
     EXAMPLES_PER_EVALUATION=2**14,  # C4 has a 365k validation split, so 16k isn't that bad. Two times the amount of data processed for one descent.
 
-    TRACK_BEST_MODEL=False,
+    track_best_checkpoint=False,
+    rank_checkpoints_using_loss=False,
     EVALS_OF_PATIENCE=None,
     EVAL_VS_SAVE_INTERVALS=Intervals(
         evaluation=EveryNDescents(descents=128),  # 128 batches doesn't seem like a lot, but with that massive batch size it means you only evaluate once every 128 ba * 8192 ex/ba * 512 tk/ex = 0.5 billion tokens seen.

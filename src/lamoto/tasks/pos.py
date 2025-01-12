@@ -24,7 +24,8 @@ class POS(Task[TokenClassificationHeadConfig]):
                 to_compute=["seqeval"],
                 to_track={
                     "seqeval": {"overall_accuracy": "Accuracy"}  # Note that Pr = Re = F1 = Acc without a negative class (BIO's O class which POS doesn't have but NER does).
-                }
+                },
+                to_rank=RankingMetricSpec("seqeval", "overall_accuracy", True)
             ),
             archit_class=ForSingleLabelTokenClassification,
             automodel_class=AutoModelForTokenClassification,

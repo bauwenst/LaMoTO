@@ -26,7 +26,8 @@ class NER(Task[TokenClassificationHeadConfig]):
                 to_compute=["seqeval"],
                 to_track={
                     "seqeval": {"overall_precision": "Pr", "overall_recall": "Re", "overall_f1": "$F_1$"}
-                }
+                },
+                to_rank=RankingMetricSpec("seqeval", "overall_f1", True)
             ),
             archit_class=ForSingleLabelTokenClassification,
             automodel_class=AutoModelForTokenClassification,
