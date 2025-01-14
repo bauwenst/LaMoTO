@@ -334,6 +334,9 @@ class Lineage:
     def run(self, node_handle: str):
         return self._get(node_handle)._run()
 
+    def out(self, node_handle: str, node_output: NodeOutput):
+        return self._get(node_handle).out(node_output)
+
     def _get(self, node_handle: str) -> _LineageNode:
         if not node_handle:
             raise ValueError(f"Cannot retrieve empty node handle.")
@@ -415,7 +418,7 @@ class TrainingNode(_LineageNode):
     def _run(self):
         result = self._trainer.train(task=self._task, hyperparameters=self._buildHyperparameters())
         self._task.resetTemporaryFields()
-        self._task.resetCaches()
+        # self._task.resetCaches()
         return result
 
     def duplicate(self) -> Self:
@@ -436,7 +439,7 @@ class TuningNode(_LineageNode):
     def _run(self):
         result = self._tuner.tune(task=self._task, hp=self._buildHyperparameters(), meta=self._buildMetaHyperparameters())
         self._task.resetTemporaryFields()
-        self._task.resetCaches()
+        # self._task.resetCaches()
         return result
 
     def duplicate(self) -> Self:

@@ -78,14 +78,12 @@ class TaskTuner:
         hp.adamw_decay_rate             = sample.dr
 
     def tune(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters):
-        hp = hp.copy()
+        hp   = hp.copy()
         meta = meta.copy()
 
         # Sanity checks and imputations
         assert meta.n_grid_samples >= 1, "At least one hyperparameter sample must be taken."
-        assert isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path)), "Can only tune starting from a pre-trained checkpoint."
-        hp.init_weights = True
-        meta.rank_by    = meta.rank_by or task.metric_config.to_rank
+        assert hp.init_weights and isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path)), "Can only tune starting from a pre-trained checkpoint."
 
         # Find best hp changes
         original_stopping_condition = hp.HARD_STOPPING_CONDITION
@@ -104,10 +102,11 @@ class TaskTuner:
         # Hyperparameter setup
         hp.traceless = True
         hp.track_best_checkpoint = True
-        hp.rank_checkpoints_using_loss = True
+        hp.rank_checkpoints_using_loss = True  # Within one HP sample, you use loss to find the best weights. Across samples, you select based on the ranking metric.
         hp.HARD_STOPPING_CONDITION = AfterNExamples(meta.max_examples_phase_1)  # Independent of batch size.
         hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_1 // meta.minmax_evals_phase_1)
         hp.EXAMPLES_PER_EVALUATION = None  # Inference should be fast enough to process anything in GLUE quickly enough.
+        rank_samples_by = meta.rank_by or task.metric_config.to_rank  # If no ranking metric is given, we use the task's default.
 
         # Grid setup
         rng = npr.default_rng(hp.SEED + meta.meta_seed)
@@ -118,8 +117,8 @@ class TaskTuner:
                                                self._decay_rates               or [hp.adamw_decay_rate])
 
         # Grid search
-        ranking_metric_name = "eval_" + meta.rank_by.fullName()
-        best_ranking_value = -float("inf") if meta.rank_by.higher_is_better else float("inf")
+        ranking_metric_name = "eval_" + rank_samples_by.fullName()
+        best_ranking_value = -float("inf") if rank_samples_by.higher_is_better else float("inf")
         best_sample = None
         for n, (wu, bs, lr, dr) in enumerate(samples):
             grid_sample = TaskTuner._HyperparameterGridSample(wu=wu, bs=bs, lr=lr, dr=dr)
@@ -136,8 +135,8 @@ class TaskTuner:
                 log(f"WARNING: Missing ranking metric {ranking_metric_name}. Cannot rank this hyperparameter set.")
             else:
                 new_ranking_value = results[ranking_metric_name]
-                if meta.rank_by.higher_is_better and new_ranking_value > best_ranking_value or \
-                    not meta.rank_by.higher_is_better and new_ranking_value < best_ranking_value:
+                if rank_samples_by.higher_is_better and new_ranking_value > best_ranking_value or \
+                    not rank_samples_by.higher_is_better and new_ranking_value < best_ranking_value:
                     best_ranking_value = new_ranking_value
                     best_sample = grid_sample
             print("=" * 50)
@@ -156,7 +155,7 @@ class TaskTuner:
         hp.EVAL_VS_SAVE_INTERVALS.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_2 // meta.minmax_evals_phase_2)
         hp.track_best_checkpoint       = True
         hp.rank_checkpoints_using_loss = False
-        if meta.rank_by is not None:  # => Override the task's usual to_rank metric with a custom one.
+        if meta.rank_by is not None:  # Override the task's usual to_rank metric with a custom one.
             task.metric_config.to_rank = meta.rank_by
 
         self._setSample(hp, best_sample)
