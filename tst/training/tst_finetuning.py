@@ -105,6 +105,25 @@ def tst_record():
     task.train(hp)
 
 
+def tst_tuner():
+    from lamoto.training.tuning import TaskTuner, MetaHyperparameters
+
+    tuner = TaskTuner(None, [8,16,32,64], [1e-4, 1e-3], None)
+    task = DP()
+    hp.archit_head_config = DependencyParsingHeadConfig(extended_model_config=PoolingAndStridingConfig())
+    meta = MetaHyperparameters(
+        meta_seed=0,
+        n_grid_samples=5,
+
+        max_examples_phase_1=16384,
+        minmax_evals_phase_1=3,
+
+        max_examples_phase_2=16384,
+        minmax_evals_phase_2=3
+    )
+    tuner.tune(task, hp, meta)
+
+
 if __name__ == "__main__":
     setModel(id=1)
 
@@ -118,3 +137,5 @@ if __name__ == "__main__":
     # tst_qqp()
     # tst_copa()
     # tst_record()
+
+    # tst_tuner()

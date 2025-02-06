@@ -36,6 +36,8 @@ class MetaHyperparameters:
 
 class TaskTuner:
     """
+    Implements the tuning procedure described in the GRaMPa paper.
+
     Samples values for certain hyperparameters in their given domains, and knows how to alter the training procedure
     when those supported hyperparameters change.
 
@@ -60,6 +62,16 @@ class TaskTuner:
         self._learning_rates            = learning_rates
         self._decay_rates               = adamw_decay_rates
         self._trainer = TaskTrainer(model_augmentation)
+
+    def withAugmentation(self, model_augmentation: Optional[ModelAugmentation]) -> "TaskTuner":
+        return TaskTuner(
+            warmup_steps=self._warmup_steps_grid,
+            effective_batch_sizes=self._effective_batch_size_grid,
+            learning_rates=self._learning_rates,
+            adamw_decay_rates=self._decay_rates,
+
+            model_augmentation=model_augmentation
+        )
 
     @dataclass
     class _HyperparameterGridSample:
