@@ -20,7 +20,6 @@ from collections import Counter
 from abc import ABC, abstractmethod
 from transformers import PretrainedConfig
 
-import warnings
 import itertools
 
 from archit.instantiation.abstracts import BaseModel
@@ -34,6 +33,7 @@ from .auxiliary.hyperparameters import TaskHyperparameters
 from .training import TaskTrainer, Task
 from .tuning import TaskTuner, MetaHyperparameters
 from ..util.exceptions import tryExceptNone
+from ..util.visuals import warn
 
 
 class ConfigFactory(ABC):
@@ -76,7 +76,7 @@ class _LineageNode(ABC):
     def out(self, node_output: NodeOutput) -> Self:
         """Sets the output of this node in-place. (If a file path, we warn about its inexistence, but don't error on it.)"""
         if isinstance(node_output, (str, Path)) and not Path(node_output).exists():
-            warnings.warn(f"Output of lineage node does not exist yet: {Path(node_output)}")
+            warn(f"Output of lineage node does not exist yet: {Path(node_output)}")
         self._out_as_field = node_output
         return self
 
@@ -351,7 +351,7 @@ class Lineage:
         return [node.handle for node in self]
 
     def __repr__(self):
-        s = "Lineage(" + self.name + ")\n"
+        s = "Lineage \"" + self.name + f"\" ({self.handle})\n"
         s += indent(1, self._node_tree.__repr__(), tab="|   ")
         return s
 

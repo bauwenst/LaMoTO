@@ -1,17 +1,28 @@
 from .. import __version__
 
 import pyfiglet
-import time
-
+import colorama
+import warnings
 import logging as logger
+import time
+from pathlib import Path
 
+__all__ = ["__version__", "log", "warn", "printLamotoWelcome"]
 
 def log(*args, **kwargs):
     print(f"[LaMoTO | {time.strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
 
 
-def warn(*args):
-    logger.warning(" ".join(map(repr, args)))  # The join-map-repr is what print() does by default.
+from warnings import warn
+
+
+def _monkeypatched_print_warning(message, category, filename, lineno, file=None, line=None):
+    bold = colorama.Style.BRIGHT
+    unbold = colorama.Style.NORMAL
+    path = Path(filename)
+    print(f"{colorama.Fore.YELLOW}{bold}{category.__name__} ({path.parent.name}/{path.name} at L{lineno}):{unbold} {message}{colorama.Fore.RESET}")
+
+warnings.showwarning = _monkeypatched_print_warning
 
 
 def printLamotoWelcome():

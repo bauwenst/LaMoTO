@@ -19,11 +19,11 @@ This is pretty much limited to the CANINE model. According to J.H. Clark via per
 
 # TODO: There's something to be said for having a split point before the first character and after the last character.
 #       This way, the model will better learn compound boundaries.
-
 import re
 from copy import deepcopy
 from typing import Iterable
 
+import numpy as np
 from datasets import Dataset
 from transformers import DataCollatorForTokenClassification, AutoModelForTokenClassification
 import torch
@@ -33,28 +33,30 @@ from modest.interfaces.datasets import ModestDataset
 from modest.languages.english import English_Celex
 from archit.instantiation.heads import TokenClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
+from archit.instantiation.basemodels import CanineBaseModel
 
 from ._core import *
-from ..training.auxiliary.hyperparameters import NEveryEpoch
+from ..training.auxiliary.hyperparameters import NEveryEpoch, AfterNEpochs
 from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
-
 
 ##################################
 SUGGESTED_HYPERPARAMETERS_MBR = getDefaultHyperparameters()
-SUGGESTED_HYPERPARAMETERS_MBR.CHECKPOINT_OR_CONFIG = "google/canine-c"
-SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER = "google/canine-c"
+SUGGESTED_HYPERPARAMETERS_MBR.archit_basemodel_class = CanineBaseModel
+SUGGESTED_HYPERPARAMETERS_MBR.MODEL_CONFIG_OR_CHECKPOINT = "google/canine-c"
+SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER                  = "google/canine-c"
 SUGGESTED_HYPERPARAMETERS_MBR.EFFECTIVE_BATCHES_WARMUP = 1000
 SUGGESTED_HYPERPARAMETERS_MBR.EVAL_VS_SAVE_INTERVALS.evaluation = NEveryEpoch(per_epoch=9)
-
-DATASET: ModestDataset[WordSegmentation] = English_Celex()
+SUGGESTED_HYPERPARAMETERS_MBR.archit_head_config = TokenClassificationHeadConfig()
+SUGGESTED_HYPERPARAMETERS_MBR.EVALS_OF_PATIENCE = 30
+SUGGESTED_HYPERPARAMETERS_MBR.HARD_STOPPING_CONDITION = AfterNEpochs(100)
 ##################################
 
 
 class MBR(Task[TokenClassificationHeadConfig]):
 
-    def __init__(self, dataset_out_of_context: bool=True):
+    def __init__(self, morphologies: ModestDataset[WordSegmentation]=English_Celex(), dataset_out_of_context: bool=True):
         super().__init__(
-            task_name="MBR" + "-" + DATASET._language.to_tag(),
+            task_name="MBR" + "-" + morphologies._name + "-" + morphologies._language.to_tag(),
             text_fields=["text"],
             label_field="labels",
             metric_config=MetricSetup(
@@ -64,7 +66,8 @@ class MBR(Task[TokenClassificationHeadConfig]):
                     "precision": {"precision": "Pr"},
                     "recall": {"recall": "Re"},
                     "f1": {"f1": "$F_1$"}
-                }
+                },
+                to_rank=RankingMetricSpec("recall", "recall", higher_is_better=True)
             ),
             archit_class=ForSingleLabelTokenClassification,
             automodel_class=AutoModelForTokenClassification,
@@ -72,30 +75,25 @@ class MBR(Task[TokenClassificationHeadConfig]):
             num_labels=2
         )
         # self.tokenizer: CanineTokenizer = AutoTokenizer.from_pretrained(CHECKPOINT)  # There is no unk_token because any Unicode codepoint is mapped via a hash table to an ID (which is better than UTF-8 byte tokenisation although not reversible).
-
-        self.single_word_dataset = dataset_out_of_context
+        self._morphologies = morphologies
+        self._single_word_dataset = dataset_out_of_context
 
     def _datasetOutOfContext(self) -> Iterable[dict]:
         print("> Building dataset")
-
-        BAR = "|"
-        FIND_BAR = re.compile(re.escape(BAR))
-
-        for obj in DATASET.generate():
-            splitstring = obj.segment()
-            split_indices = [match.start() // 2 for match in
-                             FIND_BAR.finditer(" ".join(splitstring).replace("   ", BAR))]
-
+        for obj in self._morphologies.generate():
             text = obj.word
-            labels = torch.zeros(len(text), dtype=torch.int8)
+
+            split_indices = np.cumsum([len(t) for t in obj.segment()]) - 1  # E.g.: if the token lengths are [2,3], you want [0,1,0,0,1].
+            labels = np.zeros(len(text), dtype=np.int8)
             labels[split_indices] = 1
+
             yield {"text": text, "labels": labels}
 
     def _datasetInContext(self) -> Iterable[dict]:
         raise RuntimeError("No in-context dataset exists currently.")
 
     def _loadDataset(self) -> DatasetDict:
-        iterable = self._datasetOutOfContext() if self.single_word_dataset else self._datasetInContext()
+        iterable = self._datasetOutOfContext() if self._single_word_dataset else self._datasetInContext()
 
         # Turn iterable into a Dataset. TODO: Not sure how sane this is. Works for small morphological datasets, but it should be as lazy as possible, rather than loading the whole dataset into memory at once.
         dataset = Dataset.from_list(list(iterable))
@@ -105,7 +103,7 @@ class MBR(Task[TokenClassificationHeadConfig]):
         datasetdict_valid_vs_test = datasetdict_train_vs_validtest["test"].train_test_split(train_size=50 / 100)
         return DatasetDict({
             "train": datasetdict_train_vs_validtest["train"],
-            "valid": datasetdict_valid_vs_test["train"],
+            "validation": datasetdict_valid_vs_test["train"],
             "test": datasetdict_valid_vs_test["test"]
         })
 

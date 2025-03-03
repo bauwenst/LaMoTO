@@ -105,6 +105,12 @@ def tst_record():
     task.train(hp)
 
 
+def tst_mbr():
+    from modest.languages.english import English_Celex
+    task = MBR(morphologies=English_Celex())
+    task.train()
+
+
 def tst_tuner():
     from lamoto.training.tuning import TaskTuner, MetaHyperparameters
 
@@ -133,9 +139,10 @@ if __name__ == "__main__":
     # tst_pos()
     # tst_ner()
     # tst_cola()
-    tst_dp()
+    # tst_dp()
     # tst_qqp()
     # tst_copa()
     # tst_record()
+    tst_mbr()
 
     # tst_tuner()
