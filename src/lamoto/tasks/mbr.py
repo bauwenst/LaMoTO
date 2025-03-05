@@ -19,9 +19,7 @@ This is pretty much limited to the CANINE model. According to J.H. Clark via per
 
 # TODO: There's something to be said for having a split point before the first character and after the last character.
 #       This way, the model will better learn compound boundaries.
-import re
-from copy import deepcopy
-from typing import Iterable
+from typing import Iterable, List
 
 import numpy as np
 from datasets import Dataset
@@ -37,7 +35,8 @@ from archit.instantiation.basemodels import CanineBaseModel
 
 from ._core import *
 from ..training.auxiliary.hyperparameters import NEveryEpoch, AfterNEpochs
-from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, ListOfField, ClassLabel
+from ..util.visuals import log
 
 ##################################
 SUGGESTED_HYPERPARAMETERS_MBR = getDefaultHyperparameters()
@@ -52,13 +51,63 @@ SUGGESTED_HYPERPARAMETERS_MBR.HARD_STOPPING_CONDITION = AfterNEpochs(100)
 ##################################
 
 
+from torch.nn.modules.loss import CrossEntropyLoss
+class ForSingleLabelTokenClassificationFactory:
+    """
+    Pretends to be a class, while it is actually secretly an instance.
+        - Its instance methods mimic class methods.
+        - Its __call__ is another class's __init__.
+    """
+
+    def __init__(self, class_weights: List[float]):
+        self.class_weights = class_weights
+
+    # The only method we wanted to change.
+
+    def buildLoss(self):
+        return CrossEntropyLoss(weight=torch.tensor(self.class_weights))
+
+    # Now mimic all the other classmethods as instance methods.
+
+    def __call__(self, combined_config, model, head, loss):
+        return ForSingleLabelTokenClassification(combined_config, model, head, loss)
+
+    @property
+    def __name__(self):
+        return ForSingleLabelTokenClassification.__name__
+
+    @property
+    def head_class(self):
+        return ForSingleLabelTokenClassification.head_class
+
+    @property
+    def config_class(self):
+        return ForSingleLabelTokenClassification.config_class
+
+    def buildHead(self, base_model_config, head_config):
+        return ForSingleLabelTokenClassification.buildHead(base_model_config, head_config)
+
+    def fromModelAndHeadConfig(self, base_model, head_config):
+        return ForSingleLabelTokenClassification.fromModelAndHeadConfig(base_model, head_config)
+
+    def from_pretrained(self, checkpoint: str, base_model_class, head_config=None):
+        return ForSingleLabelTokenClassification.from_pretrained(checkpoint, base_model_class, head_config)
+
+# Alternatively, but I don't think this will work since it will be impossible to load this from a checkpoint, you can
+# generate classes on-the-fly with monkeypatching like this:
+# > class_weights = [...]
+# > class ForSingleLabelTokenClassificationWeighted(ForSingleLabelTokenClassification):
+# >     pass
+# > ForSingleLabelTokenClassificationWeighted.buildLoss = classmethod(lambda self: CrossEntropyLoss(weight=torch.tensor(class_weights)))
+
+
 class MBR(Task[TokenClassificationHeadConfig]):
 
-    def __init__(self, morphologies: ModestDataset[WordSegmentation]=English_Celex(), dataset_out_of_context: bool=True):
+    def __init__(self, morphologies: ModestDataset[WordSegmentation]=English_Celex(), dataset_out_of_context: bool=True, weighted_labels: bool=True):
         super().__init__(
             task_name="MBR" + "-" + morphologies._name + "-" + morphologies._language.to_tag(),
             text_fields=["text"],
-            label_field="labels",
+            label_field=ListOfField(ClassLabel("labels")),
             metric_config=MetricSetup(
                 to_compute=["accuracy", "precision", "recall", "f1"],
                 to_track={
@@ -74,9 +123,17 @@ class MBR(Task[TokenClassificationHeadConfig]):
 
             num_labels=2
         )
-        # self.tokenizer: CanineTokenizer = AutoTokenizer.from_pretrained(CHECKPOINT)  # There is no unk_token because any Unicode codepoint is mapped via a hash table to an ID (which is better than UTF-8 byte tokenisation although not reversible).
         self._morphologies = morphologies
-        self._single_word_dataset = dataset_out_of_context
+        self._is_single_word_dataset = dataset_out_of_context
+
+        if weighted_labels:
+            _,label_distribution = self.dataset_metadata.getLabelDistribution(self.loadDataset()["train"]).popitem()
+            log(f"Class labels will be weighted proportional to the inverse of the following distribution:\n\t{sorted(label_distribution.items())}")
+            label_distribution = [1/p for _, p in sorted(label_distribution.items())]
+            label_distribution = [w/sum(label_distribution) for w in label_distribution]
+            self.archit_class = ForSingleLabelTokenClassificationFactory(label_distribution)
+
+        # self.tokenizer: CanineTokenizer = AutoTokenizer.from_pretrained(CHECKPOINT)  # There is no unk_token because any Unicode codepoint is mapped via a hash table to an ID (which is better than UTF-8 byte tokenisation although not reversible).
 
     def _datasetOutOfContext(self) -> Iterable[dict]:
         print("> Building dataset")
@@ -90,10 +147,10 @@ class MBR(Task[TokenClassificationHeadConfig]):
             yield {"text": text, "labels": labels}
 
     def _datasetInContext(self) -> Iterable[dict]:
-        raise RuntimeError("No in-context dataset exists currently.")
+        raise NotImplementedError("No in-context dataset exists currently.")
 
     def _loadDataset(self) -> DatasetDict:
-        iterable = self._datasetOutOfContext() if self._single_word_dataset else self._datasetInContext()
+        iterable = self._datasetOutOfContext() if self._is_single_word_dataset else self._datasetInContext()
 
         # Turn iterable into a Dataset. TODO: Not sure how sane this is. Works for small morphological datasets, but it should be as lazy as possible, rather than loading the whole dataset into memory at once.
         dataset = Dataset.from_list(list(iterable))

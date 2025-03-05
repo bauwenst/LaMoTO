@@ -8,7 +8,7 @@ from tktkt.preparation.perturbers import ConstantSampler, ParallelPerturber, Sub
 
 from ..tasks._core import *
 from ..tasks._core import HC
-from ..util.datasets import HuggingfaceDatasetSplit, sortSplits, TextField, CharacterIndex, SubstringLabel
+from ..util.datasets import HuggingfaceDatasetSplit, sortSplits, TextField, CharacterIndex, SubstringLabel, ListOfField
 
 DS = TypeVar("DS", bound=HuggingfaceDatasetSplit)
 
@@ -135,11 +135,17 @@ class TaskWithAugmentedDataset(TaskWrapper):
 class TaskWithTypos(TaskWithAugmentedDataset):
 
     def __init__(self, task: Task, p: float, splits: Set[str], text_fields: Set[str]=None):
-        if any(isinstance(f, (CharacterIndex,SubstringLabel)) for f in task.dataset_metadata.label_fields):
+        if any(f.involvesType(CharacterIndex) or f.involvesType(SubstringLabel) for f in task.dataset_metadata.label_fields):
             raise NotImplementedError("Cannot yet apply typos to datasets where the labels refer to characters in the input.")
         if text_fields is None:
-            text_fields = task.dataset_metadata.text_fields
-            assert all(isinstance(field,TextField) for field in text_fields)
+            text_fields = set()
+            for field in task.dataset_metadata.text_fields:
+                if isinstance(field,TextField):
+                    text_fields.add(field.field_name)
+                elif isinstance(field,ListOfField) and isinstance(field.field_itself,TextField):
+                    text_fields.add(field.field_itself.field_name)
+                else:
+                    raise NotImplementedError
             text_fields = {field.field_name for field in text_fields}
 
         text_fields = set(text_fields)

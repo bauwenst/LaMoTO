@@ -49,7 +49,7 @@ class Task(ABC, Generic[HC]):
         self.metric_config   = metric_config
         self.dataset_metadata = DatasetMetadata(
             text_fields=[(TextField(f) if isinstance(f,str) else f) for f in text_fields],
-            label_fields=[ClassLabel(label_field)] if isinstance(label_field, str) else label_field if not isinstance(label_field, list) else [(ClassLabel(f) if isinstance(f,str) else f) for f in label_field]
+            label_fields=[ClassLabel(label_field)] if isinstance(label_field, str) else [label_field] if not isinstance(label_field, list) else [(ClassLabel(f) if isinstance(f,str) else f) for f in label_field]
         )
         self.archit_class    = archit_class
         self.automodel_class = automodel_class

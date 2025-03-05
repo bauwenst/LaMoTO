@@ -15,7 +15,7 @@ from ..measuring import DependencyParsingMetrics, Metric
 from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import WordLevelPreprocessorWithDummies
 from ..util.visuals import log
-from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, WordIndex
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, WordIndex, ListOfField, TextField, ClassLabel
 
 
 def relu(x):
@@ -106,8 +106,8 @@ class DP(Task[DependencyParsingHeadConfig]):
         self.reltag_to_id = {tag: i for i, tag in enumerate(self.tagset)}
         super().__init__(
             task_name="DP",
-            text_fields=["tokens"],
-            label_field=["deprel", WordIndex("head", "tokens")],
+            text_fields=[ListOfField(TextField("tokens"))],
+            label_field=[ListOfField(ClassLabel("deprel")), ListOfField(WordIndex("head", "tokens"))],
             metric_config=MetricSetup(
                 to_compute=["attachment"],
                 to_track={

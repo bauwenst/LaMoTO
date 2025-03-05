@@ -1,5 +1,6 @@
-from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any, Callable, Generic, Tuple
+from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any, Callable, Generic, Tuple, Type
 from abc import ABC, abstractmethod
+
 from transformers import PreTrainedTokenizerBase
 
 import time
@@ -12,6 +13,7 @@ import datasets
 from datasets import Dataset, IterableDataset, DatasetDict, IterableDatasetDict
 from datasets.arrow_dataset import DatasetInfoMixin
 
+from tktkt.util.iterables import mapExtend
 from tktkt.util.printing import pluralise, ordinal
 from tktkt.util.environment import IS_NOT_LINUX
 
@@ -30,7 +32,7 @@ HuggingfaceDataset      = Union[HuggingfaceDatasetSplit, HuggingfaceDatasetDict]
 
 Dataset_or_DatasetDict = TypeVar("Dataset_or_DatasetDict", bound=Union[Dataset,DatasetDict])  # Non-iterable.
 T = TypeVar("T")
-
+T2 = TypeVar("T2")
 
 class DictOfLists:
     """
@@ -238,13 +240,20 @@ def rebalanceLabels(dataset: Dataset_or_DatasetDict, label_column: str, strategy
 
 
 def applyPerSplit(dataset_dict: Union[DatasetDict, Dict[str,Dataset]], function: Callable[[Dataset], T]) -> Dict[str,T]:
+    """Take a function meant for an individual dataset and apply it to every split in a DatasetDict."""
     return {name: function(split) for name,split in dataset_dict.items()}
 
 
 class FieldType(ABC, Generic[T]):
+    """Describes a piece of data that can be extracted from a dataset example with result of type T."""
     @abstractmethod
     def extract(self, example: dict) -> T:
         pass
+
+    def involvesType(self, cls: "Type[FieldType[Any]]") -> bool:
+        """Use this when you want to know if a field is 'actually' e.g. text, even when it is wrapped as a list or tagged as a foreign field."""
+        return isinstance(self, cls)
+
 
 class _ExplicitField(FieldType[T]):
     """Field that can be looked up as a column in a dataset."""
@@ -254,7 +263,7 @@ class _ExplicitField(FieldType[T]):
     def extract(self, example: dict) -> T:
         return example[self.field_name]
 
-class TextField(_ExplicitField[str]):
+class TextField(_ExplicitField[str]):  # TODO: Should rename to TextColumn.
     pass
 
 class ClassLabel(_ExplicitField[int]):
@@ -266,6 +275,21 @@ class RegressiveLabel(_ExplicitField[float]):
 class UnboundedIntegerLabel(_ExplicitField[int]):
     pass
 
+
+class ListOfField(FieldType[List[T2]]):
+    """Field that is a list of a certain type. The constructor asks for a field type that pretends that the list is
+       replaced by a single element (it knows how to extract the list, but its type annotation describes the element type).
+       For example, a column that is a list of tokens is a ListOfField(TextField("tokens"))."""
+    def __init__(self, field: FieldType[T2]):
+        self.field_itself = field
+
+    def extract(self, example: dict) -> T2:
+        return self.field_itself.extract(example)
+
+    def involvesType(self, cls) -> bool:
+        return super().involvesType(cls) or self.field_itself.involvesType(cls)
+
+
 class ForeignField(FieldType[T]):
     """Field that somehow refers to another field. E.g.: in extractive QA, you have 'context' field which is just text,
        and then you could have a field that refers to the starting character of the answer IN that context and/or the full answer string itself.
@@ -276,6 +300,10 @@ class ForeignField(FieldType[T]):
 
     def extract(self, example: dict) -> T:
         return self.field_itself.extract(example)
+
+    def involvesType(self, cls) -> bool:
+        return super().involvesType(cls) or self.field_itself.involvesType(cls)
+
 
 class SubstringLabel(ForeignField[str]):
     """E.g.: answer text in SQuAD."""
@@ -303,8 +331,12 @@ class SpanLabel(FieldType[Tuple[int,int]]):
     def extract(self, example: dict):
         return self.start.extract(example), self.end.extract(example)
 
+    def involvesType(self, cls) -> bool:
+        return super().involvesType(cls) or self.start.involvesType(cls) or self.end.involvesType(cls)
+
+
 class ImplicitLabel(FieldType[T]):
-    """E.g.: answerability in SQuAD v2."""
+    """E.g.: answerability in SQuAD v2. It's a binary label you get by counting the amount of answers in the example."""
     def __init__(self, from_example: Callable[[dict],T]):
         self.extraction_function = from_example
 
@@ -315,6 +347,10 @@ class NestedLabel(ImplicitLabel[T]):
     """E.g.: span start index in SQuAD v1."""
     def __init__(self, field: str, nested_field_type: FieldType[T]):
         super().__init__(lambda ex: nested_field_type.extract(ex[field]))
+        self._nested = nested_field_type
+
+    def involvesType(self, cls) -> bool:
+        return super().involvesType(cls) or self._nested.involvesType(cls)
 
 
 class DatasetMetadata:
@@ -323,20 +359,23 @@ class DatasetMetadata:
         self.text_fields  = text_fields
         self.label_fields = label_fields
 
-    def getLabelCounts(self, dataset: Dataset) -> Dict[str,Dict[Any, int]]:
+    def getLabelCounts(self, dataset: Dataset) -> Dict[str, Dict[Any, int]]:
         field_to_valuecounts = dict()
         for label_field in self.label_fields:
-            labels = dataset.with_format("numpy")[label_field]
-            unique_label_values, label_counts = np.unique(labels, return_counts=True)
+            if isinstance(label_field, ListOfField):
+                unique_label_values, label_counts = np.unique(np.fromiter(mapExtend(label_field.extract, dataset), dtype=int), return_counts=True)
+            else:
+                unique_label_values, label_counts = np.unique(np.fromiter(      map(label_field.extract, dataset), dtype=int), return_counts=True)  # dtype is int because if you apply this to any other label, it's probably just wrong.
+
             field_to_valuecounts[label_field] = dict(zip(unique_label_values, label_counts))
 
         return field_to_valuecounts
 
     def getLabelDistribution(self, dataset: Dataset) -> Dict[str, Dict[Any, float]]:
         field_to_valuefractions = dict()
-        for label_field in self.label_fields:
-            c = Counter(dataset[label_field])
-            field_to_valuefractions[label_field] = {k: v/c.total() for k,v in c.items()}
+        for field, value_counts in self.getLabelCounts(dataset).items():
+            total = sum(value_counts.values())
+            field_to_valuefractions[field] = {v: c/total for v,c in value_counts.items()}
 
         return field_to_valuefractions
 

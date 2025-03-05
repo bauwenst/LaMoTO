@@ -8,7 +8,7 @@ from ._core import *
 from ..preprocessing.ud import FilterAndCorrectUDtypes
 from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
 from ..util.visuals import log
-from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
+from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, TextField, ListOfField, ClassLabel
 
 
 class POS(Task[TokenClassificationHeadConfig]):
@@ -18,8 +18,8 @@ class POS(Task[TokenClassificationHeadConfig]):
         self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"].feature.names]
         super().__init__(
             task_name="POS",
-            text_fields=["tokens"],
-            label_field="upos",
+            text_fields=[ListOfField(TextField("tokens"))],
+            label_field=ListOfField(ClassLabel("upos")),
             metric_config=MetricSetup(
                 to_compute=["seqeval"],
                 to_track={
