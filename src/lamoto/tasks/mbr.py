@@ -51,6 +51,12 @@ SUGGESTED_HYPERPARAMETERS_MBR.HARD_STOPPING_CONDITION = AfterNEpochs(100)
 ##################################
 
 
+# TODO: In the future, ArchIt will probably have to be refactored so that all the "buildSomething()" methods are instance
+#       methods on a separate class like a ForTaskFactory accompanying every ForTask, like below.
+#       Alternatively, CombinedConfig should actually be (base, head, loss) and give a config to buildLoss() which may have label weights.
+from archit.instantiation.configs import CombinedConfig, PretrainedConfig
+from archit.instantiation.abstracts import ModelWithHead
+from archit.util import dataclass_from_dict
 from torch.nn.modules.loss import CrossEntropyLoss
 class ForSingleLabelTokenClassificationFactory:
     """
@@ -65,9 +71,37 @@ class ForSingleLabelTokenClassificationFactory:
     # The only method we wanted to change.
 
     def buildLoss(self):
-        return CrossEntropyLoss(weight=torch.tensor(self.class_weights))
+        return CrossEntropyLoss(weight=torch.tensor(self.class_weights, dtype=torch.float32))  # float32 is the standard when no .to(bfloat16) has been called.
 
-    # Now mimic all the other classmethods as instance methods.
+    # The methods that call the above method also have to be reimplemented, where every "cls" is replaced by "self".
+
+    def fromModelAndHeadConfig(self, base_model, head_config):
+        return ForSingleLabelTokenClassification(
+            CombinedConfig(base_model_config=base_model.config, head_config=head_config),
+            base_model,
+            self.buildHead(base_model.__class__.standardiseConfig(base_model.config), head_config),
+            self.buildLoss()
+        )
+
+    def from_pretrained(self, checkpoint: str, base_model_class, head_config=None):
+        base_model_config, _ = PretrainedConfig.get_config_dict(checkpoint)
+        if "base_model_config" in base_model_config:
+            head_config       = head_config or dataclass_from_dict(self.head_class.config_class, base_model_config["head_config"])
+            base_model_config = base_model_config["base_model_config"]
+
+        base_model_config = base_model_class.config_class.from_dict(base_model_config)
+        return super(ModelWithHead, ForSingleLabelTokenClassification).from_pretrained(  # This super() call means "Get the super class of ModelWithHead, and whenever you call class methods on the resulting class, use the ForSingleLabelTokenClassification class" (h/t ChatGPT).
+            checkpoint,
+            base_model_class(base_model_config),
+            self.buildHead(base_model_class.standardiseConfig(base_model_config), head_config),
+            self.buildLoss(),
+
+            head_config=head_config,
+            base_model_config_class=base_model_class.config_class,
+            head_config_class=self.head_class.config_class
+        )
+
+    # Mimic all the other classmethods as instance methods.
 
     def __call__(self, combined_config, model, head, loss):
         return ForSingleLabelTokenClassification(combined_config, model, head, loss)
@@ -87,11 +121,6 @@ class ForSingleLabelTokenClassificationFactory:
     def buildHead(self, base_model_config, head_config):
         return ForSingleLabelTokenClassification.buildHead(base_model_config, head_config)
 
-    def fromModelAndHeadConfig(self, base_model, head_config):
-        return ForSingleLabelTokenClassification.fromModelAndHeadConfig(base_model, head_config)
-
-    def from_pretrained(self, checkpoint: str, base_model_class, head_config=None):
-        return ForSingleLabelTokenClassification.from_pretrained(checkpoint, base_model_class, head_config)
 
 # Alternatively, but I don't think this will work since it will be impossible to load this from a checkpoint, you can
 # generate classes on-the-fly with monkeypatching like this:
