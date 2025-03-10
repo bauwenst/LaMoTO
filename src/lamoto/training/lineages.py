@@ -351,7 +351,7 @@ class Lineage:
         return [node.handle for node in self]
 
     def __repr__(self):
-        s = "Lineage \"" + self.name + f"\" ({self.handle})\n"
+        s = f"Lineage {self.handle}: \"{self.name}\"\n"
         s += indent(1, self._node_tree.__repr__(), tab="|   ")
         return s
 

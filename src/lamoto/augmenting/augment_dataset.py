@@ -146,7 +146,6 @@ class TaskWithTypos(TaskWithAugmentedDataset):
                     text_fields.add(field.field_itself.field_name)
                 else:
                     raise NotImplementedError
-            text_fields = {field.field_name for field in text_fields}
 
         text_fields = set(text_fields)
         if text_fields:
