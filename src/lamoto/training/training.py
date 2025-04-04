@@ -70,7 +70,6 @@ class TaskTrainer:
             hyperparameters.MODEL_CONFIG_OR_CHECKPOINT = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT.as_posix()  # FIXME: Possibly have to make it a relative path due to HF restrictions.
         if task.metric_config.to_rank is None or hyperparameters.rank_checkpoints_using_loss:
             metric_to_rank = RankingMetricSpec(metric_name="", result_name="loss", higher_is_better=False)
-            task.metric_config.to_rank = metric_to_rank
         else:
             metric_to_rank = task.metric_config.to_rank
 

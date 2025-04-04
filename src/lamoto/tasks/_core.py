@@ -34,7 +34,7 @@ class RankingMetricSpec:
 class MetricSetup:
     to_compute: List[str]               # Names of all the HuggingFace evaluate metrics to load and compute in the end.
     to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
-    to_rank: RankingMetricSpec = None   # Which of these to measure for finding the best model with the validation set. Defaults to loss.
+    to_rank: Optional[RankingMetricSpec] = None   # Which of these to measure for finding the best model with the validation set. Defaults to loss.
 
 
 class Task(ABC, Generic[HC]):
@@ -122,7 +122,7 @@ class Task(ABC, Generic[HC]):
                 results[metric_name + "_" + key] = value
 
         # Sanity checks
-        if self.metric_config.to_rank.fullName() != "loss" and self.metric_config.to_rank.fullName() not in results:
+        if self.metric_config.to_rank is not None and self.metric_config.to_rank.fullName() != "loss" and self.metric_config.to_rank.fullName() not in results:
             raise RuntimeError(f"The ranking metric '{self.metric_config.to_rank.metric_name}' did not compute the required result '{self.metric_config.to_rank.result_name}'. Results we did compute: {results}")
         for metric_name, result_names in self.metric_config.to_track.items():
             for result_name in result_names:
