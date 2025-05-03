@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple, Any, List
 from pathlib import Path
 
 import json
@@ -14,7 +14,7 @@ from huggingface_hub.constants import HF_HUB_CACHE
 
 from archit.instantiation.abstracts import CombinedConfig
 from archit.util import torchPrint, parameterCountBaseVsHead
-from fiject.hooks.transformers import FijectCallback
+from fiject.applications.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from tktkt.interfaces.factories import TokeniserFactory
@@ -31,7 +31,7 @@ from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import log, printLamotoWelcome
 from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType, \
-    SaveModelOnLinearInterval, SaveModelOnTimeInterval, _SaveModelMixin
+    SaveModelOnLinearInterval, SaveModelOnTimeInterval, _SaveModelMixin, TrainerCallback
 from .auxiliary.hyperparameters import *
 from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
 
@@ -46,8 +46,9 @@ def showWarningsAndProgress(enabled: bool):
 
 class TaskTrainer:
 
-    def __init__(self, model_augmentation: ModelAugmentation=None):
+    def __init__(self, model_augmentation: ModelAugmentation=None, custom_callbacks: List[TrainerCallback]=None):
         self._model_augmentation = model_augmentation
+        self._extra_callbacks = custom_callbacks or []
 
     def train(
         self,
@@ -446,7 +447,7 @@ class TaskTrainer:
             # Args
             args=training_args,
             optimizers=(optimizer, scheduler),
-            callbacks=callbacks,
+            callbacks=callbacks + self._extra_callbacks,
 
             # Data
             train_dataset=datasetdict["train"],

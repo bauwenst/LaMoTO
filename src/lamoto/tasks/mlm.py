@@ -70,8 +70,11 @@ class MLM(Task[MaskedLMHeadConfig]):
                          just computing NLL on masked evaluation examples.
         :param drop_train_examples: How many training examples to advance by before starting training.
                                     Note: a *training example* is not the same as a *dataset example*. Training examples
-                                    is what the batch size is measured in. If the dataset consists of very long articles,
-                                    then one training example is a fraction of one dataset example. The reverse is also possible.
+                                    are given to models, and are the unit we measure batch size in. Dataset examples can
+                                    be much larger (e.g. for datasets of long articles) or much smaller (e.g. tweets)
+                                    than training examples. Since you only know how many batches have been trained for,
+                                    rather than how many examples have been used from the underlying dataset, we skip
+                                    in units of train examples.
         """
         super().__init__(
             task_name="MLM",
@@ -117,7 +120,7 @@ class MLM(Task[MaskedLMHeadConfig]):
             dataset = dataset.map(preprocess, batched=False)
             dataset = dataset.remove_columns(["text"])
 
-        if self._drop_train:
+        if self._drop_train:  # Drop AFTER packing.
             dataset["train"] = dataset["train"].skip(self._drop_train)
 
         return dataset

@@ -9,12 +9,13 @@ import json
 from copy import deepcopy
 from math import prod
 import numpy.random as npr
+
 from tktkt.util.printing import dprint, pluralise, ordinal
 from tktkt.util.iterables import keepFirst, take
 
 from ..tasks._core import Task, RankingMetricSpec, ModelAugmentation
 from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch
-from .training import log, TaskTrainer, LamotoPaths
+from .training import log, TaskTrainer, LamotoPaths, TrainerCallback
 
 
 @dataclass
@@ -55,13 +56,13 @@ class TaskTuner:
         learning_rates: Optional[List[float]],
         adamw_decay_rates: Optional[List[float]],
         ###
-        model_augmentation: Optional[ModelAugmentation]=None
+        model_augmentation: Optional[ModelAugmentation]=None, custom_callbacks: List[TrainerCallback]=None
     ):
         self._warmup_steps_grid         = warmup_steps
         self._effective_batch_size_grid = effective_batch_sizes
         self._learning_rates            = learning_rates
         self._decay_rates               = adamw_decay_rates
-        self._trainer = TaskTrainer(model_augmentation)
+        self._trainer = TaskTrainer(model_augmentation, custom_callbacks)
 
     def withAugmentation(self, model_augmentation: Optional[ModelAugmentation]) -> "TaskTuner":
         return TaskTuner(
