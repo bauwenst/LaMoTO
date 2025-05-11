@@ -121,7 +121,10 @@ class TaskTrainer:
         n_passes = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_examples_per_pass
 
         # Metadata
-        task.adjustHyperparameters(hyperparameters)
+        try:
+            task.adjustHyperparameters(hyperparameters)
+        except:
+            log("Failed to adjust hyperparameters; an error is on its way.")
         task._setHyperparameters(hyperparameters)
 
         log("Loading model config...")
@@ -293,7 +296,7 @@ class TaskTrainer:
         else:  # Fractional warmup in [0,1]
             if wu < 0 or wu > 1:
                 raise ValueError(f"The amount of warmup batches ({wu}) has to be a positive integer or a float in [0,1].")
-            if not n_gradient_descents:
+            if n_gradient_descents is None:
                 raise ValueError(f"Amount of warmup batches ({wu}) was given as a fraction of the total amount of training batches, but we don't know what that is for stopping condition {hyperparameters.HARD_STOPPING_CONDITION.__class__.__name__}")
             n_descents_of_warmup = int(n_gradient_descents*wu)
 
@@ -319,8 +322,8 @@ class TaskTrainer:
 
         # - Finally get args
         training_args = TrainingArguments(
-            max_steps=(n_gradient_descents or -1) if n_gradient_descents or has_length(datasetdict["train"]) else 1_000_000_000_000,  # Handle a very specific illegal case according to HF. Only reason it exists is for learning rate schedules that decrease relative to the max amount of descents, but we don't use those schedules.
-            num_train_epochs=1_000_000_000_000,  # This value is used when max_steps is -1 (its default value is 3 but clearly it should be "run forever").
+            max_steps=(n_gradient_descents or -1) if n_gradient_descents is not None or has_length(datasetdict["train"]) else 1_000_000_000_000,  # Normally, -1 is all you need to indicate "no limit". However, HF has a check that you cannot ask for "no limit" when the dataset's actual limit is unknown (which is counter-intuitive...). The check exists for learning rate schedules that decrease relative to the max amount of descents, but we don't use those schedules.
+            num_train_epochs=1_000_000_000_000 if n_gradient_descents != 0 else 0,  # This value is used when max_steps is -1 (its default value is 3 but clearly it should be "run forever").
 
             # Optimisation (adding all of this in the TrainingArguments because apparently Trainer knows how to use HuggingFace `accelerate` whereas I only know the old optimisers)
             # optim=OptimizerNames.ADAMW_TORCH,
@@ -544,10 +547,11 @@ class TaskTrainer:
             with open(results_path, "w", encoding="utf-8") as handle:
                 json.dump(all_results, handle, indent=4)
 
-            # Delete all other artifacts if requested.
+            # Delete all other artifacts if requested. (We have at most two checkpoints. Backups are not checkpoints, and are never deleted.)
             if hyperparameters.traceless:
                 log("Deleting models...")
                 trainer.deleteCheckpointsInOrder(amount=2)
+                trainer.tryDeleteFolder(unless_contains_subfolders=[_SaveModelMixin.BACKUPS_FOLDER])
 
             return global_model_identifier, all_results
 

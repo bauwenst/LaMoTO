@@ -2,8 +2,11 @@
 Backend classes that do the actual model training itself.
 """
 from typing import Optional, List, Dict, Tuple, Callable, Union, Any
+from pathlib import Path
+
 import torch
 import shutil
+import os
 
 from torch import Tensor
 from torch.nn import Module
@@ -96,6 +99,26 @@ class ModelTrainer(Trainer):
         checkpoint_paths = self._sorted_checkpoints(use_mtime=False, output_dir=self._get_output_dir(None))  # Note: puts best model at the end of the list if applicable.
         for checkpoint in checkpoint_paths[0:amount]:
             shutil.rmtree(checkpoint, ignore_errors=True)
+
+    def tryDeleteFolder(self, unless_contains_subfolders: List[str]=None):
+        """
+        Deletes the entire model folder filled by the current trainer instance. If any of the given folders are
+        present, the folder is preserved along with those subfolders.
+        """
+        if unless_contains_subfolders is None:
+            unless_contains_subfolders = []
+
+        main_folder_path = Path(self._get_output_dir(None))
+        _, folder_names, _ = next(os.walk(main_folder_path))
+        delete_everything = True
+        for f in folder_names:
+            if f in unless_contains_subfolders:
+                delete_everything = False
+            else:
+                shutil.rmtree(main_folder_path / f)
+
+        if delete_everything:
+            shutil.rmtree(main_folder_path)
 
 
 class ModelTrainerWithoutEvaluationLoop(ModelTrainer):

@@ -196,6 +196,8 @@ class SaveTokeniserWithCheckpoints(TrainerCallback):
 
 
 class _SaveModelMixin:
+    BACKUPS_FOLDER = "backups"
+
     def __init__(self):
         self._trainer: Trainer = None  # Not set at construction so that you can construct a Trainer with a callback of this class first.
 
@@ -206,7 +208,7 @@ class _SaveModelMixin:
         if self._trainer is None:
             raise RuntimeError("You should set the Trainer to which this callback belongs first!")
 
-        output_dir = Path(self._trainer.args.output_dir) / "backups" / f"{global_step}"  # The reason we don't use the 'checkpoint-' prefix is that I suspect that HuggingFace's rotation system hunts for it with .glob(). Not sure if it searches recursively, but better safe than sorry.
+        output_dir = Path(self._trainer.args.output_dir) / self.BACKUPS_FOLDER / f"{global_step}"  # The reason we don't use the 'checkpoint-' prefix is that I suspect that HuggingFace's rotation system hunts for it with .glob(). Not sure if it searches recursively, but better safe than sorry.
         output_dir.mkdir(parents=True, exist_ok=True)
         self._trainer.save_model(output_dir.as_posix())
 

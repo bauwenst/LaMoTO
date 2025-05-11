@@ -170,6 +170,7 @@ AfterNExamples = EveryNExamples
 AfterNDescents = EveryNDescents
 AfterNEpochs   = EveryNEpochs
 AfterNMinutes  = EveryNMinutes
+Immediately    = lambda: AfterNExamples(0)
 
 
 ########################################################################################################################
