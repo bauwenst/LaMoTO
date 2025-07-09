@@ -41,7 +41,7 @@ class NER(Task[TokenClassificationHeadConfig]):
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         tokenise_truncate_flatten = FlattenWordLabels(tokenizer=self.tokenizer,
                                                       max_tokens=self._getMaxInputLength(),
-                                                      add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,
+                                                      add_specials=self.hyperparameters.add_special_tokens,
                                                       pooling_mode=LabelPooling.FIRST)  # Only learn from the first token, which is easiest for NER (due to capitals): https://aclanthology.org/2021.eacl-main.194.pdf
         def preprocess(example):
             tokens, labels = tokenise_truncate_flatten.preprocess(example["tokens"], {"ner_tags": example["ner_tags"]})

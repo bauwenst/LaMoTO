@@ -28,6 +28,6 @@ class MultiRC(CompareSentencesSuperGLUETask):
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
             return self.tokenizer(" ".join(example[key] for key in self._field1.split("+")), example[self._field2],
-                                  add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
+                                  add_special_tokens=self.hyperparameters.add_special_tokens, truncation=True, max_length=self._getMaxInputLength())
 
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})

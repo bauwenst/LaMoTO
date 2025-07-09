@@ -165,13 +165,13 @@ class _LineageNode(ABC):
 
         # Copy HPs because e.g. storing the built tokeniser permanently in this node's HPs would be a memory leak in case we want to run multiple lineage nodes back-to-back in the same runtime session.
         hp = self._hp.copy()
-        hp.MODEL_CONFIG_OR_CHECKPOINT = parent_out if not isinstance(parent_out, ConfigFactory) else parent_out.buildConfig(serialised_tokeniser=tokeniser, base_model=base_model)
+        hp.model_config_or_checkpoint = parent_out if not isinstance(parent_out, ConfigFactory) else parent_out.buildConfig(serialised_tokeniser=tokeniser, base_model=base_model)
         hp.archit_basemodel_class = base_model
-        hp.TOKENISER              = tokeniser
-        hp.init_weights           = isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, (str,Path))  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
+        hp.tokeniser              = tokeniser
+        hp.init_weights           = isinstance(hp.model_config_or_checkpoint, (str, Path))  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
 
         # Identify the run by the full name of the lineage and possibly the node.
-        hp.SAVE_AS = lineage.name + ("_" + self.handle)*self._include_handle_in_checkpoint
+        hp.save_as = lineage.name + ("_" + self.handle) * self._include_handle_in_checkpoint
         return hp
 
     def __iter__(self) -> Iterator["_LineageNode"]:

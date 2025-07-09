@@ -18,46 +18,46 @@ from ..training.auxiliary.hyperparameters import *
 
 @dataclass
 class MlmHyperparameters(TaskHyperparameters[MaskedLMHeadConfig]):
-    MLM_PROBABILITY: float
-    PPPL_PARAMETERS: PPPL_Parameters
+    mlm_probability: float
+    pppl: PPPL_Parameters
 
 
 SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa's hyperparameters.
-    SAVE_AS=None,
-    WANDB_PROJECT=None,
+    save_as=None,
+    wandb_project=None,
     traceless=False,
     store_in_hf_cache=False,
 
-    EXAMPLES_PER_EFFECTIVE_BATCH=8192,
-    EXAMPLES_PER_DEVICEBATCH=64,  # Should definitely fit on an A100.
-    EFFECTIVE_BATCHES_WARMUP=0.05,
-    HARD_STOPPING_CONDITION=AfterNDescents(500_000),
-    EXAMPLES_PER_EVALUATION=2**14,  # C4 has a 365k validation split, so 16k isn't that bad. Two times the amount of data processed for one descent.
+    examples_per_effective_batch=8192,
+    examples_per_device_batch=64,  # Should definitely fit on an A100.
+    effective_batches_warmup=0.05,
+    hard_stopping_condition=AfterNDescents(500_000),
+    examples_per_evaluation=2 ** 14,  # C4 has a 365k validation split, so 16k isn't that bad. Two times the amount of data processed for one descent.
 
     track_best_checkpoint=False,
     rank_checkpoints_using_loss=False,
-    EVALS_OF_PATIENCE=None,
-    EVAL_VS_SAVE_INTERVALS=Intervals(
+    evals_of_patience=None,
+    eval_vs_save_intervals=Intervals(
         evaluation=EveryNDescents(descents=128),  # 128 batches doesn't seem like a lot, but with that massive batch size it means you only evaluate once every 128 ba * 8192 ex/ba * 512 tk/ex = 0.5 billion tokens seen.
         checkpointing=EveryNMinutes(minutes=30)
     ),
 
-    SEED=69420,
+    seed=69420,
     init_weights=False,
-    MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
+    model_config_or_checkpoint="roberta-base",
     archit_basemodel_class=RobertaBaseModel,
     archit_head_config=MaskedLMHeadConfig(),
     load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
     custom_hf_class=None,
 
-    TOKENISER="roberta-base",
-    ADD_SPECIAL_TOKENS=True,
+    tokeniser="roberta-base",
+    add_special_tokens=True,
 
     learning_rate=6e-4,
     adamw_decay_rate=0.01,
 
-    MLM_PROBABILITY=0.15,
-    PPPL_PARAMETERS=PPPL_Parameters(right_fraction=0.5)
+    mlm_probability=0.15,
+    pppl=PPPL_Parameters(right_fraction=0.5)
 )
 
 
@@ -107,7 +107,7 @@ class MLM(Task[MaskedLMHeadConfig]):
 
     def _prepareDataset(self, dataset: IterableDatasetDict) -> IterableDatasetDict:
         def preprocess(example):
-            return self.tokenizer(example["text"], is_split_into_words=False, add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
+            return self.tokenizer(example["text"], is_split_into_words=False, add_special_tokens=self.hyperparameters.add_special_tokens, truncation=True, max_length=self._getMaxInputLength())
 
         if self._use_packing:  # Train split is not tokenised here but in the packer.
             dataset["train"] = PackedDataset(dataset["train"], self.tokenizer, context_length=self._getMaxInputLength())
@@ -129,7 +129,7 @@ class MLM(Task[MaskedLMHeadConfig]):
         pass
 
     def getCollator(self) -> DataCollator:
-        return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=True, mlm_probability=self.hyperparameters.MLM_PROBABILITY)
+        return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=True, mlm_probability=self.hyperparameters.mlm_probability)
 
     def sneakyLogitTransform(self, logits, labels):
         return torch.tensor([[1]], device=logits[0].device)

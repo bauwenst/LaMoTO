@@ -61,24 +61,24 @@ class TaskTrainer:
         """
         printLamotoWelcome()
         log("Running task:", task.task_name)
-        transformers.set_seed(seed=hyperparameters.SEED)
+        transformers.set_seed(seed=hyperparameters.seed)
         if not DO_WARNINGS_AND_PROGRESSBARS:
             set_verbosity_error()
         task.resetTemporaryFields()
 
         # Imputations and sanity checks
-        if isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, Path):
-            hyperparameters.MODEL_CONFIG_OR_CHECKPOINT = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT.as_posix()  # FIXME: Possibly have to make it a relative path due to HF restrictions.
+        if isinstance(hyperparameters.model_config_or_checkpoint, Path):
+            hyperparameters.model_config_or_checkpoint = hyperparameters.model_config_or_checkpoint.as_posix()  # FIXME: Possibly have to make it a relative path due to HF restrictions.
         if task.metric_config.to_rank is None or hyperparameters.rank_checkpoints_using_loss:
             metric_to_rank = RankingMetricSpec(metric_name="", result_name="loss", higher_is_better=False)
         else:
             metric_to_rank = task.metric_config.to_rank
 
-        if hyperparameters.init_weights and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
+        if hyperparameters.init_weights and not isinstance(hyperparameters.model_config_or_checkpoint, str):
             raise ValueError("You said you wanted to initialise model weights from the checkpoint, but didn't give a checkpoint path!")
         if hyperparameters.archit_basemodel_class is None:
             raise ValueError("In order to parse model configs, the archit_basemodel_class hyperparameter cannot be None.")
-        if hyperparameters.archit_head_config is None and not isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):  # Note: there is another failure case: when the checkpoint *is* a string, but *isn't* an ArchIt checkpoint. It errors below.
+        if hyperparameters.archit_head_config is None and not isinstance(hyperparameters.model_config_or_checkpoint, str):  # Note: there is another failure case: when the checkpoint *is* a string, but *isn't* an ArchIt checkpoint. It errors below.
             raise ValueError("Without a checkpoint, a head config must be provided to instantiate a new head.")
         if not hyperparameters.track_best_checkpoint and hyperparameters.rank_checkpoints_using_loss:
             raise ValueError("Asked to rank models with loss, but also to not track the best model.")
@@ -92,15 +92,15 @@ class TaskTrainer:
 
         # Imputation of device batch size specifically
         n_devices = torch.cuda.device_count()
-        if hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH % n_devices != 0:  # This is an unsolvable issue by setting a new device batch size.
-            raise ValueError(f"Effective batch size ({hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH}) must be a multiple of the amount of devices ({n_devices}).")
+        if hyperparameters.examples_per_effective_batch % n_devices != 0:  # This is an unsolvable issue by setting a new device batch size.
+            raise ValueError(f"Effective batch size ({hyperparameters.examples_per_effective_batch}) must be a multiple of the amount of devices ({n_devices}).")
 
-        n_examples_per_pass_per_device = hyperparameters.EXAMPLES_PER_DEVICEBATCH
+        n_examples_per_pass_per_device = hyperparameters.examples_per_device_batch
         n_examples_per_pass            = n_examples_per_pass_per_device * n_devices
-        if n_examples_per_pass > hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH:  # One pass through your devices already exceeds one effective batch.
-            n_examples_per_pass_per_device = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_devices  # Suggest a new device batch size.
-            n_examples_per_pass            = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
-        if hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH % n_examples_per_pass != 0:  # You can't push an integer amount of passes through your devices to get to the effective batch size.
+        if n_examples_per_pass > hyperparameters.examples_per_effective_batch:  # One pass through your devices already exceeds one effective batch.
+            n_examples_per_pass_per_device = hyperparameters.examples_per_effective_batch // n_devices  # Suggest a new device batch size.
+            n_examples_per_pass            = hyperparameters.examples_per_effective_batch
+        if hyperparameters.examples_per_effective_batch % n_examples_per_pass != 0:  # You can't push an integer amount of passes through your devices to get to the effective batch size.
             # Example: effective batch size 96, 4 devices, device batch size 7  =>  28 per pass whilst you need a total of 24.
             # Because we get to choose the device batch size but not the effective batch size or amount of device, we choose a new one as follows:
             #   - The base criterion is that effective batch size % (device size * devices) == 0, thus effective batch size == device size * devices * integer.
@@ -109,7 +109,7 @@ class TaskTrainer:
             #   - It has to be as high as possible given the above.
             # In the example: we want to get to 96//4 == 24 examples with each device, so push 24 examples for 1 pass, 12 for 2 passes, 8 for 3 passes, 6 for 4 passes, 4 for 6 passes, 3 for 8 passes, 2 for 12 passes or 1 for 24 passes.
             # The best of these is size 4 for 6 passes because it is smaller than the given 7 whilst being the highest possible power of 2.
-            n_examples_per_device = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_devices
+            n_examples_per_device = hyperparameters.examples_per_effective_batch // n_devices
             for n_passes in range(1, n_examples_per_device+1):
                 if n_examples_per_device % n_passes == 0:
                     n_examples_per_pass_per_device = n_examples_per_device // n_passes
@@ -118,7 +118,7 @@ class TaskTrainer:
             else:
                 raise ImpossibleBranchError()
             n_examples_per_pass = n_devices * n_examples_per_pass_per_device
-        n_passes = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH // n_examples_per_pass
+        n_passes = hyperparameters.examples_per_effective_batch // n_examples_per_pass
 
         # Metadata
         try:
@@ -128,7 +128,7 @@ class TaskTrainer:
         task._setHyperparameters(hyperparameters)
 
         log("Loading model config...")
-        config_or_str = hyperparameters.MODEL_CONFIG_OR_CHECKPOINT
+        config_or_str = hyperparameters.model_config_or_checkpoint
         if isinstance(config_or_str, str):  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
             model_config = CombinedConfig.from_pretrained(config_or_str,
                                                           head_config=hyperparameters.archit_head_config,
@@ -142,10 +142,10 @@ class TaskTrainer:
                                           base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # This call pretends to be CombinedConfig(**json).
         task._setModelConfig(model_config)
 
-        if hyperparameters.SAVE_AS:
-            model_name = hyperparameters.SAVE_AS
-        elif isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
-            model_name = getSubstringAfterLastSlash(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT)
+        if hyperparameters.save_as:
+            model_name = hyperparameters.save_as
+        elif isinstance(hyperparameters.model_config_or_checkpoint, str):
+            model_name = getSubstringAfterLastSlash(hyperparameters.model_config_or_checkpoint)
         else:  # We don't use the tokeniser name because it isn't directly related to the model.
             raise RuntimeError("Cannot deduce name to save model as from a config.")
 
@@ -160,7 +160,7 @@ class TaskTrainer:
 
         # Set up tokeniser
         log("Loading tokeniser...")
-        tokenizer = hyperparameters.TOKENISER
+        tokenizer = hyperparameters.tokeniser
         if tokenizer:
             if isinstance(tokenizer, str):
                 tokenizer = AutoTokenizer.from_pretrained(tokenizer, add_prefix_space=True)
@@ -169,9 +169,9 @@ class TaskTrainer:
             elif isinstance(tokenizer, TokeniserFactory):
                 tokenizer = TktktToHuggingFace(tokenizer.buildTokeniser())
             elif not isinstance(tokenizer, PreTrainedTokenizerBase):
-                raise RuntimeError(f"Cannot handle tokeniser of type '{type(hyperparameters.TOKENISER)}'.")
-        elif isinstance(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, str):
-            tokenizer = AutoTokenizer.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, add_prefix_space=True)
+                raise RuntimeError(f"Cannot handle tokeniser of type '{type(hyperparameters.tokeniser)}'.")
+        elif isinstance(hyperparameters.model_config_or_checkpoint, str):
+            tokenizer = AutoTokenizer.from_pretrained(hyperparameters.model_config_or_checkpoint, add_prefix_space=True)
         else:
             raise RuntimeError("Cannot deduce tokeniser checkpoint from a model config.")
         task._setTokenizer(tokenizer)
@@ -193,12 +193,12 @@ class TaskTrainer:
         log("Loading dataset...")
         datasetdict = task.loadDataset()
         n_examples_validation = tryExceptNone(lambda: getDatasetSize(datasetdict["validation"], split="validation")) or 1_000_000_000_000  # Very very big number assumed when you can't find the dataset size.
-        n_examples_validation = n_examples_validation if not hyperparameters.EXAMPLES_PER_EVALUATION else min(n_examples_validation, hyperparameters.EXAMPLES_PER_EVALUATION)
+        n_examples_validation = n_examples_validation if not hyperparameters.examples_per_evaluation else min(n_examples_validation, hyperparameters.examples_per_evaluation)
         print(datasetdict)
 
         log("Preparing dataset...")
-        datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"], seed=hyperparameters.SEED)
-        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=hyperparameters.SEED, truncate_to=n_examples_validation)
+        datasetdict["train"]      = shuffleAndTruncate(datasetdict["train"], seed=hyperparameters.seed)
+        datasetdict["validation"] = shuffleAndTruncate(datasetdict["validation"], seed=hyperparameters.seed, truncate_to=n_examples_validation)
         datasetdict = task.prepareDataset(datasetdict)
 
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
@@ -215,7 +215,7 @@ class TaskTrainer:
             log("Instantiating an ArchIt model.")
             torch.set_default_dtype(task.automodel_args["torch_dtype"])
             if hyperparameters.init_weights:
-                model: PreTrainedModel = task.archit_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
+                model: PreTrainedModel = task.archit_class.from_pretrained(hyperparameters.model_config_or_checkpoint, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
             else:
                 assert hyperparameters.archit_head_config is not None, "You forgot to set the head config in the hyperparameters!"
                 model: PreTrainedModel = task.archit_class.fromModelAndHeadConfig(hyperparameters.archit_basemodel_class.from_config(task.model_config), hyperparameters.archit_head_config)
@@ -223,19 +223,19 @@ class TaskTrainer:
             if is_custom_hf_architecture:
                 log("Instantiating a custom HuggingFace class.")
                 if hyperparameters.init_weights:  # model_config_or_checkpoint is a string
-                    model: PreTrainedModel = hyperparameters.custom_hf_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **task.automodel_args)
+                    model: PreTrainedModel = hyperparameters.custom_hf_class.from_pretrained(hyperparameters.model_config_or_checkpoint, **task.automodel_args)
                 else:
                     model: PreTrainedModel = hyperparameters.custom_hf_class._from_config(task.model_config.base_model_config, **task.automodel_args)
             elif is_exact_hf_checkpoint:  # model_config_or_checkpoint is a string
                 log(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({task.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({task.automodel_class.__name__}) instead of ArchIt.")
-                model: PreTrainedModel = task.automodel_class.from_pretrained(hyperparameters.MODEL_CONFIG_OR_CHECKPOINT, **task.automodel_args)
+                model: PreTrainedModel = task.automodel_class.from_pretrained(hyperparameters.model_config_or_checkpoint, **task.automodel_args)
             else:
                 raise ImpossibleBranchError()
 
         # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.
         if self._model_augmentation:
             if hyperparameters.init_weights:
-                self._model_augmentation.augmentAndLoad(model, task.tokenizer, checkpoint=hyperparameters.MODEL_CONFIG_OR_CHECKPOINT)
+                self._model_augmentation.augmentAndLoad(model, task.tokenizer, checkpoint=hyperparameters.model_config_or_checkpoint)
             else:
                 self._model_augmentation.augment(model, task.tokenizer)
         model.to("cuda")
@@ -273,9 +273,9 @@ class TaskTrainer:
         folder_wandb = folder_to_this_models_checkpoints / "wandb"
         folder_wandb.mkdir(exist_ok=True)
         wandb.init(
-            mode="disabled" if hyperparameters.traceless or not hyperparameters.WANDB_PROJECT else "online",
+            mode="disabled" if hyperparameters.traceless or not hyperparameters.wandb_project else "online",
 
-            project=hyperparameters.WANDB_PROJECT,
+            project=hyperparameters.wandb_project,
             group=model_name,
             name=global_model_identifier,
             tags=[task.task_name, torch.cuda.get_device_name()] + ([self._model_augmentation.name] if self._model_augmentation else []),
@@ -285,10 +285,10 @@ class TaskTrainer:
 
         # Training arguments
         # - Sizes
-        stopping_condition = hyperparameters.HARD_STOPPING_CONDITION
-        n_gradient_descents = tryExceptNone(lambda: stopping_condition.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+        stopping_condition = hyperparameters.hard_stopping_condition
+        n_gradient_descents = tryExceptNone(lambda: stopping_condition.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
                                                                                 dataset=datasetdict["train"], split_name="train"))
-        wu = hyperparameters.EFFECTIVE_BATCHES_WARMUP  # Alias to shorten this long name.
+        wu = hyperparameters.effective_batches_warmup  # Alias to shorten this long name.
         if isinstance(wu, int):
             if wu < 0:
                 raise ValueError(f"The amount of warmup batches ({wu}) has to be a positive integer or a float in [0,1].")
@@ -297,24 +297,24 @@ class TaskTrainer:
             if wu < 0 or wu > 1:
                 raise ValueError(f"The amount of warmup batches ({wu}) has to be a positive integer or a float in [0,1].")
             if n_gradient_descents is None:
-                raise ValueError(f"Amount of warmup batches ({wu}) was given as a fraction of the total amount of training batches, but we don't know what that is for stopping condition {hyperparameters.HARD_STOPPING_CONDITION.__class__.__name__}")
+                raise ValueError(f"Amount of warmup batches ({wu}) was given as a fraction of the total amount of training batches, but we don't know what that is for stopping condition {hyperparameters.hard_stopping_condition.__class__.__name__}")
             n_descents_of_warmup = int(n_gradient_descents*wu)
 
         # - Intervals
-        eval_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.evaluation or Never()
+        eval_interval = hyperparameters.eval_vs_save_intervals.evaluation or Never()
         if not hyperparameters.track_best_checkpoint:
-            save_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.checkpointing or Never()
+            save_interval = hyperparameters.eval_vs_save_intervals.checkpointing or Never()
         else:  # Ignore it and sync with eval interval.
             if isinstance(eval_interval, Never):
                 raise ValueError("You indicated that you want to track the best model, but specified no evaluation interval!")
             save_interval = eval_interval
-        backup_interval = hyperparameters.EVAL_VS_SAVE_INTERVALS.backups or Never()  # Not relevant to the TrainingArguments, but will come in later.
+        backup_interval = hyperparameters.eval_vs_save_intervals.backups or Never()  # Not relevant to the TrainingArguments, but will come in later.
 
-        batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+        batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
                                                                              dataset=datasetdict["train"], split_name="train"))
-        batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+        batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
                                                                              dataset=datasetdict["train"], split_name="train"))
-        batches_between_backups = tryExceptNone(lambda: backup_interval.getSteps(batch_size=hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH,
+        batches_between_backups = tryExceptNone(lambda: backup_interval.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
                                                                                  dataset=datasetdict["train"], split_name="train"))
 
         # - Early stopping (only used if required)
@@ -345,7 +345,7 @@ class TaskTrainer:
             eval_on_start=not isinstance(eval_interval, Never),  # Always do an evaluation at the start, unless you wanted to avoid all evaluations.
             eval_strategy=IntervalStrategy.STEPS if batches_between_evals else IntervalStrategy.NO,
             eval_steps=batches_between_evals,
-            per_device_eval_batch_size=hyperparameters.EXAMPLES_PER_DEVICEBATCH,  # We know that the GPU can handle at least this much data during eval if it can during training, since training additionally requires the gradients and optimiser to be stored in VRAM as overhead.
+            per_device_eval_batch_size=hyperparameters.examples_per_device_batch,  # We know that the GPU can handle at least this much data during eval if it can during training, since training additionally requires the gradients and optimiser to be stored in VRAM as overhead.
             eval_accumulation_steps=1,  # "Number of predictions steps to accumulate the output tensors for, before moving the results to the CPU. If left unset, all predictions are accumulated on GPU before being moved to the CPU (faster but requires more GPU memory)." You always need more RAM than VRAM, of course.
 
             # Saving
@@ -381,9 +381,9 @@ class TaskTrainer:
         scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=n_descents_of_warmup)  # Not using a linear decay because that's the whole point of having Adam.
 
         # - Build callbacks
-        callbacks = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(task.tokenizer)]
-        if hyperparameters.track_best_checkpoint and hyperparameters.EVALS_OF_PATIENCE is not None:
-            callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.EVALS_OF_PATIENCE))  # Patience is the amount of eval calls you can tolerate worsening loss.
+        callbacks: List[TrainerCallback] = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(task.tokenizer)]
+        if hyperparameters.track_best_checkpoint and hyperparameters.evals_of_patience is not None:
+            callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.evals_of_patience))  # Patience is the amount of eval calls you can tolerate worsening loss.
 
         # if not isinstance(eval_interval, NeverInterval):  # Didn't work, but has since become an option that works. https://discuss.huggingface.co/t/how-to-evaluate-before-first-training-step/18838
         #     callbacks.append(EvaluateBeforeTrainingCallback())
@@ -424,7 +424,7 @@ class TaskTrainer:
             )
         )
 
-        if not hyperparameters.traceless and not hyperparameters.WANDB_PROJECT:
+        if not hyperparameters.traceless and not hyperparameters.wandb_project:
             if hyperparameters.track_best_checkpoint:
                 callbacks.append(FijectCallback(global_model_identifier + "_eval_goal", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
 
@@ -486,7 +486,7 @@ class TaskTrainer:
         print()
 
         print("="*17 + " TRAINING SIZES " + "="*17)
-        batch_size = hyperparameters.EXAMPLES_PER_EFFECTIVE_BATCH
+        batch_size = hyperparameters.examples_per_effective_batch
         n_examples_training = tryExceptNone(lambda: getDatasetSize(datasetdict["train"], "train"))
         print("Batch size:", pluralise(batch_size, "example"))
         print("Context length:", pluralise(task._getMaxInputLength(), "token"))

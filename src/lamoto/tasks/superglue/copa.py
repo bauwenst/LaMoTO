@@ -58,8 +58,8 @@ class COPA(SuperGLUETask):
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
-            return self.tokenizer(2*[example["premise"] + " " + COPA.HARDCODED_QUESTIONS[example["question"]]], [example["choice1"], example["choice2"]],
-                                  add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
+            return self.tokenizer(2 * [example["premise"] + " " + COPA.HARDCODED_QUESTIONS[example["question"]]], [example["choice1"], example["choice2"]],
+                                  add_special_tokens=self.hyperparameters.add_special_tokens, truncation=True, max_length=self._getMaxInputLength())
 
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
 

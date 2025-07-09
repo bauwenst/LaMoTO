@@ -21,45 +21,45 @@ from ..util.datasets import PackedDataset
 
 @dataclass
 class ClmHyperparameters(TaskHyperparameters[CausalLMHeadConfig]):
-    PPL: PPL_Parameters  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
+    ppl: PPL_Parameters  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
 
 
 SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
-    SAVE_AS=None,
-    WANDB_PROJECT=None,
+    save_as=None,
+    wandb_project=None,
     traceless=False,
     store_in_hf_cache=False,
 
-    EXAMPLES_PER_EFFECTIVE_BATCH = 512,   # From the OpenAI GPT-2 paper.
-    EXAMPLES_PER_DEVICEBATCH = 64,  # Used to fit on an A100, but recently got an error saying 80 GiB got filled
-    EFFECTIVE_BATCHES_WARMUP=0.1,
-    HARD_STOPPING_CONDITION=AfterNPackedTokens(total_tokens=10_000_000_000, max_context_length=1024),  # From GEITje.
+    examples_per_effective_batch= 512,   # From the OpenAI GPT-2 paper.
+    examples_per_device_batch= 64,  # Used to fit on an A100, but recently got an error saying 80 GiB got filled
+    effective_batches_warmup=0.1,
+    hard_stopping_condition=AfterNPackedTokens(total_tokens=10_000_000_000, max_context_length=1024),  # From GEITje.
 
-    EXAMPLES_PER_EVALUATION = 2**14,
+    examples_per_evaluation=2 ** 14,
 
     track_best_checkpoint=False,
     rank_checkpoints_using_loss=False,
-    EVALS_OF_PATIENCE=None,
-    EVAL_VS_SAVE_INTERVALS=Intervals(
+    evals_of_patience=None,
+    eval_vs_save_intervals=Intervals(
         evaluation=EveryNDescents(descents=128),
         checkpointing=EveryNMinutes(minutes=30)
     ),
 
-    SEED=69420,
+    seed=69420,
     init_weights=False,
-    MODEL_CONFIG_OR_CHECKPOINT="openai-community/gpt2",
+    model_config_or_checkpoint="openai-community/gpt2",
     archit_basemodel_class=GPT2BaseModel,
     archit_head_config=CausalLMHeadConfig(),
     load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
     custom_hf_class=None,
 
-    TOKENISER="openai-community/gpt2",
-    ADD_SPECIAL_TOKENS=False,
+    tokeniser="openai-community/gpt2",
+    add_special_tokens=False,
 
     learning_rate=2e-5,
     adamw_decay_rate=0.01,
 
-    PPL = PPL_Parameters(stride_fraction=1/8)
+    ppl= PPL_Parameters(stride_fraction=1/8)
 )
 
 

@@ -17,4 +17,4 @@ class CoLA(ClassifySentenceGLUETask):
         examples from the train set and then sampling from the train set means you get data leakage from train to test.
         """
         dataset_with_test = super()._loadDataset()
-        return rebalanceLabels(dataset_with_test, label_column="label", strategy=self._balancing, seed=self.hyperparameters.SEED)
+        return rebalanceLabels(dataset_with_test, label_column="label", strategy=self._balancing, seed=self.hyperparameters.seed)

@@ -186,10 +186,10 @@ class Intervals:
 @dataclass
 class TaskHyperparameters(Generic[HC]):
     # Naming (not necessary in case a checkpoint name is given)
-    SAVE_AS: Optional[str]  # Results in checkpoint names of the form "partialname+augmentation_taskname+taskaugmentation_2024-01-23_01-02-03"
+    save_as: Optional[str]  # Results in checkpoint names of the form "partialname+augmentation_taskname+taskaugmentation_2024-01-23_01-02-03"
 
     # Side-effects
-    WANDB_PROJECT: Optional[str]
+    wandb_project: Optional[str]
     traceless: bool  # Whether to discard any model and any graph of intermediate results and only the evaluation results, or to keep graphs and the usual two checkpoints.
     store_in_hf_cache: bool  # Whether to store model checkpoints in the HF_HOME cache folder, or just the CWD.
 
@@ -198,24 +198,24 @@ class TaskHyperparameters(Generic[HC]):
     #   Classically, the loss function looks like sum_{i=1}^N loss(x_i, y_i). You compute that sum by splitting the effort
     #   across devices and, per device, splitting the work into several runs because of memory limitations.
     # - Training:
-    EXAMPLES_PER_EFFECTIVE_BATCH: int
-    EXAMPLES_PER_DEVICEBATCH: int  # A devicebatch is just whatever fits on the GPU, not N.
+    examples_per_effective_batch: int
+    examples_per_device_batch: int  # A devicebatch is just whatever fits on the GPU, not N.
 
-    EFFECTIVE_BATCHES_WARMUP: Union[int, float]  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-    HARD_STOPPING_CONDITION: BatchesPerTriggerStrategy
+    effective_batches_warmup: Union[int, float]  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
+    hard_stopping_condition: BatchesPerTriggerStrategy
 
     # - Evaluating:
-    EXAMPLES_PER_EVALUATION: Optional[int]  # If None, use the entire validation set.
-    EVALS_OF_PATIENCE: Optional[int]  # Don't necessary need early stopping. You never know what's around the corner!
+    examples_per_evaluation: Optional[int]  # If None, use the entire validation set.
+    evals_of_patience: Optional[int]  # Don't necessary need early stopping. You never know what's around the corner!
 
     track_best_checkpoint: bool
     rank_checkpoints_using_loss: bool
-    EVAL_VS_SAVE_INTERVALS: Intervals  # Second one will be ignored if the above option is true.
+    eval_vs_save_intervals: Intervals  # Second one will be ignored if the above option is true.
 
     # Model configuration
     # - Initialising:
-    SEED: int
-    MODEL_CONFIG_OR_CHECKPOINT: Union[str, Path, PretrainedConfig]
+    seed: int
+    model_config_or_checkpoint: Union[str, Path, PretrainedConfig]
     archit_basemodel_class: Type[BaseModel]
     archit_head_config: HC
 
@@ -228,8 +228,8 @@ class TaskHyperparameters(Generic[HC]):
     adamw_decay_rate: float  # Not the same as L2 regularisation. That's the whole point of the AdamW paper!
 
     # Tokeniser
-    TOKENISER: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithFiniteTypeDomain, TokeniserFactory[TokeniserWithFiniteTypeDomain]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
-    ADD_SPECIAL_TOKENS: bool
+    tokeniser: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithFiniteTypeDomain, TokeniserFactory[TokeniserWithFiniteTypeDomain]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
+    add_special_tokens: bool
 
     def copy(self) -> "TaskHyperparameters[HC]":
         return deepcopy(self)
@@ -245,18 +245,29 @@ class TaskHyperparameters(Generic[HC]):
         """
         hp_as_dict = dict(self.__dict__)
         hp_as_dict["_hp_class"]               = self.__class__.__name__
-        hp_as_dict["HARD_STOPPING_CONDITION"] = repr(self.HARD_STOPPING_CONDITION)
-        hp_as_dict["EVAL_VS_SAVE_INTERVALS"]  = repr(self.EVAL_VS_SAVE_INTERVALS)
+        hp_as_dict["hard_stopping_condition"] = repr(self.hard_stopping_condition)
+        hp_as_dict["eval_vs_save_intervals"]  = repr(self.eval_vs_save_intervals)
         hp_as_dict["archit_basemodel_class"]  = self.archit_basemodel_class.__name__
         hp_as_dict["custom_hf_class"]         = self.custom_hf_class.__name__ if self.custom_hf_class else None
-        if isinstance(self.MODEL_CONFIG_OR_CHECKPOINT, PretrainedConfig):
-            hp_as_dict["MODEL_CONFIG_OR_CHECKPOINT"] = {
-                "_config_class":  self.MODEL_CONFIG_OR_CHECKPOINT.__class__.__name__,
-                "_config_fields": self.MODEL_CONFIG_OR_CHECKPOINT.to_dict(),
+        if isinstance(self.model_config_or_checkpoint, PretrainedConfig):
+            hp_as_dict["model_config_or_checkpoint"] = {
+                "_config_class":  self.model_config_or_checkpoint.__class__.__name__,
+                "_config_fields": self.model_config_or_checkpoint.to_dict(),
             }
-        if self.TOKENISER is not None and not isinstance(self.TOKENISER, str):
-            hp_as_dict["TOKENISER"] = repr(self.TOKENISER)
+        if self.tokeniser is not None and not isinstance(self.tokeniser, str):
+            hp_as_dict["tokeniser"] = repr(self.tokeniser)
         return hp_as_dict
+
+    def __setattr__(self, key, value):
+        """Ensures that all field assignments are case-insensitive. (The only part that is not case-insensitive are constructor arguments.)"""
+        super().__setattr__(key.lower(), value)
+
+    def __getattr__(self, item):
+        """Ensures that all field accesses are case-insensitive."""
+        if item.lower() != item:
+            return getattr(self, item.lower())
+        else:
+            raise AttributeError(item)
 
 
 def hyperparametersFromDict(hp_as_dict: dict) -> TaskHyperparameters:
@@ -265,49 +276,49 @@ def hyperparametersFromDict(hp_as_dict: dict) -> TaskHyperparameters:
     """
     hp_class = eval(hp_as_dict.pop("_hp_class"))
     hp = hp_class(**hp_as_dict)
-    hp.HARD_STOPPING_CONDITION = eval(hp.HARD_STOPPING_CONDITION)
-    hp.EVAL_VS_SAVE_INTERVALS  = eval(hp.EVAL_VS_SAVE_INTERVALS)
+    hp.hard_stopping_condition = eval(hp.hard_stopping_condition)
+    hp.eval_vs_save_intervals  = eval(hp.eval_vs_save_intervals)
     hp.archit_basemodel_class  = eval(hp.archit_basemodel_class)
     hp.custom_hf_class         = eval(hp.custom_hf_class) if hp.custom_hf_class is not None else None
-    if isinstance(hp.MODEL_CONFIG_OR_CHECKPOINT, dict):
-        config_class = eval(hp.MODEL_CONFIG_OR_CHECKPOINT["_config_class"])
-        config_fields = hp.MODEL_CONFIG_OR_CHECKPOINT["_config_fields"]
-        hp.MODEL_CONFIG_OR_CHECKPOINT = config_class(**config_fields)
-    if hp.TOKENISER is not None:
+    if isinstance(hp.model_config_or_checkpoint, dict):
+        config_class = eval(hp.model_config_or_checkpoint["_config_class"])
+        config_fields = hp.model_config_or_checkpoint["_config_fields"]
+        hp.model_config_or_checkpoint = config_class(**config_fields)
+    if hp.tokeniser is not None:
         try:
-            hp.TOKENISER = eval(hp.TOKENISER)
+            hp.tokeniser = eval(hp.tokeniser)
         except:
-            hp.TOKENISER = None
-            warnings.warn(f"Tokeniser set to 'None' (so the model's default tokeniser will be used) because it could not be reconstructed from the given value:\n{hp.TOKENISER}")
+            hp.tokeniser = None
+            warnings.warn(f"Tokeniser set to 'None' (so the model's default tokeniser will be used) because it could not be reconstructed from the given value:\n{hp.tokeniser}")
     return hp
 
 
 from archit.instantiation.basemodels import RobertaBaseModel
 
 SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
-    SAVE_AS=None,
-    WANDB_PROJECT=None,
+    save_as=None,
+    wandb_project=None,
     traceless=False,
     store_in_hf_cache=False,
 
-    EXAMPLES_PER_EFFECTIVE_BATCH=32,
-    EXAMPLES_PER_DEVICEBATCH=32,
-    EFFECTIVE_BATCHES_WARMUP=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-    HARD_STOPPING_CONDITION=AfterNEpochs(epochs=10),
+    examples_per_effective_batch=32,
+    examples_per_device_batch=32,
+    effective_batches_warmup=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
+    hard_stopping_condition=AfterNEpochs(epochs=10),
 
-    EXAMPLES_PER_EVALUATION=None,
-    EVAL_VS_SAVE_INTERVALS=Intervals(
+    examples_per_evaluation=None,
+    eval_vs_save_intervals=Intervals(
         evaluation=EveryNDescents(descents=512),  # Not relative to epoch size because epochs can be insanely massive.
         checkpointing=None
     ),
-    EVALS_OF_PATIENCE=5,
+    evals_of_patience=5,
     track_best_checkpoint=True,
     rank_checkpoints_using_loss=True,
 
-    SEED=69420,
+    seed=69420,
     init_weights=True,
     load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
-    MODEL_CONFIG_OR_CHECKPOINT="roberta-base",
+    model_config_or_checkpoint="roberta-base",
     archit_basemodel_class=RobertaBaseModel,
     archit_head_config=None,
     custom_hf_class=None,
@@ -315,8 +326,8 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     learning_rate=2e-5,
     adamw_decay_rate=0.01,
 
-    TOKENISER=None,
-    ADD_SPECIAL_TOKENS=True
+    tokeniser=None,
+    add_special_tokens=True
 )
 
 

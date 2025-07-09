@@ -36,7 +36,7 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
         return imputeTestSplit(
             self._loadDatasetRaw(),
             column_for_stratification="label" if not self._is_regressive else None,
-            seed=self.hyperparameters.SEED
+            seed=self.hyperparameters.seed
         )
 
     def _loadDatasetRaw(self) -> DatasetDict:
@@ -101,7 +101,7 @@ class CompareSentencesGLUETask(GLUETask):
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
-            return self.tokenizer(example[self._field1], example[self._field2], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,
+            return self.tokenizer(example[self._field1], example[self._field2], add_special_tokens=self.hyperparameters.add_special_tokens,
                                   truncation=True, max_length=self._getMaxInputLength())
 
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
@@ -132,7 +132,7 @@ class ClassifySentenceGLUETask(GLUETask):
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example):
-            return self.tokenizer(example["sentence"], add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS,  # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
+            return self.tokenizer(example["sentence"], add_special_tokens=self.hyperparameters.add_special_tokens,  # return_tensors="pt",  # DO NOT USE THIS OPTION, IT IS EVIL. Will basically make 1-example batches of everything even though things like the collator will expect non-batches, and hence they will think no padding is needed because all features magically have the same length of 1.
                                   truncation=True, max_length=self._getMaxInputLength())
 
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})

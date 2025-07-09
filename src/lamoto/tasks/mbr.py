@@ -41,13 +41,13 @@ from ..util.visuals import log
 ##################################
 SUGGESTED_HYPERPARAMETERS_MBR = getDefaultHyperparameters()
 SUGGESTED_HYPERPARAMETERS_MBR.archit_basemodel_class = CanineBaseModel
-SUGGESTED_HYPERPARAMETERS_MBR.MODEL_CONFIG_OR_CHECKPOINT = "google/canine-c"
-SUGGESTED_HYPERPARAMETERS_MBR.TOKENISER                  = "google/canine-c"
-SUGGESTED_HYPERPARAMETERS_MBR.EFFECTIVE_BATCHES_WARMUP = 1000
-SUGGESTED_HYPERPARAMETERS_MBR.EVAL_VS_SAVE_INTERVALS.evaluation = NEveryEpoch(per_epoch=9)
+SUGGESTED_HYPERPARAMETERS_MBR.model_config_or_checkpoint = "google/canine-c"
+SUGGESTED_HYPERPARAMETERS_MBR.tokeniser                  = "google/canine-c"
+SUGGESTED_HYPERPARAMETERS_MBR.effective_batches_warmup = 1000
+SUGGESTED_HYPERPARAMETERS_MBR.eval_vs_save_intervals.evaluation = NEveryEpoch(per_epoch=9)
 SUGGESTED_HYPERPARAMETERS_MBR.archit_head_config = TokenClassificationHeadConfig()
-SUGGESTED_HYPERPARAMETERS_MBR.EVALS_OF_PATIENCE = 30
-SUGGESTED_HYPERPARAMETERS_MBR.HARD_STOPPING_CONDITION = AfterNEpochs(100)
+SUGGESTED_HYPERPARAMETERS_MBR.evals_of_patience = 30
+SUGGESTED_HYPERPARAMETERS_MBR.hard_stopping_condition = AfterNEpochs(100)
 ##################################
 
 

@@ -24,7 +24,7 @@ class PseudoPerplexity(AutonomousMetric):
             tokenizer=self.environment.tokeniser,
             dataset=self.environment.getDatasetWithoutCollator(),
             rightward_fraction=params.right_fraction,
-            device_batch_size=self.environment.hyperparameters.EXAMPLES_PER_DEVICEBATCH
+            device_batch_size=self.environment.hyperparameters.examples_per_device_batch
         )
         return {
             "pppl": p,

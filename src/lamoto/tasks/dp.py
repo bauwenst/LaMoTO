@@ -159,7 +159,7 @@ class DP(Task[DependencyParsingHeadConfig]):
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         filter_and_correct = FilterAndCorrectUDtypes(self.reltag_to_id)
-        truncator = WordLevelPreprocessorWithDummies(self.tokenizer, max_tokens=self._getMaxInputLength(), add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS, redirect_to_dummy_if_index_was_truncated=False)
+        truncator = WordLevelPreprocessorWithDummies(self.tokenizer, max_tokens=self._getMaxInputLength(), add_specials=self.hyperparameters.add_special_tokens, redirect_to_dummy_if_index_was_truncated=False)
 
         def datasetMap(example: dict):
             # Filter entries with None head, map strings to ints, and truncate everything to a fixed token limit.

@@ -45,7 +45,7 @@ class POS(Task[TokenClassificationHeadConfig]):
         sanitiser = FilterAndCorrectUDtypes()
         flattener = FlattenWordLabels(tokenizer=self.tokenizer,
                                       max_tokens=self._getMaxInputLength(),
-                                      add_specials=self.hyperparameters.ADD_SPECIAL_TOKENS,
+                                      add_specials=self.hyperparameters.add_special_tokens,
                                       pooling_mode=LabelPooling.LAST)
 
         def datasetMap(example: dict) -> dict:

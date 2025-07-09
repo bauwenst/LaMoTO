@@ -41,12 +41,12 @@ class SWAG(Task[SequenceClassificationHeadForNestedBatches]):
         )
 
     def _loadDataset(self) -> DatasetDict:
-        return imputeTestSplit(load_dataset("allenai/swag", "regular"), column_for_stratification="label", seed=self.hyperparameters.SEED)
+        return imputeTestSplit(load_dataset("allenai/swag", "regular"), column_for_stratification="label", seed=self.hyperparameters.seed)
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def preprocess(example: dict) -> dict:
-            return self.tokenizer(len(SWAG.ENDING_FIELDS)*[example["sent1"]], [example["sent2"] + " " + example[ending] for ending in SWAG.ENDING_FIELDS],
-                                  add_special_tokens=self.hyperparameters.ADD_SPECIAL_TOKENS, truncation=True, max_length=self._getMaxInputLength())
+            return self.tokenizer(len(SWAG.ENDING_FIELDS) * [example["sent1"]], [example["sent2"] + " " + example[ending] for ending in SWAG.ENDING_FIELDS],
+                                  add_special_tokens=self.hyperparameters.add_special_tokens, truncation=True, max_length=self._getMaxInputLength())
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
 
     def getCollator(self) -> DataCollator:

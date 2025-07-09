@@ -92,7 +92,7 @@ class _SquadTask(Task):
         self._stride_fraction = context_stride
 
     def _loadDataset(self) -> DatasetDict:  # TODO: NewsQA?
-        return imputeTestSplit(load_dataset("rajpurkar/squad" + "_v2"*self._v2), column_for_stratification=None, seed=self.hyperparameters.SEED)
+        return imputeTestSplit(load_dataset("rajpurkar/squad" + "_v2"*self._v2), column_for_stratification=None, seed=self.hyperparameters.seed)
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         def squadTokenConversion(example: Dict[str, Any]) -> Dict[str, Any]:

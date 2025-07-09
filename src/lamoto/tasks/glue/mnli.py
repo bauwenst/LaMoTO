@@ -18,7 +18,7 @@ class MNLI(CompareSentencesGLUETask):
         new_datasetdict      = original_datasetdict["train"].train_test_split(
             test_size=len(original_datasetdict["validation_mismatched"])/len(original_datasetdict["train"]),
             stratify_by_column="label",
-            seed=self.hyperparameters.SEED
+            seed=self.hyperparameters.seed
         )
         new_datasetdict["validation"] = original_datasetdict["validation_mismatched"]
         return new_datasetdict
