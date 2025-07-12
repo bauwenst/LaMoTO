@@ -12,6 +12,16 @@ load checkpoints and tokenisers for you.
 If I'd redesign this again, I would perhaps have nodes be checkpoints rather than the arcs between them being checkpoints,
 and I would also perhaps let Lineage and LineageRootNode be the same class, rather than one wrapping the other.
 The only real benefit you get from this wrapping is that you don't get a ".run()" method suggested while building a node tree.
+
+Typically, when using lineages, a script defining your language modelling experiments will look like this:
+    1. Define all your root nodes;
+    2. Define a placeholder followed by your pretraining node;
+    3. Define your task nodes on the placeholder;
+    4. Build a registry from your root nodes followed by that placeholder;
+    5. Define where to find existing outputs of some nodes (if applicable).
+Then after this, you create a script that parses command-line arguments and uses the one-liner
+    REGISTRYNAME.get(LINEAGENAME).run(NODENAME)
+to run an experiment.
 """
 from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator, Tuple, Callable
 from typing_extensions import Self
@@ -289,16 +299,19 @@ class LineagePlaceholderNode(_LineageNode):
         for parent in parents:
             self.after(parent)
 
-    def buildRegistry(self, starting_nodes: List[_LineageNode]) -> "LineageRegistry":
+    def buildRegistry(self, starting_nodes: List[_LineageNode], quiet: bool=True) -> "LineageRegistry":
         """
-        Append this node tree to each of the given nodes, and then turn the resulting trees into lineages
-        stored in a registry.
+        Append this node tree to each of the given nodes, turn the resulting trees into lineages stored in a registry,
+        and print these lineages.
         """
         self.afterMany(starting_nodes)
 
         registry = LineageRegistry()
         for i,node in enumerate(starting_nodes):
-            registry.add(Lineage(handle=f"{i+1}", root=node._getRoot()))
+            lineage = Lineage(handle=f"{i+1}", root=node._getRoot())
+            registry.add(lineage)
+            if not quiet:
+                print(lineage)
         return registry
 
 

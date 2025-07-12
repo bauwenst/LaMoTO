@@ -8,20 +8,20 @@ from lamoto.training.training import LamotoPaths
 
 
 hp = getDefaultHyperparameters()
-hp.SEED = 0
+hp.seed = 0
 hp.store_in_hf_cache = False
 hp.traceless = True
 
 
 def setModel(id: int=1):
     if id == 1:
-        hp.MODEL_CONFIG_OR_CHECKPOINT = "haisongzhang/roberta-tiny-cased"  # 4 layers, 512 hidden size
+        hp.model_config_or_checkpoint = "haisongzhang/roberta-tiny-cased"  # 4 layers, 512 hidden size
         hp.archit_basemodel_class = RobertaBaseModel
     elif id == 2:
-        hp.MODEL_CONFIG_OR_CHECKPOINT = "microsoft/deberta-base"
+        hp.model_config_or_checkpoint = "microsoft/deberta-base"
         hp.archit_basemodel_class = DebertaBaseModel
     elif id == 3:  # Will only work on my local machine.
-        hp.MODEL_CONFIG_OR_CHECKPOINT = LamotoPaths.pathToCheckpoints() / "roberta-tiny-cased_DP_2024-12-17_02-17-40" / "checkpoint-3072"
+        hp.model_config_or_checkpoint = LamotoPaths.pathToCheckpoints() / "roberta-tiny-cased_DP_2024-12-17_02-17-40" / "checkpoint-3072"
         hp.archit_basemodel_class = RobertaBaseModel
     else:
         raise RuntimeError()
@@ -49,14 +49,14 @@ def tst_dp():
 
 def tst_cola():
     hp.archit_head_config = SequenceClassificationHeadConfig()
-    hp.HARD_STOPPING_CONDITION = Never()
+    hp.hard_stopping_condition = Never()
 
     task = CoLA()
     task.train(hp)
 
 
 def tst_sts():
-    hp.HARD_STOPPING_CONDITION = Never()
+    hp.hard_stopping_condition = Never()
     hp.archit_head_config = SequenceClassificationHeadConfig()
 
     task = STSB()
@@ -79,20 +79,20 @@ def tst_qnli():
 def tst_qqp():
     hp.archit_head_config = SequenceClassificationHeadConfig()
 
-    hp.HARD_STOPPING_CONDITION = AfterNDescents(descents=5)
+    hp.hard_stopping_condition = AfterNDescents(descents=5)
 
     task = QQP()
     task.train(hp)
 
 
 def tst_copa():
-    hp.HARD_STOPPING_CONDITION = Never()
-    hp.EVAL_VS_SAVE_INTERVALS = Intervals(
+    hp.hard_stopping_condition = Never()
+    hp.eval_vs_save_intervals = Intervals(
         evaluation=EveryNDescents(descents=256),
         checkpointing=None,
         backups=EveryNDescents(descents=512)  # Good test to see if this works.
     )
-    hp.EVALS_OF_PATIENCE = 5
+    hp.evals_of_patience = 5
 
     hp.archit_head_config = SequenceClassificationHeadConfig()
     task = COPA()
@@ -111,10 +111,36 @@ def tst_mbr():
     task.train()
 
 
-def tst_tuner():
-    from lamoto.training.tuning import TaskTuner, MetaHyperparameters
+def tst_squadv1():
+    hp.archit_head_config = ExtractiveQAHeadConfig()
+    task = SQuADv1()
+    task.train(hp)
 
-    tuner = TaskTuner(None, [8,16,32,64], [1e-4, 1e-3], None)
+
+def tst_squadv2():
+    hp.archit_head_config = ExtractiveAQAHeadConfig(ua_loss_weight=1.0)
+    task = SQuADv2()
+    task.train(hp)
+
+
+def tst_wic():
+    hp.archit_head_config = SequenceClassificationHeadConfig()
+    task = WiC()
+    task.train(hp)
+
+
+def tst_tuner():
+    from lamoto.training.tuning import TaskTuner, MetaHyperparameters, HyperparameterGrid
+
+    tuner = TaskTuner(
+        sampling_grid=HyperparameterGrid(
+            None,
+            None,
+            [8,16,32,64],
+            [1e-4, 1e-3],
+            None
+        )
+    )
     task = DP()
     hp.archit_head_config = DependencyParsingHeadConfig(extended_model_config=PoolingAndStridingConfig())
     meta = MetaHyperparameters(
@@ -143,6 +169,10 @@ if __name__ == "__main__":
     # tst_qqp()
     # tst_copa()
     # tst_record()
-    tst_mbr()
+    # tst_mbr()
+
+    tst_wic()
+    # tst_squadv1()
+    # tst_squadv2()
 
     # tst_tuner()

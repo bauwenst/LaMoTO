@@ -22,7 +22,7 @@ class BinaryConfusionMatrix(StreamedMetric):
         self.cache = None
         self.matrix = evaluate.load("BucketHeadP65/confusion_matrix")  # TP = answerable predicted as answerable.
 
-    def add(self, logits: Tensor, labels: Tensor):
+    def add(self, logits: Tensor, labels: Tensor) -> torch.BoolTensor:
         thresholded_predictions = torch.nn.functional.softmax(logits, dim=-1)[:,1] > self.threshold  # If you didn't have a dedicated UA head, you could impute this with when the QA head says  start_index != end_index.
 
         for example_idx in range(thresholded_predictions.shape[0]):

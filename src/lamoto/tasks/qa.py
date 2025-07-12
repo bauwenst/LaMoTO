@@ -1,3 +1,6 @@
+"""
+Extractive question answering with and without answerability classification.
+"""
 from typing import Dict, Any, List, Tuple
 from dataclasses import dataclass
 from datasets import load_dataset, DatasetDict
@@ -11,7 +14,7 @@ from tktkt.preparation.splitters import Pretokeniser, SplitNextToWhitespace, Pun
 from archit.instantiation.tasks import ForExtractiveAQA, ForExtractiveQA
 from archit.instantiation.heads import ExtractiveQAHeadConfig, ExtractiveAQAHeadConfig
 
-from ._core import Task, MetricSetup
+from ._core import Task, MetricSetup, RankingMetricSpec
 from ..util.datasets import imputeTestSplit, DictOfLists, \
     replaceDatasetColumns_OneExampleToOneExample, replaceDatasetColumns_ManyExamplesToManyExamples, ImplicitLabel, \
     TextField, ForeignField, CharacterIndex
@@ -79,10 +82,12 @@ class _SquadTask(Task):
                         + with_answerability*[ImplicitLabel(lambda ex: int(len(ex["answers"]["answer_start"]) > 0))],
             metric_config=MetricSetup(
                 to_compute=["aqa"],
-                to_track={"aqa": {name: name.replace("_", "-") for name in AQA.keys()}}
+                to_track={"aqa": {name: name.replace("_", "-") for name in AQA.keys()}},
+                to_rank=RankingMetricSpec(metric_name="aqa", result_name="correctness", higher_is_better=True)
             ) if with_answerability else MetricSetup(
                 to_compute=["qa"],
-                to_track={"qa": {"EM": "EM", "F1": "$F_1$"}}
+                to_track={"qa": {"EM": "EM", "F1": "$F_1$"}},
+                to_rank=RankingMetricSpec(metric_name="qa", result_name="EM", higher_is_better=True)
             ),
             archit_class=ForExtractiveAQA if with_answerability else ForExtractiveQA,
             automodel_class=None

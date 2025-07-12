@@ -10,9 +10,14 @@ TODO: The architecture described by the authors is not bad. Mean-pooling the wor
       have an extra ArchIt architecture that mean-pools the ranges between specials (here, generating 3 embeddings)
       and then either sends them through a 3H x C linear head or something more complex.
 """
+from typing import Tuple, List
 from datasets import DatasetDict
+from transformers import PreTrainedTokenizerBase
+
+from tktkt.util.iterables import indexSpan
 
 from ._general import ClassifySentenceSuperGLUETask
+from .._core import RankingMetricSpec
 from ...util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
@@ -31,18 +36,47 @@ class WiC(ClassifySentenceSuperGLUETask):
     but it is contextualised. Easier to hack the tokeniser to do this than to hack inference to concatenate an embedding to the pooled output.
     """
     def __init__(self):
-        super().__init__(task_name="WiC")
+        super().__init__(task_name="WiC", rank_by=RankingMetricSpec("matthews_correlation", "matthews_correlation", True))
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        def preprocess(example):  # FIXME: This doesn't work for CLS-SEP-based vocabularies rather than BOS-EOS.
+        bos_ids, sep_ids, eos_ids = deduceTemplateSpecials(self.tokenizer)
+        bos_ids, sep_ids, eos_ids = self.tokenizer.convert_tokens_to_ids(bos_ids), self.tokenizer.convert_tokens_to_ids(sep_ids), self.tokenizer.convert_tokens_to_ids(eos_ids)
+
+        def preprocess(example):
             input_ids = \
-                [self.tokenizer.bos_token_id] + \
+                bos_ids + \
                 self.tokenizer(example["word"], add_special_tokens=False, return_attention_mask=False)["input_ids"] + \
-                [self.tokenizer.eos_token_id] + \
+                sep_ids + \
                 self.tokenizer(example["sentence1"], add_special_tokens=False, return_attention_mask=False)["input_ids"] + \
-                [self.tokenizer.eos_token_id] + \
+                sep_ids + \
                 self.tokenizer(example["sentence2"], add_special_tokens=False, return_attention_mask=False)["input_ids"] + \
-                [self.tokenizer.eos_token_id]
+                eos_ids
             return {"input_ids": input_ids, "attention_mask": [1]*len(input_ids)}
 
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
+
+
+def deduceTemplateSpecials(hf_tokeniser: PreTrainedTokenizerBase) -> Tuple[List[str], List[str], List[str]]:
+    x_tokens = hf_tokeniser.tokenize("x", add_special_tokens=False)
+    y_tokens = hf_tokeniser.tokenize("y", add_special_tokens=False)
+
+    tokens = hf_tokeniser.tokenize("x", "y", add_special_tokens=True)
+
+    try:
+        x_start, x_end = indexSpan(x_tokens, tokens)
+    except:
+        x_start, x_end = 0, 0
+
+    try:
+        y_start, y_end = indexSpan(y_tokens, tokens)
+    except:
+        y_start, y_end = 0, 0
+
+    if y_start < x_start:
+        raise NotImplementedError("It seems that the given tokeniser reverses its input!")
+
+    bos = tokens[:x_start]
+    sep = tokens[x_end:y_start]
+    eos = tokens[y_end:]
+
+    return bos, sep, eos

@@ -99,8 +99,9 @@ class AQA(QA):
 
         :param answerability_threshold: Predict answerable when you are at least this certain that it is answerable.
         """
-        super().__init__(environment=environment)
-        self.qa_true_positives = QA(environment)
+        super().__init__(environment=environment)  # super() computes EM metric for all answerables.
+
+        self.qa_true_positives = QA(environment)  # This computes EM metric only for the answerables that were not refused.
         self.matrix = BinaryConfusionMatrix(threshold=answerability_threshold)
 
     def _addBatch(self, logits: Tensors, labels: Tensors,
@@ -109,20 +110,21 @@ class AQA(QA):
         qa_labels, ua_labels = labels
 
         # Individual QA and UA metrics
-        qa_predictions, qa_answers = super()._addBatch(logits=qa_logits[torch.where(ua_labels)], labels=qa_labels[torch.where(ua_labels)],
-                                                       input_ids=input_ids, context_mask=context_mask)  # Compute QA, but only for examples that have an answer. (Our prediction doesn't matter.)
-        ua_predictions = self.matrix.add(logits=ua_logits, labels=ua_labels)  # If you didn't have a dedicated UA head, you could impute UA logits with the QA head when it says  start_index != end_index.
+        ans_mask = (ua_labels == 1)
+        qa_predictions, qa_answers = super()._addBatch(logits=qa_logits[ans_mask], labels=qa_labels[ans_mask],
+                                                       input_ids=input_ids, context_mask=context_mask)  # Compute QA, but only for examples that have an answer. (Our UA prediction doesn't matter.)
+        ua_predictions = self.matrix.add(logits=ua_logits, labels=ua_labels)  # Footnote: If you didn't have a dedicated UA head, you could impute UA logits with the QA head when it says  start_index != end_index.
 
         # Joint metric: exact matches for those that were correctly predicted to be answerable
-        qa_with_correct_ua = (torch.cumsum(ua_labels, dim=0)-1)[torch.where(ua_labels & ua_predictions)]
-        self.qa_true_positives._addFromStrings(predictions=[qa_predictions[i] for i in qa_with_correct_ua],
-                                               actual_answers=[qa_answers[i]  for i in qa_with_correct_ua])
+        indices_in_qa_with_correct_ua = (torch.cumsum(ua_labels, dim=0)-1)[ans_mask & ua_predictions]  # The cumsum-1 is a trick to get the enumerate indices of answerables (ua_labels == 1) but in a tensor that is still as large as the original batch. The values of this cumsum at unanswerable rows is bogus but will never be seen by the mask.
+        self.qa_true_positives._addFromStrings(predictions=[qa_predictions[idx] for idx in indices_in_qa_with_correct_ua],
+                                               actual_answers=[qa_answers[idx]  for idx in indices_in_qa_with_correct_ua])
 
     @classmethod
     def keys(cls) -> Set[str]:
         return {"correctness", "correctness-ans"} | \
                {"QA_Uni" + name for name in QA.keys()} | \
-               {"UA_" + name for name in BinaryConfusionMatrix.keys()}
+               {"UA_" + name    for name in BinaryConfusionMatrix.keys()}
 
     def _finish(self) -> Dict[str, float]:
         # Compute the separate QA and UA metrics.
@@ -130,7 +132,8 @@ class AQA(QA):
         ua_metrics = self.matrix.computeFromMemory()
 
         # Combine them into one dictionary.
-        metrics = {("QA_Uni" + key): value for key,value in qa_metrics.items()} | {("UA_" + key): value for key,value in ua_metrics.items()}
+        metrics = {("QA_Uni" + key): value for key,value in qa_metrics.items()} | \
+                  {("UA_" + key): value for key,value in ua_metrics.items()}
 
         # Compute the combined metrics.
         qa_tp_metrics = self.qa_true_positives._finish()
@@ -152,21 +155,31 @@ class AQA(QA):
 
         metrics["correctness"] = (skew*re_p*EM_tp + (1-skew)*re_n)
 
-        # 2. Full answerable correctness: in SQuAD v1, full correctness is equivalent to full correctness across answerable
-        #                                 questions because there are no negatives. You predict a span for all examples and
-        #                                 all examples have a span. In SQuAD v2, the same positive examples are used as in SQuAD v1,
-        #                                 except now it is possible that your system wrongfully refuses to predict a span for
-        #                                 it (equivalently, it predicts the wrong span). So, we adjust for that to get the new
-        #                                 correctness rate when the system is presented with a positive.
+        # 2. Full answerable correctness: for just the answerable questions, we can again measure if you correctly classify them and then find the span. This is easier than full correctness, because you aren't punished for viewing unanswerable questions as answerable.
         #   P(correct | ans) = P(correct span, predict ans | ans)
         #                    = P(correct span | ans, predict ans)*P(predict ans | ans)
         #                    = EM_tp*recall_ans
-        # Note that EM == P(correct span | ans) measures the performance of the QA heads regardless of the UA heads.
-        # The relation between it, EM_tp and the correctness computed here is
-        #   EM = P(correct span | ans) = P(correct span, predict ans | ans) + P(correct span, predict unans | ans)
-        #                              = P(correct span | predict ans, ans)*P(predict ans | ans) + P(correct span | predict unans, ans)*P(predict unans | ans)
-        #                              = EM_tp*recall_ans + EM_fn*(1-recall_ans) >= EM_tp*recall_ans = P(correct | ans)
-        # so we can say for sure that EM >= P(correct | ans), making the latter a harder metric.
         metrics["correctness-ans"] = EM_tp*re_p
 
+        # Two notes about this metric:
+        #   1. About the difficulty as compared to EM:
+        #       Because EM = P(correct span | ans) rather than P(correct | ans), it is always higher, because it does not require
+        #       a correct answerability prediction, only a correct span prediction. This is easy to prove formally:
+        #           EM = P(correct span | ans) = P(correct span, predict ans | ans) + P(correct span, predict unans | ans)
+        #                                      = P(correct span | predict ans, ans)*P(predict ans | ans) + P(correct span | predict unans, ans)*P(predict unans | ans)
+        #                                      = EM_tp*recall_ans + EM_fn*(1-recall_ans) >= EM_tp*recall_ans = P(correct | ans)
+        #       which makes this reduced correctness still harder than EM.
+        #   2. About comparing a SQuAD v2 system to a SQuAD v1 system:
+        #       You may be tempted to compare the EM scores for SQuAD v1 and SQuAD v2 systems, because they have the same
+        #       name. But actually, there are four metrics in SQuAD v2 that all collapse into one number for SQuAD v1:
+        #       EM = P(correct span | ans), EM_tp = P(correct span | predict ans, ans), P(correct) and P(correct | ans).
+        #       This is because in SQuAD v1, all questions are answerable, and all answerable questions have a span
+        #       predicted for them (i.e. they are implicitly predicted to be answerable).
+        #
+        #       When running a SQuAD v2 system on the same dataset, it is possible that it wrongfully refuses to predict
+        #       a span for an example, which in SQuAD v1 is equivalent to getting a non-exact match. That means you
+        #       should actually compare SQuAD v2 to SQuAD v1 not using EM, but using P(correct | ans).
+        #
+        #       If you want to compare the QA heads of both systems, the EM metric is what you want.
+        #       EM_tp can be higher or lower than EM and has no useful interpretation on its own.
         return metrics

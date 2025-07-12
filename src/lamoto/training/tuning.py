@@ -98,7 +98,7 @@ class HyperparameterGrid:
         ]
 
     def domainSize(self) -> int:
-        return prod(map(len, self.getFullGrid(defaults=getDefaultTaskHyperparameters())))
+        return prod(map(len, self.getFullGrid(defaults=getDefaultHyperparameters())))
 
     def enumerate(self, defaults: TaskHyperparameters) -> Iterable["HyperparameterGrid.Sample"]:
         for seed, wu, bs, lr, dr in itertools.product(*self.getFullGrid(defaults)):
