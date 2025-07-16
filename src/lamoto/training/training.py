@@ -18,8 +18,9 @@ from fiject.applications.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from tktkt.interfaces.factories import TokeniserFactory
-from tktkt.util.printing import intsep, pluralise
+from tktkt.util.printing import intsep, pluralise, dprint
 from tktkt.util.timing import datetimeDashed
+from tktkt.util.dicts import saveToJson
 from tktkt.paths import PathManager
 
 from ..tasks._core import Task, RankingMetricSpec
@@ -142,21 +143,8 @@ class TaskTrainer:
                                           base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # This call pretends to be CombinedConfig(**json).
         task._setModelConfig(model_config)
 
-        if hyperparameters.save_as:
-            model_name = hyperparameters.save_as
-        elif isinstance(hyperparameters.model_config_or_checkpoint, str):
-            model_name = getSubstringAfterLastSlash(hyperparameters.model_config_or_checkpoint)
-        else:  # We don't use the tokeniser name because it isn't directly related to the model.
-            raise RuntimeError("Cannot deduce name to save model as from a config.")
-
-        global_model_identifier = model_name + ("" if not self._model_augmentation else ("+" + self._model_augmentation.name)) \
-                                + f"_{task.task_name}" \
-                                + f"_{datetimeDashed()}"
-
-        if hyperparameters.store_in_hf_cache:
-            folder_to_this_models_checkpoints = LamotoPaths.append(Path(HF_HUB_CACHE), global_model_identifier)  # If that first path doesn't exist yet, it will be created automatically.
-        else:
-            folder_to_this_models_checkpoints = LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_model_identifier)
+        model_identifier, global_model_identifier = self._getRunIdentifiers(task, hyperparameters)
+        folder_of_this_models_checkpoints, folder_of_this_models_evaluations = self._getRunPaths(global_model_identifier, hyperparameters)
 
         # Set up tokeniser
         log("Loading tokeniser...")
@@ -270,13 +258,13 @@ class TaskTrainer:
         task._setMetrics({name: METRICS.load(name,env) for name in task.metric_config.to_compute})
 
         # Set up reporting too
-        folder_wandb = folder_to_this_models_checkpoints / "wandb"
+        folder_wandb = folder_of_this_models_checkpoints / "wandb"
         folder_wandb.mkdir(exist_ok=True)
         wandb.init(
-            mode="disabled" if hyperparameters.traceless or not hyperparameters.wandb_project else "online",
+            mode="disabled" if hyperparameters.discard_artifacts or not hyperparameters.wandb_project else "online",
 
             project=hyperparameters.wandb_project,
-            group=model_name,
+            group=model_identifier,
             name=global_model_identifier,
             tags=[task.task_name, torch.cuda.get_device_name()] + ([self._model_augmentation.name] if self._model_augmentation else []),
 
@@ -352,7 +340,7 @@ class TaskTrainer:
             save_strategy=IntervalStrategy.STEPS if batches_between_saves else IntervalStrategy.NO,
             save_steps=batches_between_saves,
 
-            output_dir=folder_to_this_models_checkpoints.as_posix(),
+            output_dir=folder_of_this_models_checkpoints.as_posix(),
 
             load_best_model_at_end=hyperparameters.track_best_checkpoint,  # Will take the best model out of its checkpoint directory and load it into task.model, which can then be saved. At the end of Trainer's loop, the following happens: "Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint"
             metric_for_best_model=best_model_metric_handle,
@@ -424,7 +412,7 @@ class TaskTrainer:
             )
         )
 
-        if not hyperparameters.traceless and not hyperparameters.wandb_project:
+        if not hyperparameters.discard_artifacts and not hyperparameters.wandb_project:
             if hyperparameters.track_best_checkpoint:
                 callbacks.append(FijectCallback(global_model_identifier + "_eval_goal", evals_between_commits=4))  # Automatically tracks the same metric as is used to decide best model.
 
@@ -525,30 +513,32 @@ class TaskTrainer:
             trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # Not needed since we already checkpoint the last model with a callback.
             # trainer.push_to_hub()
+            global_step = trainer.state.global_step
+            all_results = {"train_global_step": global_step}
 
             log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on validation set...")
             env.use_test_not_validation = False
             validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="eval")
-            print(validation_results)
+            dprint(validation_results, indent=1)
 
             if "test" in datasetdict:
                 log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on test set...")
                 env.use_test_not_validation = True
                 test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
-                all_results = validation_results | test_results
-                print(test_results)
+                all_results |= validation_results | test_results
+                dprint(test_results, indent=1)
             else:
-                all_results = validation_results
+                all_results |= validation_results
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
 
             # Save results
-            results_path = LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_model_identifier) / f"metrics-{trainer.state.global_step}.json"
-            log(f"Saving results to {results_path.as_posix()} ...")
-            with open(results_path, "w", encoding="utf-8") as handle:
-                json.dump(all_results, handle, indent=4)
+            if not hyperparameters.discard_results:
+                results_path = folder_of_this_models_evaluations / f"metrics-{global_step}.json"
+                log(f"Saving results to {results_path.as_posix()} ...")
+                saveToJson(all_results, results_path, do_indent=True)
 
             # Delete all other artifacts if requested. (We have at most two checkpoints. Backups are not checkpoints, and are never deleted.)
-            if hyperparameters.traceless:
+            if hyperparameters.discard_artifacts:
                 log("Deleting models...")
                 trainer.deleteCheckpointsInOrder(amount=2)
                 trainer.tryDeleteFolder(unless_contains_subfolders=[_SaveModelMixin.BACKUPS_FOLDER])
@@ -579,3 +569,27 @@ class TaskTrainer:
             if not key.startswith(f"{metric_key_prefix}_"):
                 metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
         return metrics
+
+    def _getRunIdentifiers(self, task: Task, hp: TaskHyperparameters) -> Tuple[str,str]:
+        if hp.save_as:
+            model_name = hp.save_as
+        elif isinstance(hp.model_config_or_checkpoint, str):
+            model_name = getSubstringAfterLastSlash(hp.model_config_or_checkpoint)
+        else:  # We don't use the tokeniser name because it isn't directly related to the model.
+            raise RuntimeError("Configs do not allow deducing the name under which to save the model.")
+
+        return (
+            model_name,
+            model_name + ("" if not self._model_augmentation else ("+" + self._model_augmentation.name)) \
+                       + f"_{task.task_name}" \
+                       + f"_{datetimeDashed()}"
+        )
+
+    def _getRunPaths(self, global_identifier: str, hp: TaskHyperparameters) -> Tuple[Path,Path]:
+        if hp.store_in_hf_cache:
+            path_checkpoints = LamotoPaths.append(Path(HF_HUB_CACHE), global_identifier)  # If that first path doesn't exist yet, it will be created automatically.
+        else:
+            path_checkpoints = LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_identifier)
+
+        path_evals = LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_identifier)
+        return path_checkpoints, path_evals

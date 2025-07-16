@@ -27,7 +27,7 @@ class ClmHyperparameters(TaskHyperparameters[CausalLMHeadConfig]):
 SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     save_as=None,
     wandb_project=None,
-    traceless=False,
+    discard_artifacts=False,
     store_in_hf_cache=False,
 
     examples_per_effective_batch= 512,   # From the OpenAI GPT-2 paper.

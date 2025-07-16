@@ -10,7 +10,7 @@ from lamoto.training.training import LamotoPaths
 hp = getDefaultHyperparameters()
 hp.seed = 0
 hp.store_in_hf_cache = False
-hp.traceless = True
+hp.discard_artifacts = True
 
 
 def setModel(id: int=1):

@@ -13,6 +13,9 @@ import numpy.random as npr
 
 from tktkt.util.printing import dprint, pluralise, ordinal
 from tktkt.util.iterables import keepFirst, take
+from tktkt.util.dicts import saveToJson
+
+from fiject import MultiHistogram
 
 from ..tasks._core import Task, RankingMetricSpec, ModelAugmentation
 from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch, getDefaultHyperparameters
@@ -154,40 +157,44 @@ class TaskTuner:
         )
 
     def tune(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters):
+        # Don't alter what is given to you.
         hp   = hp.copy()
         meta = meta.copy()
 
-        # Sanity checks and imputations
+        # Sanity checks
         assert meta.n_grid_samples >= 1, "At least one hyperparameter sample must be taken."
         assert hp.init_weights and isinstance(hp.model_config_or_checkpoint, (str, Path)), "Can only tune starting from a pre-trained checkpoint."
 
-        # Find best hp changes
-        original_stopping_condition = hp.hard_stopping_condition
-        original_traceless          = hp.traceless
-        best_sample = self._phase1(task, hp, meta)
+        # Find best hp changes and apply them.
+        folder = self._makeResultsFolder(task, hp)
+        return self._phase2(task, hp, meta, self._phase1(task, hp, meta, folder), folder)
 
-        # Apply best hp changes
-        hp.hard_stopping_condition = original_stopping_condition  # FIXME: We override this in phase 2 regardless... Maybe allow both custom stopping condition and automatic stopping condition?
-        hp.traceless               = original_traceless
-        return self._phase2(task, hp, meta, best_sample)
-
-    def _phase1(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters) -> HyperparameterGrid.Sample:
+    def _phase1(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, results_folder: Path) -> HyperparameterGrid.Sample:
         """
         Try to find the optimal set of hyperparameters from n grid samples.
         """
+        # Input preservation
+        original_stopping_condition = hp.hard_stopping_condition
+        original_da                 = hp.da
+        original_dr                 = hp.dr
+        saveToJson(asdict(meta), results_folder / "tuning-config.json")
+
         # Hyperparameter setup
-        hp.traceless = True
-        hp.track_best_checkpoint = True
+        hp.discard_artifacts           = True
+        hp.discard_results             = True
+        hp.track_best_checkpoint       = True
         hp.rank_checkpoints_using_loss = True  # Within one HP sample, you use loss to find the best weights. Across samples, you select based on the ranking metric.
-        hp.hard_stopping_condition = AfterNExamples(meta.max_examples_phase_1)  # Independent of batch size.
+        rank_samples_by                = meta.rank_by or task.metric_config.to_rank  # If no ranking metric is given, we use the task's default.
+        hp.examples_per_evaluation     = None  # Inference should be fast enough to use the full eval set.
+        hp.hard_stopping_condition           = AfterNExamples(meta.max_examples_phase_1)  # Independent of batch size.
         hp.eval_vs_save_intervals.evaluation = EveryNExamplesOrOncePerEpoch(meta.max_examples_phase_1 // meta.minmax_evals_phase_1)
-        hp.examples_per_evaluation = None  # Inference should be fast enough to process anything in GLUE quickly enough.
-        rank_samples_by = meta.rank_by or task.metric_config.to_rank  # If no ranking metric is given, we use the task's default.
 
         # Grid search
         ranking_metric_name = "eval_" + rank_samples_by.fullName()
         best_ranking_value = -float("inf") if rank_samples_by.higher_is_better else float("inf")
-        best_sample = None
+        best_sample: HyperparameterGrid.Sample = None
+        results_across_all_runs = MultiHistogram("dummy")
+        # if results_across_all_runs.needs_computation:  # TODO: Really, if we could hash everything that determines an experiment (task, tuning grid, metahyperparameters, rest of the hyperparameters including PretrainedConfig and ArchIt base class) you could use Fiject's caching functionality to skip phase 1 of tuning entirely if it has been done already.
 
         samples_so_far = set()
         cached_hp = hp.copy()  # Save these defaults for the second grid's loop. Otherwise, if it the second grid has a None where the first did not, the last HP value of the first grid will be used rather than the given default.
@@ -215,6 +222,8 @@ class TaskTuner:
                 log(f"Finished short tuning for {ordinal(len(samples_so_far))} hyperparameter set:", grid_sample)
                 print("Results:")
                 dprint(results, indent=1)
+                for key, value in sorted(results.items()):
+                    results_across_all_runs.add(key, value)
 
                 # Ranking
                 if ranking_metric_name not in results:
@@ -227,13 +236,19 @@ class TaskTuner:
                         best_sample = grid_sample
                 print("=" * 50)
 
+        saveToJson(results_across_all_runs.checkpoint(), results_folder / "metrics-tuning-phase1.json")
+
         if best_sample is None:
             raise RuntimeError(f"No hyperparameter sets resulted in the ranking metric '{ranking_metric_name}'.")
-
         log(f"Best hyperparameters out of {pluralise(meta.n_grid_samples, 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
+        saveToJson(asdict(best_sample), results_folder / "best-sample.json")
+
+        hp.hard_stopping_condition = original_stopping_condition  # FIXME: We override this in phase 2 regardless... Maybe allow both custom stopping condition and automatic stopping condition?
+        hp.discard_artifacts       = original_da
+        hp.discard_results         = original_dr
         return best_sample
 
-    def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: HyperparameterGrid.Sample) -> Dict[str,float]:
+    def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: HyperparameterGrid.Sample, results_folder: Path) -> Dict[str,float]:
         """
         Use the best hyperparameters you found and run until you can't.
         """
@@ -246,17 +261,18 @@ class TaskTuner:
 
         best_sample.modifyHyperparameters(hp)
         log("Starting long tuning for best hyperparameters:", best_sample)
-        identifier, results = self._trainer.train(task, hp)
+        last_run_identifier, results = self._trainer.train(task, hp)
         log("Finished long tuning for best hyperparameters:", best_sample)
         print("Results:")
         dprint(results, indent=1)
 
-        # Save meta-hyperparameters so there is no confusion about how finetuning was done later on.
-        #   TODO: Ideally, these are also added to the W&B log, but that would essentially mean giving an arbitrary dictionary to the Trainer
-        #         (perhaps in a method?) that is then .log()ed after wandb.init and before wandb.finish.
-        with open(LamotoPaths.append(LamotoPaths.pathToEvaluations(), identifier) / "tuning-config.json", "w", encoding="utf-8") as handle:
-            json.dump(asdict(meta), handle)
+        saveToJson({"checkpoints": last_run_identifier} | results, results_folder / "metrics-tuning-phase2.json")
         return results
+
+    def _makeResultsFolder(self, task: Task, hp: TaskHyperparameters) -> Path:
+        _, global_identifier = self._trainer._getRunIdentifiers(task, hp)
+        _, eval_path         = self._trainer._getRunPaths(global_identifier, hp)
+        return eval_path
 
 
 def sampleGridWithoutReplacement(rng: npr.Generator, n_samples: Optional[int], *domains: List[float]) -> Iterable[Tuple[float, ...]]:

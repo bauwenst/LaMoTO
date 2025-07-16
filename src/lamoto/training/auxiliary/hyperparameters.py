@@ -190,7 +190,8 @@ class TaskHyperparameters(Generic[HC]):
 
     # Side-effects
     wandb_project: Optional[str]
-    traceless: bool  # Whether to discard any model and any graph of intermediate results and only the evaluation results, or to keep graphs and the usual two checkpoints.
+    discard_artifacts: bool  # If true, any model and any graph of intermediate results will be removed after training. Does not apply to backups.
+    discard_results: bool    # If true, the eval/test results will not be stored on disk, only returned as a Python dictionary after training.
     store_in_hf_cache: bool  # Whether to store model checkpoints in the HF_HOME cache folder, or just the CWD.
 
     # Sizes
@@ -298,7 +299,8 @@ from archit.instantiation.basemodels import RobertaBaseModel
 SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
     save_as=None,
     wandb_project=None,
-    traceless=False,
+    discard_artifacts=False,
+    discard_results=False,
     store_in_hf_cache=False,
 
     examples_per_effective_batch=32,

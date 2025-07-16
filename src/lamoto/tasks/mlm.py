@@ -25,7 +25,7 @@ class MlmHyperparameters(TaskHyperparameters[MaskedLMHeadConfig]):
 SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa's hyperparameters.
     save_as=None,
     wandb_project=None,
-    traceless=False,
+    discard_artifacts=False,
     store_in_hf_cache=False,
 
     examples_per_effective_batch=8192,
