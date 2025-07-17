@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "transformers >= 4.45.1",  # Note: training is unstable between >4.45.2 and at least 4.48.0.
-    "datasets >= 2.18.0",
+    "datasets == 3.6.0",  # Datasets 4 no longer supports CoNLL-2003. https://github.com/huggingface/datasets/issues/7675#issuecomment-3053565137,
     "evaluate >= 0.4.1",
     "pyfiglet >= 1.0.2",
     "wandb",

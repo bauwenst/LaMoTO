@@ -175,8 +175,8 @@ class TaskTuner:
         """
         # Input preservation
         original_stopping_condition = hp.hard_stopping_condition
-        original_da                 = hp.da
-        original_dr                 = hp.dr
+        original_da                 = hp.discard_artifacts
+        original_dr                 = hp.discard_results
         saveToJson(asdict(meta), results_folder / "tuning-config.json")
 
         # Hyperparameter setup
@@ -209,7 +209,7 @@ class TaskTuner:
                 if self._sampling_domain is None:
                     continue
                 hp = cached_hp
-                samples    = self._sampling_domain.sample(sampling_seed=hp.seed + meta.meta_seed, n_samples=meta.n_grid_samples, defaults=hp, excluded=samples_so_far)
+                samples    = self._sampling_domain.sample(sampling_seed=hp.seed + meta.meta_seed, n_samples=meta.n_grid_samples, defaults=hp, excluded=samples_so_far)  # TODO: This makes reporting slightly more difficult since you're tuning across more samples than meta.n_grid_samples... idk
                 n_possible = self._sampling_domain.domainSize()
                 n_target   = meta.n_grid_samples
 
