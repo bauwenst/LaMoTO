@@ -112,18 +112,22 @@ def tst_mbr():
 
 
 def tst_squadv1():
+    hp.hard_stopping_condition = Never()
     hp.archit_head_config = ExtractiveQAHeadConfig()
     task = SQuADv1()
     task.train(hp)
 
 
 def tst_squadv2():
+    hp.hard_stopping_condition = Never()
     hp.archit_head_config = ExtractiveAQAHeadConfig(ua_loss_weight=1.0)
     task = SQuADv2()
     task.train(hp)
 
 
 def tst_wic():
+    hp.hard_stopping_condition = Never()
+    hp.evals_of_patience  = 10
     hp.archit_head_config = SequenceClassificationHeadConfig()
     task = WiC()
     task.train(hp)

@@ -26,6 +26,7 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     save_as=None,
     wandb_project=None,
     discard_artifacts=False,
+    discard_results=False,
     store_in_hf_cache=False,
 
     examples_per_effective_batch=8192,

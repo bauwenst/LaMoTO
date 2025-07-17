@@ -142,7 +142,7 @@ class TaskTuner:
         ###
         model_augmentation: Optional[ModelAugmentation]=None, custom_callbacks: List[TrainerCallback]=None
     ):
-        assert sampling_grid is not None or guaranteed_grid is not None
+        assert (sampling_grid is not None and sampling_grid.domainSize() > 0) or (guaranteed_grid is not None and guaranteed_grid.domainSize() > 0)
 
         self._guaranteed      = guaranteed_grid
         self._sampling_domain = sampling_grid
@@ -162,7 +162,7 @@ class TaskTuner:
         meta = meta.copy()
 
         # Sanity checks
-        assert meta.n_grid_samples >= 1, "At least one hyperparameter sample must be taken."
+        assert self._guaranteed or meta.n_grid_samples >= 1, "At least one hyperparameter sample must be taken."
         assert hp.init_weights and isinstance(hp.model_config_or_checkpoint, (str, Path)), "Can only tune starting from a pre-trained checkpoint."
 
         # Find best hp changes and apply them.
@@ -240,7 +240,7 @@ class TaskTuner:
 
         if best_sample is None:
             raise RuntimeError(f"No hyperparameter sets resulted in the ranking metric '{ranking_metric_name}'.")
-        log(f"Best hyperparameters out of {pluralise(meta.n_grid_samples, 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
+        log(f"Best hyperparameters out of {pluralise(len(samples_so_far), 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
         saveToJson(asdict(best_sample), results_folder / "best-sample.json")
 
         hp.hard_stopping_condition = original_stopping_condition  # FIXME: We override this in phase 2 regardless... Maybe allow both custom stopping condition and automatic stopping condition?
