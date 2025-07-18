@@ -271,8 +271,8 @@ class TaskTuner:
 
     def _makeResultsFolder(self, task: Task, hp: TaskHyperparameters) -> Path:
         _, global_identifier = self._trainer._getRunIdentifiers(task, hp)
-        _, eval_path         = self._trainer._getRunPaths(global_identifier, hp)
-        return eval_path
+        path = self._trainer._getEvalPath(global_identifier, "_tuning")
+        return path
 
 
 def sampleGridWithoutReplacement(rng: npr.Generator, n_samples: Optional[int], *domains: List[float]) -> Iterable[Tuple[float, ...]]:

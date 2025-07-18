@@ -144,7 +144,7 @@ class TaskTrainer:
         task._setModelConfig(model_config)
 
         model_identifier, global_model_identifier = self._getRunIdentifiers(task, hyperparameters)
-        folder_of_this_models_checkpoints, folder_of_this_models_evaluations = self._getRunPaths(global_model_identifier, hyperparameters)
+        folder_of_this_models_checkpoints = self._getCheckpointPath(global_model_identifier, hyperparameters)
 
         # Set up tokeniser
         log("Loading tokeniser...")
@@ -533,7 +533,7 @@ class TaskTrainer:
 
             # Save results
             if not hyperparameters.discard_results:
-                results_path = folder_of_this_models_evaluations / f"metrics-{global_step}.json"
+                results_path = self._getEvalPath(global_model_identifier) / f"metrics-{global_step}.json"
                 log(f"Saving results to {results_path.as_posix()} ...")
                 saveToJson(all_results, results_path, do_indent=True)
 
@@ -585,11 +585,11 @@ class TaskTrainer:
                        + f"_{datetimeDashed()}"
         )
 
-    def _getRunPaths(self, global_identifier: str, hp: TaskHyperparameters) -> Tuple[Path,Path]:
+    def _getCheckpointPath(self, global_identifier: str, hp: TaskHyperparameters) -> Path:
         if hp.store_in_hf_cache:
-            path_checkpoints = LamotoPaths.append(Path(HF_HUB_CACHE), global_identifier)  # If that first path doesn't exist yet, it will be created automatically.
+            return LamotoPaths.append(Path(HF_HUB_CACHE), global_identifier)  # If that first path doesn't exist yet, it will be created automatically.
         else:
-            path_checkpoints = LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_identifier)
+            return LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_identifier)
 
-        path_evals = LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_identifier)
-        return path_checkpoints, path_evals
+    def _getEvalPath(self, global_identifier: str, identifier_suffix: str=""):
+        return LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_identifier + identifier_suffix)
