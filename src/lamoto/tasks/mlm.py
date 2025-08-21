@@ -156,3 +156,56 @@ class MLM_SlimPajama(MLM):
     def _loadIterableDataset(self) -> IterableDatasetDict:
         dataset: IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True, trust_remote_code=True)
         return dataset.remove_columns(["meta"])
+
+
+###################################
+### FIXING HUGGINGFACE DATASETS ###
+###################################
+# See https://github.com/huggingface/datasets/issues/7440 for what the issue is.
+# Until recently, nothing could be done about this, but since then the offending code has been put into a class method,
+# which can be monkey-patched externally.
+from typing import Union, Optional, Generator, Type
+from datasets.utils.file_utils import DownloadConfig, xisfile, xisdir, xbasename, xjoin, xwalk, FilesIterable, logger
+import time
+
+
+def _iter_from_urlpaths(cls: Type[FilesIterable], urlpaths: Union[str, list[str]], download_config: Optional[DownloadConfig]=None) -> Generator[str, None, None]:
+    MAX_TRIES = 6
+    SKIP_EXCEPTION = False
+
+    if not isinstance(urlpaths, list):
+        urlpaths = [urlpaths]
+
+    for urlpath in urlpaths:
+        n_tries = 0
+        while True:
+            if xisfile(urlpath, download_config=download_config):
+                yield urlpath
+                break
+            elif xisdir(urlpath, download_config=download_config):
+                for dirpath, dirnames, filenames in xwalk(urlpath, download_config=download_config):
+                    # in-place modification to prune the search
+                    dirnames[:] = sorted([dirname for dirname in dirnames if not dirname.startswith((".", "__"))])
+                    if xbasename(dirpath).startswith((".", "__")):
+                        # skipping hidden directories
+                        continue
+                    for filename in sorted(filenames):
+                        if filename.startswith((".", "__")):
+                            # skipping hidden files
+                            continue
+                        yield xjoin(dirpath, filename)
+                break
+
+            n_tries += 1
+            if n_tries >= MAX_TRIES:
+                if SKIP_EXCEPTION:
+                    break
+                else:
+                    raise FileNotFoundError(urlpath)
+            else:
+                seconds = 1.875 * 2**(n_tries-1)
+                logger.info(f"Supposedly could not find URL path {urlpath}. Retrying in {seconds} seconds.")
+                time.sleep(seconds)
+
+# Monkey-patching a class method means that old and new instances are affected.
+FilesIterable._iter_from_urlpaths = _iter_from_urlpaths
