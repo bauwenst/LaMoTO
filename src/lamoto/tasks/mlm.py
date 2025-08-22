@@ -208,4 +208,4 @@ def _iter_from_urlpaths(cls: Type[FilesIterable], urlpaths: Union[str, list[str]
                 time.sleep(seconds)
 
 # Monkey-patching a class method means that old and new instances are affected.
-FilesIterable._iter_from_urlpaths = _iter_from_urlpaths
+FilesIterable._iter_from_urlpaths = classmethod(_iter_from_urlpaths)  # You need this wrapper because the replacement method behaves as a static method otherwise, where the first argument you give it will be assigned to 'cls'.
