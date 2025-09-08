@@ -165,7 +165,7 @@ class MLM_SlimPajama(MLM):
 # Until recently, nothing could be done about this, but since then the offending code has been put into a class method,
 # which can be monkey-patched externally.
 from typing import Union, Optional, Generator, Type
-from datasets.utils.file_utils import DownloadConfig, xisfile, xisdir, xbasename, xjoin, xwalk, FilesIterable, logger
+from datasets.utils.file_utils import FilesIterable, DownloadConfig, xisfile, xisdir, xbasename, xjoin, xwalk, logger
 import time
 
 
@@ -179,7 +179,7 @@ def _iter_from_urlpaths(cls: Type[FilesIterable], urlpaths: Union[str, list[str]
     for urlpath in urlpaths:
         n_tries = 0
         while True:
-            if xisfile(urlpath, download_config=download_config):
+            if xisfile(urlpath, download_config=download_config):  # This function just flat-out lies sometimes lmao
                 yield urlpath
                 break
             elif xisdir(urlpath, download_config=download_config):
@@ -204,7 +204,7 @@ def _iter_from_urlpaths(cls: Type[FilesIterable], urlpaths: Union[str, list[str]
                     raise FileNotFoundError(urlpath)
             else:
                 seconds = 1.875 * 2**(n_tries-1)
-                logger.info(f"Supposedly could not find URL path {urlpath}. Retrying in {seconds} seconds.")
+                logger.warning(f"Supposedly could not find URL path {urlpath} (this was try {n_tries}/{MAX_TRIES}). Retrying in {seconds} seconds.")
                 time.sleep(seconds)
 
 # Monkey-patching a class method means that old and new instances are affected.

@@ -5,7 +5,6 @@ from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Tuple, Iterable, Union, Set
 from pathlib import Path
 
-import json
 import itertools
 from copy import deepcopy
 from math import prod
@@ -13,7 +12,7 @@ import numpy.random as npr
 
 from tktkt.util.printing import dprint, pluralise, ordinal
 from tktkt.util.iterables import keepFirst, take
-from tktkt.util.dicts import saveToJson
+from tktkt.util.dicts import dictToJson
 
 from fiject import MultiHistogram
 
@@ -177,7 +176,7 @@ class TaskTuner:
         original_stopping_condition = hp.hard_stopping_condition
         original_da                 = hp.discard_artifacts
         original_dr                 = hp.discard_results
-        saveToJson(asdict(meta), results_folder / "tuning-config.json")
+        dictToJson(asdict(meta), results_folder / "tuning-config.json")
 
         # Hyperparameter setup
         hp.discard_artifacts           = True
@@ -236,12 +235,12 @@ class TaskTuner:
                         best_sample = grid_sample
                 print("=" * 50)
 
-        saveToJson(results_across_all_runs.checkpoint(), results_folder / "metrics-tuning-phase1.json")
+        dictToJson(results_across_all_runs.checkpoint(), results_folder / "metrics-tuning-phase1.json")
 
         if best_sample is None:
             raise RuntimeError(f"No hyperparameter sets resulted in the ranking metric '{ranking_metric_name}'.")
         log(f"Best hyperparameters out of {pluralise(len(samples_so_far), 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
-        saveToJson(asdict(best_sample), results_folder / "best-sample.json")
+        dictToJson(asdict(best_sample), results_folder / "best-sample.json")
 
         hp.hard_stopping_condition = original_stopping_condition  # FIXME: We override this in phase 2 regardless... Maybe allow both custom stopping condition and automatic stopping condition?
         hp.discard_artifacts       = original_da
@@ -266,7 +265,7 @@ class TaskTuner:
         print("Results:")
         dprint(results, indent=1)
 
-        saveToJson({"checkpoints": last_run_identifier} | results, results_folder / "metrics-tuning-phase2.json")
+        dictToJson({"checkpoints": last_run_identifier} | results, results_folder / "metrics-tuning-phase2.json")
         return results
 
     def _makeResultsFolder(self, task: Task, hp: TaskHyperparameters) -> Path:

@@ -1,7 +1,6 @@
 from typing import Dict, Tuple, Any, List
 from pathlib import Path
 
-import json
 import time
 import torch
 import wandb
@@ -19,8 +18,8 @@ from tktkt.interfaces.huggingface import TktktToHuggingFace
 from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
 from tktkt.interfaces.factories import TokeniserFactory
 from tktkt.util.printing import intsep, pluralise, dprint
-from tktkt.util.timing import datetimeDashed
-from tktkt.util.dicts import saveToJson
+from tktkt.util.timing import datetimeDashed, Timer
+from tktkt.util.dicts import dictToJson
 from tktkt.paths import PathManager
 
 from ..tasks._core import Task, RankingMetricSpec
@@ -61,6 +60,8 @@ class TaskTrainer:
         Encapsulation of everything you need to do to get a (modified) `transformers.Trainer` running.
         """
         printLamotoWelcome()
+        timer = Timer()
+        timer.start(echo=True)
         log("Running task:", task.task_name)
         transformers.set_seed(seed=hyperparameters.seed)
         if not DO_WARNINGS_AND_PROGRESSBARS:
@@ -535,7 +536,7 @@ class TaskTrainer:
             if not hyperparameters.discard_results:
                 results_path = self._getEvalPath(global_model_identifier) / f"metrics-{global_step}.json"
                 log(f"Saving results to {results_path.as_posix()} ...")
-                saveToJson(all_results, results_path, do_indent=True)
+                dictToJson(all_results, results_path, do_indent=True)
 
             # Delete all other artifacts if requested. (We have at most two checkpoints. Backups are not checkpoints, and are never deleted.)
             if hyperparameters.discard_artifacts:
@@ -543,10 +544,12 @@ class TaskTrainer:
                 trainer.deleteCheckpointsInOrder(amount=2)
                 trainer.tryDeleteFolder(unless_contains_subfolders=[_SaveModelMixin.BACKUPS_FOLDER])
 
+            timer.soFar(echo=True)
             return global_model_identifier, all_results
 
         except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
             log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.")
+            timer.soFar(echo=True)
             try:
                 trainer._save_checkpoint(model, trial=None)
                 trainer.callback_handler.on_save(trainer.args, trainer.state, trainer.control)
