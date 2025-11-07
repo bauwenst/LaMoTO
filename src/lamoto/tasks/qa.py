@@ -10,7 +10,7 @@ import warnings
 from transformers.data.data_collator import DataCollatorMixin
 from transformers import DataCollator, EvalPrediction, PreTrainedTokenizerBase
 
-from tktkt.preparation.splitters import Pretokeniser, SplitNextToWhitespace, PunctuationPretokeniser, HyphenMode, PretokeniserSequence
+from tktkt.preparation.splitters import Pretokeniser, IntoWhitespacePrefixed, IsolatePunctuation, HyphenMode, PretokeniserSequence
 from archit.instantiation.tasks import ForExtractiveAQA, ForExtractiveQA
 from archit.instantiation.heads import ExtractiveQAHeadConfig, ExtractiveAQAHeadConfig
 
@@ -22,8 +22,8 @@ from ..measuring import AQA
 
 
 DefaultSquadPretokeniser = PretokeniserSequence([
-    SplitNextToWhitespace(before_not_after=True),
-    PunctuationPretokeniser(HyphenMode.EXCLUDED, protect_apostrophes_without_spaces=True)
+    IntoWhitespacePrefixed(prefix_not_suffix=True),
+    IsolatePunctuation(HyphenMode.EXCLUDED, protect_apostrophes_without_spaces=True)
 ])
 
 
