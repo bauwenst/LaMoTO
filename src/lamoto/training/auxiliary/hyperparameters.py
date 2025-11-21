@@ -1,4 +1,5 @@
 from typing import Optional, Union, Generic, Type
+from typing_extensions import Self
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -232,7 +233,7 @@ class TaskHyperparameters(Generic[HC]):
     tokeniser: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithFiniteTypeDomain, TokeniserFactory[TokeniserWithFiniteTypeDomain]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
     add_special_tokens: bool
 
-    def copy(self) -> "TaskHyperparameters[HC]":
+    def copy(self) -> Self:
         return deepcopy(self)
 
     def withHeadConfig(self, config: HC):

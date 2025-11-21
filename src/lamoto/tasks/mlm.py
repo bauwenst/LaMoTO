@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 from datasets import IterableDatasetDict, IterableDataset
+from langcodes import Language
 
 import torch
 import datasets
@@ -9,6 +10,8 @@ from transformers import AutoModelForMaskedLM, DataCollatorForLanguageModeling
 from archit.instantiation.basemodels import RobertaBaseModel
 from archit.instantiation.heads import MaskedLMHeadConfig
 from archit.instantiation.tasks import ForMaskedLM
+
+from tktkt.util.types import Languish, L
 
 from ._core import *
 from ..measuring.pppl import PPPL_Parameters
@@ -156,6 +159,20 @@ class MLM_SlimPajama(MLM):
     def _loadIterableDataset(self) -> IterableDatasetDict:
         dataset: IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True, trust_remote_code=True)
         return dataset.remove_columns(["meta"])
+
+
+class MLM_Fineweb(MLM):
+    def __init__(self, #language: Languish,
+                 packing: bool=False, drop_train_examples: int=0, use_pppl: bool=False):
+        super().__init__(packing=packing, drop_train_examples=drop_train_examples, use_pppl=use_pppl)
+        # self._language = L(language)
+
+    def _loadIterableDataset(self) -> IterableDatasetDict:
+        # if self._language == L("English"):
+        dataset: IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb", "default", streaming=True, trust_remote_code=True)
+        # else:
+        #     dataset: IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb-2", ..., streaming=True, trust_remote_code=True)
+        return dataset.remove_columns(["id", "dump", "url", "date", "file_path", "language", "language_score", "token_count"])
 
 
 ###################################
