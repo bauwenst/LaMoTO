@@ -34,10 +34,10 @@ import itertools
 
 from archit.instantiation.abstracts import BaseModel
 from tktkt.interfaces.factories import TokeniserFactory
-from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
+from tktkt.interfaces.tokeniser import TokeniserWithVocabulary
 from tktkt.util.strings import indent
 from tktkt.util.iterables import filterOptionals
-SerialisedTokeniser = Union[str,TokeniserFactory[TokeniserWithFiniteTypeDomain]]
+SerialisedTokeniser = Union[str,TokeniserFactory[TokeniserWithVocabulary]]
 
 from .auxiliary.hyperparameters import TaskHyperparameters
 from .training import TaskTrainer, Task

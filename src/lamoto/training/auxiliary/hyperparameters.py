@@ -11,7 +11,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedCon
 from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
 
-from tktkt.interfaces.tokeniser import TokeniserWithFiniteTypeDomain
+from tktkt.interfaces.tokeniser import TokeniserWithVocabulary
 from tktkt.interfaces.factories import TokeniserFactory
 from archit.instantiation.abstracts import PC, HC, BaseModel
 
@@ -230,7 +230,7 @@ class TaskHyperparameters(Generic[HC]):
     adamw_decay_rate: float  # Not the same as L2 regularisation. That's the whole point of the AdamW paper!
 
     # Tokeniser
-    tokeniser: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithFiniteTypeDomain, TokeniserFactory[TokeniserWithFiniteTypeDomain]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
+    tokeniser: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithVocabulary, TokeniserFactory[TokeniserWithVocabulary]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
     add_special_tokens: bool
 
     def copy(self) -> Self:

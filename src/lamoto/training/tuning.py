@@ -11,7 +11,7 @@ from math import prod
 import numpy.random as npr
 
 from tktkt.util.printing import dprint, pluralise, ordinal
-from tktkt.util.iterables import keepFirst, take
+from tktkt.util.iterables import deduplicate, take
 from tktkt.util.dicts import dictToJson
 
 from fiject import MultiHistogram
@@ -290,4 +290,4 @@ def sampleGridWithoutReplacement(rng: npr.Generator, n_samples: Optional[int], *
         while True:
             yield tuple(denumpyify(rng.choice(domain)) for domain in domains)
 
-    yield from take(n_samples, keepFirst(generateSamples()))
+    yield from take(n_samples, deduplicate(generateSamples()))
