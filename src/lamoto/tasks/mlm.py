@@ -34,7 +34,7 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
 
     examples_per_effective_batch=8192,
     examples_per_device_batch=64,  # Should definitely fit on an A100.
-    effective_batches_warmup=0.05,
+    effective_batches_warmup=1024,  # This greatly depends on how much time you have for your runs... RoBERTa had 1 million descents of which 10k (1%) warmup, but they had 1024 V100s.
     hard_stopping_condition=AfterNDescents(500_000),
     examples_per_evaluation=2 ** 14,  # C4 has a 365k validation split, so 16k isn't that bad. Two times the amount of data processed for one descent.
 

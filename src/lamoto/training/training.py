@@ -15,7 +15,7 @@ from archit.instantiation.abstracts import CombinedConfig
 from archit.util import torchPrint, parameterCountBaseVsHead
 from fiject.applications.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
-from tktkt.interfaces.tokeniser import TokeniserWithVocabulary
+from tktkt.interfaces.tokenisers import TokeniserWithVocabulary
 from tktkt.interfaces.factories import TokeniserFactory
 from tktkt.util.printing import intsep, pluralise, dprint
 from tktkt.util.timing import datetimeDashed, Timer

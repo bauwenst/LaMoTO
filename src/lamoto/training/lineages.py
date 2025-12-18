@@ -34,7 +34,7 @@ import itertools
 
 from archit.instantiation.abstracts import BaseModel
 from tktkt.interfaces.factories import TokeniserFactory
-from tktkt.interfaces.tokeniser import TokeniserWithVocabulary
+from tktkt.interfaces.tokenisers import TokeniserWithVocabulary
 from tktkt.util.strings import indent
 from tktkt.util.iterables import filterOptionals
 SerialisedTokeniser = Union[str,TokeniserFactory[TokeniserWithVocabulary]]

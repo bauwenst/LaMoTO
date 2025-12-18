@@ -2,7 +2,7 @@ from typing import Set, TypeVar, Optional
 from abc import abstractmethod, ABC
 
 from datasets.iterable_dataset import IterableDataset, Dataset
-from tktkt.interfaces.preparation import TextMapper
+from tktkt.interfaces.preprocessors import TextMapper
 from tktkt.util.printing import roundHuman
 from tktkt.preparation.perturbers import ConstantSampler, ParallelPerturber, Substitute, Insert, Pop
 
