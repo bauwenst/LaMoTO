@@ -228,6 +228,7 @@ class TaskHyperparameters(Generic[HC]):
     # - Gradients:
     learning_rate: float
     adamw_decay_rate: float  # Not the same as L2 regularisation. That's the whole point of the AdamW paper!
+    gradient_clipping_norm: Optional[float]  # The gradient norm past which the magnitude of the gradient vector is clipped.
 
     # Tokeniser
     tokeniser: Optional[Union[PreTrainedTokenizerBase, str, TokeniserWithVocabulary, TokeniserFactory[TokeniserWithVocabulary]]]  # If not given, will use the HuggingFace tokeniser of the model checkpoint (which can't be a config then).
@@ -328,6 +329,7 @@ SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
 
     learning_rate=2e-5,
     adamw_decay_rate=0.01,
+    gradient_clipping_norm=None,
 
     tokeniser=None,
     add_special_tokens=True

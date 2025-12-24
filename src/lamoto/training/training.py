@@ -321,6 +321,7 @@ class TaskTrainer:
 
             # lr_scheduler_type=SchedulerType.CONSTANT_WITH_WARMUP,
             # warmup_steps=n_descents_of_warmup,
+            max_grad_norm=hyperparameters.gradient_clipping_norm,
 
             # Batches
             per_device_train_batch_size=n_examples_per_pass_per_device,
