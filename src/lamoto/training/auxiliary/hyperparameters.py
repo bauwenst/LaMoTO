@@ -11,8 +11,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedCon
 from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
 
-from tktkt.interfaces.tokenisers import TokeniserWithVocabulary
-from tktkt.interfaces.factories import TokeniserFactory
+from tktkt.interfaces import TokeniserWithVocabulary, TokeniserFactory
 from archit.instantiation.abstracts import PC, HC, BaseModel
 
 from ...util.datasets import getDatasetSize, totalBatches

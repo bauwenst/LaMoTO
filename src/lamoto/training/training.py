@@ -15,8 +15,7 @@ from archit.instantiation.abstracts import CombinedConfig
 from archit.util import torchPrint, parameterCountBaseVsHead
 from fiject.applications.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
-from tktkt.interfaces.tokenisers import TokeniserWithVocabulary
-from tktkt.interfaces.factories import TokeniserFactory
+from tktkt.interfaces import TokeniserWithVocabulary, TokeniserFactory
 from tktkt.util.printing import intsep, pluralise, dprint
 from tktkt.util.timing import datetimeDashed, Timer
 from tktkt.util.dicts import dictToJson
@@ -94,6 +93,8 @@ class TaskTrainer:
 
         # Imputation of device batch size specifically
         n_devices = torch.cuda.device_count()
+        if n_devices == 0:
+            raise RuntimeError("No CUDA devices found on this machine.")
         if hyperparameters.examples_per_effective_batch % n_devices != 0:  # This is an unsolvable issue by setting a new device batch size.
             raise ValueError(f"Effective batch size ({hyperparameters.examples_per_effective_batch}) must be a multiple of the amount of devices ({n_devices}).")
 
