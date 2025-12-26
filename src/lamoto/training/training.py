@@ -135,14 +135,14 @@ class TaskTrainer:
         if isinstance(config_or_str, str):  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
             model_config = CombinedConfig.from_pretrained(config_or_str,
                                                           head_config=hyperparameters.archit_head_config,
-                                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
+                                                          base_model_config_class=hyperparameters.archit_basemodel_class.configClass())  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
         else:  # It's an object.
             assert isinstance(config_or_str, PretrainedConfig)
             if isinstance(config_or_str, CombinedConfig):
                 raise ValueError("When instantiating a new model from a config, it must only parameterise the base model. The head has its own config.")
             model_config = CombinedConfig(base_model_config=config_or_str,
                                           head_config=hyperparameters.archit_head_config,
-                                          base_model_config_class=hyperparameters.archit_basemodel_class.config_class)  # This call pretends to be CombinedConfig(**json).
+                                          base_model_config_class=hyperparameters.archit_basemodel_class.configClass())  # This call pretends to be CombinedConfig(**json).
         task._setModelConfig(model_config)
 
         model_identifier, global_model_identifier = self._getRunIdentifiers(task, hyperparameters)

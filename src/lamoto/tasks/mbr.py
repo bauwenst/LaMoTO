@@ -55,7 +55,7 @@ SUGGESTED_HYPERPARAMETERS_MBR.hard_stopping_condition = AfterNEpochs(100)
 #       methods on a separate class like a ForTaskFactory accompanying every ForTask, like below.
 #       Alternatively, CombinedConfig should actually be (base, head, loss) and give a config to buildLoss() which may have label weights.
 from archit.instantiation.configs import CombinedConfig, PretrainedConfig
-from archit.instantiation.abstracts import ModelWithHead
+from archit.instantiation.abstracts import BaseModel, ModelWithHead
 from archit.util import dataclass_from_dict
 from torch.nn.modules.loss import CrossEntropyLoss
 class ForSingleLabelTokenClassificationFactory:
@@ -83,13 +83,13 @@ class ForSingleLabelTokenClassificationFactory:
             self.buildLoss()
         )
 
-    def from_pretrained(self, checkpoint: str, base_model_class, head_config=None):
+    def from_pretrained(self, checkpoint: str, base_model_class: type[BaseModel], head_config=None):
         base_model_config, _ = PretrainedConfig.get_config_dict(checkpoint)
         if "base_model_config" in base_model_config:
-            head_config       = head_config or dataclass_from_dict(self.head_class.config_class, base_model_config["head_config"])
+            head_config       = head_config or dataclass_from_dict(self.headClass().configClass(), base_model_config["head_config"])
             base_model_config = base_model_config["base_model_config"]
 
-        base_model_config = base_model_class.config_class.from_dict(base_model_config)
+        base_model_config = base_model_class.configClass().from_dict(base_model_config)
         return super(ModelWithHead, ForSingleLabelTokenClassification).from_pretrained(  # This super() call means "Get the super class of ModelWithHead, and whenever you call class methods on the resulting class, use the ForSingleLabelTokenClassification class" (h/t ChatGPT).
             checkpoint,
             base_model_class(base_model_config),
@@ -97,8 +97,8 @@ class ForSingleLabelTokenClassificationFactory:
             self.buildLoss(),
 
             head_config=head_config,
-            base_model_config_class=base_model_class.config_class,
-            head_config_class=self.head_class.config_class
+            base_model_config_class=base_model_class.configClass(),
+            head_config_class=self.headClass().configClass()
         )
 
     # Mimic all the other classmethods as instance methods.
@@ -110,13 +110,10 @@ class ForSingleLabelTokenClassificationFactory:
     def __name__(self):
         return ForSingleLabelTokenClassification.__name__
 
-    @property
-    def head_class(self):
-        return ForSingleLabelTokenClassification.head_class
+    def headClass(self):
+        return ForSingleLabelTokenClassification.headClass()
 
-    @property
-    def config_class(self):
-        return ForSingleLabelTokenClassification.config_class
+    config_class = ForSingleLabelTokenClassification.config_class
 
     def buildHead(self, base_model_config, head_config):
         return ForSingleLabelTokenClassification.buildHead(base_model_config, head_config)
@@ -134,7 +131,7 @@ class MBR(Task[TokenClassificationHeadConfig]):
 
     def __init__(self, morphologies: ModestDataset[WordSegmentation]=English_Celex(), dataset_out_of_context: bool=True, weighted_labels: bool=True):
         super().__init__(
-            task_name="MBR" + "-" + morphologies._name + "-" + morphologies._language.to_tag(),
+            task_name="MBR" + "-" + morphologies.identifier(),
             text_fields=["text"],
             label_field=ListOfField(ClassLabel("labels")),
             metric_config=MetricSetup(

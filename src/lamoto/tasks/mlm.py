@@ -163,6 +163,10 @@ class MLM_SlimPajama(MLM):
 
 
 class MLM_Fineweb(MLM):
+    # FIXME: Fineweb-2 languages only have a test set, not a validation set.
+
+    _ENGLISH_VALIDATION_SIZE = 100_00
+
     def __init__(self, #language: Languish,
                  packing: bool=False, drop_train_examples: int=0, use_pppl: bool=False):
         super().__init__(packing=packing, drop_train_examples=drop_train_examples, use_pppl=use_pppl)
@@ -171,6 +175,9 @@ class MLM_Fineweb(MLM):
     def _loadIterableDataset(self) -> IterableDatasetDict:
         # if self._language == L("English"):
         dataset: IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb", "default", streaming=True, trust_remote_code=True)
+        full_iterable: IterableDataset = dataset["train"]
+        dataset["train"]      = full_iterable.skip(MLM_Fineweb._ENGLISH_VALIDATION_SIZE)
+        dataset["validation"] = full_iterable.take(MLM_Fineweb._ENGLISH_VALIDATION_SIZE)
         # else:
         #     dataset: IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb-2", ..., streaming=True, trust_remote_code=True)
         return dataset.remove_columns(["id", "dump", "url", "date", "file_path", "language", "language_score", "token_count"])
