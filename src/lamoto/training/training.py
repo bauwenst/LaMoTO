@@ -134,7 +134,7 @@ class TaskTrainer:
         config_or_str = hyperparameters.model_config_or_checkpoint
         if isinstance(config_or_str, str):  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
             model_config = CombinedConfig.from_pretrained(config_or_str,
-                                                          head_config=hyperparameters.archit_head_config,
+                                                          head_config=hyperparameters.archit_head_config,  # This overwrites what's in the checkpoint if it is a JSONified CombinedConfig. FWIW, task.archit_class.from_pretrained() ignores whatever is in the JSON if the given head config is not None.
                                                           base_model_config_class=hyperparameters.archit_basemodel_class.configClass())  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
         else:  # It's an object.
             assert isinstance(config_or_str, PretrainedConfig)
@@ -229,6 +229,8 @@ class TaskTrainer:
             else:
                 self._model_augmentation.augment(model, task.tokenizer)
         model.to("cuda")
+        log("Model sent to GPU.")
+        log("\tAttention implementation:", model.config._attn_implementation)
 
         # ...and verify that after all of this, the model, the config and the tokeniser all agree about the pad token.
         pad_tk = task.tokenizer.pad_token_id
@@ -480,6 +482,7 @@ class TaskTrainer:
         batch_size = hyperparameters.examples_per_effective_batch
         n_examples_training = tryExceptNone(lambda: getDatasetSize(datasetdict["train"], "train"))
         print("Batch size:", pluralise(batch_size, "example"))
+        print("\t", "Device batch size:", pluralise(n_examples_per_pass_per_device, "example"))
         print("Context length:", pluralise(task._getMaxInputLength(), "token"))
 
         print("Training set:")
@@ -488,7 +491,7 @@ class TaskTrainer:
             print("\t", pluralise(n_examples_training, "example"), "per epoch")
             print("\t", pluralise(batches_per_epoch, "batch", "es"), "per epoch")
             if n_gradient_descents:
-                print("\t", round(n_gradient_descents / batches_per_epoch, 1), "epochs")
+                print("\t", round(n_gradient_descents / batches_per_epoch, 3), "epochs")
                 print("\t", pluralise(n_gradient_descents, "batch", "es"), "in total")
         else:
             batches_per_epoch = 0

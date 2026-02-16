@@ -5,7 +5,7 @@ from ...util.datasets import BalancingStrategy, UpsampleToBiggest, rebalanceLabe
 
 
 class CoLA(ClassifySentenceGLUETask):
-    """Detection of erroneously formed sentences. Note that the actual dataset has a 70-30 positive-negative skew."""
+    """Detection of erroneously formed sentences. Note that the actual dataset has a 70-30 positive-negative skew (label imbalance)."""
     def __init__(self, balancing: BalancingStrategy=UpsampleToBiggest()):
         super().__init__("CoLA", rank_by=RankingMetricSpec("matthews_correlation", "matthews_correlation", True))
         self._balancing = balancing
