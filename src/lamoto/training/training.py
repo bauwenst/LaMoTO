@@ -230,7 +230,7 @@ class TaskTrainer:
                 self._model_augmentation.augment(model, task.tokenizer)
         model.to("cuda")
         log("Model sent to GPU.")
-        log("\tAttention implementation:", model.config._attn_implementation)
+        print("\tAttention implementation:", model.config._attn_implementation)
 
         # ...and verify that after all of this, the model, the config and the tokeniser all agree about the pad token.
         pad_tk = task.tokenizer.pad_token_id
@@ -331,7 +331,7 @@ class TaskTrainer:
             gradient_accumulation_steps=n_passes,
 
             # Style of computations
-            gradient_checkpointing=model.supports_gradient_checkpointing,  # Only if you have the VRAM though. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
+            gradient_checkpointing=hyperparameters.gradient_checkpointing_if_possible and model.supports_gradient_checkpointing,  # Lowers VRAM needed for remembering gradients, at the cost of time needed to recompute results. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
             bf16=do_bf16,
 
             # Evaluation
