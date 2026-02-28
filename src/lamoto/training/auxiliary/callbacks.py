@@ -1,4 +1,4 @@
-from typing import Set, Union
+from typing import Union
 from abc import abstractmethod, ABC
 from pathlib import Path
 from enum import Enum
@@ -10,6 +10,7 @@ from transformers import TrainerCallback, TrainingArguments, TrainerState, Train
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 
+@warnings.deprecated("Evaluation before the first training step is now supported in HuggingFace transformers without needing a callback.")
 class EvaluateBeforeTrainingCallback(TrainerCallback):
     """
     Triggers evaluation before the first training batch, so that you can benchmark all metrics before any finetuning
@@ -37,9 +38,12 @@ class EventType(Enum):
 class CombinedCallback(TrainerCallback, ABC):
     """
     Combined callback for evaluating, checkpointing and stopping.
+    It would be ridiculous to have a separate implementation of on_step_end for each field that could be changed as
+    a result of some kind of condition triggering. Clearly the condition should be implemented once, and which field is
+    changed should just be decided at construction.
     """
 
-    def __init__(self, events: Union[EventType, Set[EventType]]):
+    def __init__(self, events: Union[EventType, set[EventType]]):
         self.event_types = events if isinstance(events, set) else {events}
 
     @abstractmethod
@@ -80,7 +84,7 @@ class CallbackAtTimeInterval(CombinedCallback):
     Rather than saving/evaluating/stopping based on the amount of STEPS trained, do it based on the amount of TIME trained.
     """
 
-    def __init__(self, minutes: float, events: Union[EventType, Set[EventType]]):
+    def __init__(self, minutes: float, events: Union[EventType, set[EventType]]):
         super().__init__(events)
         self.seconds_between_events = minutes * 60
         self.last_event_was_at = 0
@@ -99,7 +103,7 @@ class CallbackAtLinearInterval(CombinedCallback):
     linear step size from TrainerArguments, it is taken from the constructor.
     """
 
-    def __init__(self, start: int, step: int, events: Union[EventType, Set[EventType]]):
+    def __init__(self, start: int, step: int, events: Union[EventType, set[EventType]]):
         super().__init__(events)
         self.step = step
         self.next_threshold = start
@@ -119,14 +123,17 @@ class CallbackAtExpInterval(CombinedCallback):
     """
     Produces triggers that are linearly spaced on a log axis. This is equivalent to using linearly spaced values as
     exponents for an exponential function. Examples:
-        Start 1, spacing 1:     1, 10^1, 10^2, 10^3, ...
-        Start 10, spacing 0.1: 10, 10^1.1, 10^1.2, 10^1.3, ...
+        Base 10, start 1, spacing 1:     1, 10^1, 10^2, 10^3, ...
+        Base 10, start 10, spacing 0.1: 10, 10^1.1, 10^1.2, 10^1.3, ...
     If you need a sequence that goes like 1, 2, 3, ..., 10, 20, 30, ... This is not the right class.
     """
 
-    def __init__(self, start: float, spacing: float, events: Union[EventType, Set[EventType]]):
+    def __init__(self, start: float, base: int, spacing: float, events: Union[EventType, set[EventType]]):
         super().__init__(events)
-        self.start = start
+        assert start >= 1
+        assert base > 1
+        self.start   = start
+        self.base    = base
         self.spacing = spacing
         self.i = 0
 
@@ -143,17 +150,17 @@ class CallbackAtExpInterval(CombinedCallback):
             return False
 
     def getNextThreshold(self) -> int:
-        return int(self.start * 10**(self.i * self.spacing))
+        return int(self.start * self.base**(self.i * self.spacing))
 
 
 class CallbackAtRatchetingInterval(CombinedCallback):
     """
     Starts at a given amount and ratchets up the step size after every N increases. For example:
         start 10, 9 steps: 10, 20, 30, ..., 100, 200, 300, ..., 1000, 2000, 3000, ...
-        start 20, 4 steps: 20, 40, 60, 80, 100, 200, 300, 400, 500, 1000, 1500, 2000, 2500, 5000, 7500, 1000, ...
+        start 20, 4 steps: 20, 40, 60, 80,  100, 200, 300, 400,  500, 1000, 1500, 2000,  2500, 5000, 7500, 10000, ...
     """
 
-    def __init__(self, start: int, steps_between_ratchets: int, events: Union[EventType, Set[EventType]]):
+    def __init__(self, start: int, steps_between_ratchets: int, events: Union[EventType, set[EventType]]):
         super().__init__(events)
         self.increments_between_ratchets = steps_between_ratchets
         self.increments_since_last_ratchet = 0

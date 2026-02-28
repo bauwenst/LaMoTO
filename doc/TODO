@@ -1,8 +1,6 @@
 TODO: Fix "Matplotlib's TeX implementation searched for a file named 'cmss10.tfm' in your texmf tree, but could not find it"
       on some Linux implementations.
 
-TODO: Ratcheting and Exp callbacks should be added to training.py.
-
 TODO: Embedding matrix resizing when the checkpoint mismatches the vocab.
     https://huggingface.co/docs/transformers/main/main_classes/model#transformers.PreTrainedModel.resize_token_embeddings
     - We want this for WiC.
@@ -18,11 +16,7 @@ TODO: It would be very cool if there was a callback connected to some kind of me
       service, where you could send a signal to kill training and the model will (after the current step) quit and save.
       You could e.g. reply to an email that says "LaMoTO training started" and it will fetch replies to the email once
       every X steps. Alternatively, WandB might have some kind of stopping built into the UI. https://github.com/wandb/wandb/issues/3366
-
-TODO: I would like more decoupling between evaluation and saving.
-    - Be able to save more frequently than evals so that you don't lose hours of progress just because you're scared of the cost of eval.
-      You could do this by having a callback that triggers a save to a different folder (because the Trainer tracks which checkpoints exist
-      using folder names).
+    - Could notify of dataset delays etc.
 
 TODO: Test the resume-from-folder functionality. It isn't properly tested.
     - Also, this is really too much manual labour. Resuming should be done automatically where possible.
@@ -35,8 +29,3 @@ TODO: I'm not happy with how metrics are set up. It really makes zero sense to e
       the task config to then parse them implicitly (if you didn't forget them) or error (because you did forget them).
     - Also, a metric should be able to tell at declaration whether it will be able to deliver a requested result, rather
       than only being able to do a sanity check after it has been computed.
-
-TODO: Hour-long backoff wrapper around streamed datasets, to smooth over HuggingFace outages when streaming.
-    - Also spice it up by sending the user an email to notify them of this "hybernation mode".
-    - Also save the model.
-    - TURNS OUT THIS IS IMPOSSIBLE BECAUSE HF IS ASS

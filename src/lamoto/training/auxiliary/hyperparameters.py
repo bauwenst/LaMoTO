@@ -8,22 +8,32 @@ import warnings
 from copy import deepcopy
 
 from transformers import PreTrainedModel, PreTrainedTokenizerBase, PretrainedConfig
-from datasets import Dataset
 from datasets.arrow_dataset import DatasetInfoMixin
 
 from tktkt.interfaces import TokeniserWithVocabulary, TokeniserFactory
+from tktkt.interfaces.identifiers import _ProhibitDeclaringConstructor
 from archit.instantiation.abstracts import PC, HC, BaseModel
 
 from ...util.datasets import getDatasetSize, totalBatches
+from .callbacks import CombinedCallback, EventType, CallbackAtExpInterval, CallbackAtRatchetingInterval, \
+    CallbackAtTimeInterval
 
 
-class BatchesPerTriggerStrategy(ABC):
+class _IntervalConfig(ABC, metaclass=_ProhibitDeclaringConstructor):
     """
-    A "step" is one gradient descent, or equivalently, one effective batch.
-    You can use this as a time axis in the training process. Used for both intervalling and stopping strategies.
+    A configuration dataclass for a certain way of deciding how much space there is between triggers of some kind.
+    Also used for stopping strategies.
 
     All descendants of this class are a @dataclass so that they can be serialised with repr() and deserialised with eval().
-    The @dataclass decorator is not heritable.
+    The @dataclass decorator is not heritable, so we have a metaclass to prevent normal constructors.
+    """
+    pass
+
+
+class _FixedBatchesInterval(_IntervalConfig):
+    """
+    For intervals where the amount of steps between triggers is constant. A "step" is one gradient descent, or
+    equivalently, one effective batch.
     """
     @abstractmethod
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
@@ -31,15 +41,22 @@ class BatchesPerTriggerStrategy(ABC):
         pass
 
 
+class _CallbackInterval(_IntervalConfig):
+    """
+    For intervalling that is more difficult than just "every XYZ steps".
+    """
+    @abstractmethod
+    def getCallback(self, events: Union[EventType,set[EventType]]) -> CombinedCallback:
+        pass
+
+
 @dataclass
-class Never(BatchesPerTriggerStrategy):
-
-    def getSteps(self, *args, **kwargs):
-        raise NotImplementedError("No strategy for getting this interval.")
+class Never(_IntervalConfig):
+    pass
 
 
 @dataclass
-class EveryNExamples(BatchesPerTriggerStrategy):
+class EveryNExamples(_FixedBatchesInterval):
     examples: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
@@ -47,7 +64,7 @@ class EveryNExamples(BatchesPerTriggerStrategy):
 
 
 @dataclass
-class EveryNExamplesOrOncePerEpoch(BatchesPerTriggerStrategy):
+class EveryNExamplesOrOncePerEpoch(_FixedBatchesInterval):
     max_examples: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
@@ -61,7 +78,7 @@ class EveryNExamplesOrOncePerEpoch(BatchesPerTriggerStrategy):
 
 
 @dataclass
-class EveryNDescents(BatchesPerTriggerStrategy):
+class EveryNDescents(_FixedBatchesInterval):
     descents: int
 
     def getSteps(self, *args, **kwargs) -> int:
@@ -69,7 +86,7 @@ class EveryNDescents(BatchesPerTriggerStrategy):
 
 
 @dataclass
-class EveryNDescentsOrOncePerEpoch(BatchesPerTriggerStrategy):
+class EveryNDescentsOrOncePerEpoch(_FixedBatchesInterval):
     """
     Same as EveryNDescents except if epochs are smaller than N, you evaluate once per epoch.
     """
@@ -86,23 +103,25 @@ class EveryNDescentsOrOncePerEpoch(BatchesPerTriggerStrategy):
 
 
 @dataclass
-class EveryExpDescents(BatchesPerTriggerStrategy):
+class EveryExpDescents(_CallbackInterval):
     """
     Produces triggers that are linearly spaced on a log axis. This is equivalent to using linearly spaced values as
     exponents for an exponential function. Examples:
         Start 1, spacing 1:     1, 10^1, 10^2, 10^3, ...
         Start 10, spacing 0.1: 10, 10^1.1, 10^1.2, 10^1.3, ...
+    In general, start * 10^{i*spacing} for i = 0, 1, ...
     If you need a sequence that goes like 1, 2, 3, ..., 10, 20, 30, ... This is not the right class.
     """
-    start: int = 10
+    start: float = 10
+    base: int = 10
     exp_spacing: float = 1.0
 
-    def getSteps(self, *args, **kwargs) -> int:
-        raise NotImplementedError("Log-based intervals aren't enforced with step arguments, but a custom callback.")
+    def getCallback(self, events: Union[EventType,set[EventType]]) -> CombinedCallback:
+        return CallbackAtExpInterval(start=self.start, base=self.base, spacing=self.exp_spacing, events=events)
 
 
 @dataclass
-class EveryRatchetingDescents(BatchesPerTriggerStrategy):
+class EveryRatchetingDescents(_CallbackInterval):
     """
     Starts at a given amount and ratchets up the step size after every N increases. For example:
         start 10, 9 steps: 10, 20, 30, ..., 100, 200, 300, ..., 1000, 2000, 3000, ...
@@ -111,12 +130,12 @@ class EveryRatchetingDescents(BatchesPerTriggerStrategy):
     start: int = 10
     steps: int = 9
 
-    def getSteps(self, *args, **kwargs) -> int:
-        raise NotImplementedError("Ratchet-based intervals aren't enforced with step arguments, but a custom callback.")
+    def getCallback(self, events: Union[EventType,set[EventType]]) -> CombinedCallback:
+        return CallbackAtRatchetingInterval(start=self.start, steps_between_ratchets=self.steps, events=events)
 
 
 @dataclass
-class EveryNEpochs(BatchesPerTriggerStrategy):
+class EveryNEpochs(_FixedBatchesInterval):
     epochs: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:
@@ -129,7 +148,7 @@ class EveryNEpochs(BatchesPerTriggerStrategy):
 
 
 @dataclass
-class NEveryEpoch(BatchesPerTriggerStrategy):
+class NEveryEpoch(_FixedBatchesInterval):
     per_epoch: int
 
     def getSteps(self, batch_size: int, dataset: DatasetInfoMixin, split_name: str) -> int:  # DatasetInfoMixin is the parent class for Dataset and IterableDataset.
@@ -144,17 +163,17 @@ class NEveryEpoch(BatchesPerTriggerStrategy):
 
 
 @dataclass
-class EveryNMinutes(BatchesPerTriggerStrategy):
+class EveryNMinutes(_CallbackInterval):
     minutes: int
 
-    def getSteps(self, *args, **kwargs) -> int:
-        raise NotImplementedError("Time-based intervals aren't enforced with step arguments, but a custom callback.")
+    def getCallback(self, events: Union[EventType,set[EventType]]) -> CombinedCallback:
+        return CallbackAtTimeInterval(minutes=self.minutes, events=events)
 
 
 @dataclass
-class EveryNPackedTokens(BatchesPerTriggerStrategy):
+class EveryNPackedTokens(_FixedBatchesInterval):
     """
-    Only works for packed datasets. Otherwise, you need to use a TrainerCallback that uses state.num_input_tokens_seen.
+    Only works for packed datasets. Otherwise, you need to use a CombinedCallback that uses state.num_input_tokens_seen.
     """
     total_tokens: int
     max_context_length: int
@@ -178,9 +197,9 @@ Immediately    = lambda: AfterNExamples(0)
 
 @dataclass
 class Intervals:
-    evaluation: BatchesPerTriggerStrategy
-    checkpointing: Optional[BatchesPerTriggerStrategy] = None  # Checkpoints contain the model, the optimiser, the rng, ... so that you can resume training from them. HuggingFace allows checkpointing to differ from evaluation IF AND ONLY IF saving and evaluation are done every fixed number of steps AND a save step happens on every evaluation. That means save_steps % eval_steps == 0.
-    backups: Optional[BatchesPerTriggerStrategy] = None  # Stores the weights of the model (and nothing else!) to a permanent backup, i.e. a folder that falls outside of the "checkpoint rotation" (the system that removes older checkpoints to keep a fixed amount stored).
+    evaluation: _IntervalConfig
+    checkpointing: Optional[_IntervalConfig] = None  # Checkpoints contain the model, the optimiser, the rng, ... so that you can resume training from them. HuggingFace allows checkpointing to differ from evaluation IF AND ONLY IF saving and evaluation are done every fixed number of steps AND a save step happens on every evaluation. That means save_steps % eval_steps == 0.
+    backups: Optional[_IntervalConfig] = None  # Stores the weights of the model (and nothing else!) to a permanent backup, i.e. a folder that falls outside of the "checkpoint rotation" (the system that removes older checkpoints to keep a fixed amount stored).
 
 
 @dataclass
@@ -203,7 +222,7 @@ class TaskHyperparameters(Generic[HC]):
     examples_per_device_batch: int  # A devicebatch is just whatever fits on the GPU, not N.
 
     effective_batches_warmup: Union[int, float]  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-    hard_stopping_condition: BatchesPerTriggerStrategy
+    hard_stopping_condition: _IntervalConfig
 
     # - Evaluating:
     examples_per_evaluation: Optional[int]  # If None, use the entire validation set.

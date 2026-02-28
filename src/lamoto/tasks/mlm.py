@@ -60,7 +60,7 @@ SUGGESTED_HYPERPARAMETERS_MLM = MlmHyperparameters(  # Attempt to mimic RoBERTa'
     learning_rate=6e-4,
     adamw_decay_rate=0.01,
     gradient_clipping_norm=None,
-    gradient_checkpointing_if_possible=False,
+    gradient_checkpointing_if_possible=True,
 
     mlm_probability=0.15,
     pppl=PPPL_Parameters(right_fraction=0.5)

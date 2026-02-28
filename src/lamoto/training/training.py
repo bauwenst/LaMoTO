@@ -32,6 +32,7 @@ from ..util.visuals import log, printLamotoWelcome
 from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType, \
     SaveModelOnLinearInterval, SaveModelOnTimeInterval, _SaveModelMixin, TrainerCallback
 from .auxiliary.hyperparameters import *
+from .auxiliary.hyperparameters import _CallbackInterval, _FixedBatchesInterval
 from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
 
 LamotoPaths = PathManager("lamoto")
@@ -279,7 +280,7 @@ class TaskTrainer:
         # - Sizes
         stopping_condition = hyperparameters.hard_stopping_condition
         n_gradient_descents = tryExceptNone(lambda: stopping_condition.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
-                                                                                dataset=datasetdict["train"], split_name="train"))
+                                                                                dataset=datasetdict["train"], split_name="train") if isinstance(stopping_condition, _FixedBatchesInterval) else None)
         wu = hyperparameters.effective_batches_warmup  # Alias to shorten this long name.
         if isinstance(wu, int):
             if wu < 0:
@@ -303,11 +304,11 @@ class TaskTrainer:
         backup_interval = hyperparameters.eval_vs_save_intervals.backups or Never()  # Not relevant to the TrainingArguments, but will come in later.
 
         batches_between_evals = tryExceptNone(lambda: eval_interval.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
-                                                                             dataset=datasetdict["train"], split_name="train"))
+                                                                             dataset=datasetdict["train"], split_name="train") if isinstance(eval_interval, _FixedBatchesInterval) else None)
         batches_between_saves = tryExceptNone(lambda: save_interval.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
-                                                                             dataset=datasetdict["train"], split_name="train"))
+                                                                             dataset=datasetdict["train"], split_name="train") if isinstance(save_interval, _FixedBatchesInterval) else None)
         batches_between_backups = tryExceptNone(lambda: backup_interval.getSteps(batch_size=hyperparameters.examples_per_effective_batch,
-                                                                                 dataset=datasetdict["train"], split_name="train"))
+                                                                                 dataset=datasetdict["train"], split_name="train") if isinstance(backup_interval, _FixedBatchesInterval) else None)
 
         # - Early stopping (only used if required)
         best_model_metric_handle = f"eval_{metric_to_rank.fullName()}" if hyperparameters.track_best_checkpoint else None
@@ -381,19 +382,20 @@ class TaskTrainer:
         # if not isinstance(eval_interval, NeverInterval):  # Didn't work, but has since become an option that works. https://discuss.huggingface.co/t/how-to-evaluate-before-first-training-step/18838
         #     callbacks.append(EvaluateBeforeTrainingCallback())
 
-        if isinstance(stopping_condition, AfterNMinutes):
-            callbacks.append(CallbackAtTimeInterval(minutes=stopping_condition.minutes, events=EventType.STOP))
+        if isinstance(stopping_condition, _CallbackInterval):
+            callbacks.append(stopping_condition.getCallback(events=EventType.STOP))
 
         if isinstance(eval_interval, EveryNMinutes) and isinstance(save_interval, EveryNMinutes) and eval_interval.minutes == save_interval.minutes:  # They are completely tied. This means you need a fully synchronised callback to prevent race conditions.
-            callbacks.append(CallbackAtTimeInterval(minutes=eval_interval.minutes, events={EventType.EVALUATE, EventType.CHECKPOINT}))
-        else:  # Can be neither, one, or both but with disparate minutes. Either way, you'll need a separate callback per type.
-            if isinstance(eval_interval, EveryNMinutes):
-                callbacks.append(CallbackAtTimeInterval(minutes=eval_interval.minutes, events=EventType.EVALUATE))
-            if isinstance(save_interval, EveryNMinutes):
-                callbacks.append(CallbackAtTimeInterval(minutes=save_interval.minutes, events=EventType.CHECKPOINT))
+            callbacks.append(eval_interval.getCallback(events={EventType.EVALUATE, EventType.CHECKPOINT}))
+        else:  # In all other cases, the evaluation and checkpoint intervals have separate callbacks.
+            if isinstance(eval_interval, _CallbackInterval):
+                callbacks.append(eval_interval.getCallback(events=EventType.EVALUATE))
+            if isinstance(save_interval, _CallbackInterval):
+                callbacks.append(save_interval.getCallback(events=EventType.CHECKPOINT))
 
         if backup_interval is not None:  # => There is a backup strategy.
-            if batches_between_backups is not None:  # => It can even be expressed using linear steps.
+            if isinstance(backup_interval, _FixedBatchesInterval):  # => It can even be expressed using linear steps.
+                assert batches_between_backups is not None
                 callbacks.append(SaveModelOnLinearInterval(start=batches_between_backups, step=batches_between_backups))
             elif isinstance(backup_interval, EveryNMinutes):
                 callbacks.append(SaveModelOnTimeInterval(minutes=backup_interval.minutes))

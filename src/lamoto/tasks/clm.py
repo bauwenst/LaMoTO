@@ -60,7 +60,7 @@ SUGGESTED_HYPERPARAMETERS_CLM = ClmHyperparameters(
     learning_rate=2e-5,
     adamw_decay_rate=0.01,
     gradient_clipping_norm=None,
-    gradient_checkpointing_if_possible=False,
+    gradient_checkpointing_if_possible=True,
 
     ppl= PPL_Parameters(stride_fraction=1/8)
 )
