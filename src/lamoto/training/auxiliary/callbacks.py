@@ -1,4 +1,5 @@
 from typing import Union
+from typing_extensions import deprecated
 from abc import abstractmethod, ABC
 from pathlib import Path
 from enum import Enum
@@ -10,7 +11,7 @@ from transformers import TrainerCallback, TrainingArguments, TrainerState, Train
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
 
-@warnings.deprecated("Evaluation before the first training step is now supported in HuggingFace transformers without needing a callback.")
+@deprecated("Evaluation before the first training step is now supported in HuggingFace transformers without needing a callback.")
 class EvaluateBeforeTrainingCallback(TrainerCallback):
     """
     Triggers evaluation before the first training batch, so that you can benchmark all metrics before any finetuning
