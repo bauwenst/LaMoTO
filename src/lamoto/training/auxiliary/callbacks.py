@@ -47,11 +47,13 @@ class CombinedCallback(TrainerCallback, ABC):
         self.event_types = events if isinstance(events, set) else {events}
 
     @abstractmethod
-    def on_event_happens(self):
+    def should_event_happen(self, global_step: int) -> bool:
+        """Called at the end of each gradient descent to check whether the event(s) in the constructor should take place."""
         pass
 
     @abstractmethod
-    def should_event_happen(self, global_step: int) -> bool:
+    def on_event_happens(self):
+        """Called when the event(s) in the constructor actually take place (whether triggered by this callback or not)."""
         pass
 
     def on_train_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
@@ -89,12 +91,12 @@ class CallbackAtTimeInterval(CombinedCallback):
         self.seconds_between_events = minutes * 60
         self.last_event_was_at = 0
 
-    def on_event_happens(self):
-        self.last_event_was_at = time.perf_counter()
-
     def should_event_happen(self, global_step: int) -> bool:
         seconds_since_last_event = time.perf_counter() - self.last_event_was_at
         return seconds_since_last_event >= self.seconds_between_events
+
+    def on_event_happens(self):
+        self.last_event_was_at = time.perf_counter()
 
 
 class CallbackAtLinearInterval(CombinedCallback):
@@ -108,15 +110,15 @@ class CallbackAtLinearInterval(CombinedCallback):
         self.step = step
         self.next_threshold = start
 
-    def on_event_happens(self):
-        pass
-
     def should_event_happen(self, global_step: int) -> bool:
         if global_step >= self.next_threshold:
             self.next_threshold += self.step
             return True
         else:
             return False
+
+    def on_event_happens(self):
+        pass
 
 
 class CallbackAtExpInterval(CombinedCallback):
@@ -137,9 +139,6 @@ class CallbackAtExpInterval(CombinedCallback):
         self.spacing = spacing
         self.i = 0
 
-    def on_event_happens(self):
-        pass
-
     def should_event_happen(self, global_step: int) -> bool:
         threshold = self.getNextThreshold()
         if global_step >= threshold:
@@ -151,6 +150,9 @@ class CallbackAtExpInterval(CombinedCallback):
 
     def getNextThreshold(self) -> int:
         return int(self.start * self.base**(self.i * self.spacing))
+
+    def on_event_happens(self):
+        pass
 
 
 class CallbackAtRatchetingInterval(CombinedCallback):
@@ -168,9 +170,6 @@ class CallbackAtRatchetingInterval(CombinedCallback):
         self.next_threshold = start
         self.delta_threshold = start
 
-    def on_event_happens(self):
-        pass
-
     def should_event_happen(self, global_step: int) -> bool:
         if global_step >= self.next_threshold:
             self.next_threshold += self.delta_threshold
@@ -182,6 +181,9 @@ class CallbackAtRatchetingInterval(CombinedCallback):
             return True
         else:
             return False
+
+    def on_event_happens(self):
+        pass
 
 
 class SaveTokeniserWithCheckpoints(TrainerCallback):
@@ -223,7 +225,8 @@ class _SaveModelMixin:
 class SaveModelOnLinearInterval(CallbackAtLinearInterval, _SaveModelMixin):
     """
     Saves the model weights (and nothing else!) on a linear interval, to a folder protected from the checkpoint rotation,
-    without notifying the callback system that a save has been made.
+    WITHOUT notifying the callback system that a save has been made.
+    This is not meant for checkpointing, which is mediated by .should_save and .on_save().
     """
 
     def __init__(self, start: int, step: int):

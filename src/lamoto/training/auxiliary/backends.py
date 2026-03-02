@@ -88,6 +88,7 @@ class ModelTrainer(Trainer):
         model.apply(f)
 
     def log(self, logs: Dict[str, float], start_time: Optional[float]=None):
+        print("Logs printed inside the trainer itself (will be sent to callback):", logs)
         extra_logs = self._extra_log.compute(tensor_gathering_function=self._nested_gather, round_digits=None)
         try:
             super().log(logs | extra_logs, start_time)
