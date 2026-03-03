@@ -1,6 +1,6 @@
 from typing import Optional, Union, Generic, Type
 from typing_extensions import Self
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, ABCMeta
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +19,11 @@ from .callbacks import CombinedCallback, EventType, CallbackAtExpInterval, Callb
     CallbackAtTimeInterval
 
 
-class _IntervalConfig(ABC, metaclass=_ProhibitDeclaringConstructor):
+class _AbstractableWithoutConstructor(ABCMeta, _ProhibitDeclaringConstructor):
+    pass
+
+
+class _IntervalConfig(metaclass=_AbstractableWithoutConstructor):
     """
     A configuration dataclass for a certain way of deciding how much space there is between triggers of some kind.
     Also used for stopping strategies.
