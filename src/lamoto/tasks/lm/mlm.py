@@ -166,7 +166,7 @@ class MLM_SlimPajama(MLM):
 class MLM_Fineweb(MLM):
     # FIXME: Fineweb-2 languages only have a test set, not a validation set.
 
-    _ENGLISH_VALIDATION_SIZE = 100_00
+    _ENGLISH_VALIDATION_SIZE = 100_000
 
     def __init__(self, #language: Languish,
                  packing: bool=False, drop_train_examples: int=0, use_pppl: bool=False):

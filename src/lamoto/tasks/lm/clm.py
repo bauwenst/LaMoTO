@@ -102,7 +102,11 @@ class CLM(Task[CausalLMHeadConfig]):
         return None, None
 
 
-class PretrainingC4(CLM):
+class CLM_C4(CLM):
+    def _loadDataset(self) -> IterableDatasetDict:
+        return datasets.load_dataset("allenai/c4", "en", streaming=True)
 
+
+class CLM_Fineweb(CLM):
     def _loadDataset(self) -> IterableDatasetDict:
         return datasets.load_dataset("allenai/c4", "en", streaming=True)
