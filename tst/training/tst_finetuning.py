@@ -1,13 +1,14 @@
 from tst.preamble import *
 
 from archit.instantiation.heads import *
-from archit.instantiation.basemodels import RobertaBaseModel, DebertaBaseModel
+from archit.instantiation.basemodels import *
 from lamoto.tasks import *
+from lamoto.tasks._core import Task
 from lamoto.training.auxiliary.hyperparameters import *
 from lamoto.training.training import LamotoPaths
 
 
-hp = getDefaultHyperparameters()
+hp = Task.getDefaultHyperparameters()
 hp.seed = 0
 hp.store_in_hf_cache = False
 hp.discard_artifacts = True
@@ -23,6 +24,9 @@ def setModel(id: int=1):
     elif id == 3:  # Will only work on my local machine.
         hp.model_config_or_checkpoint = LamotoPaths.pathToCheckpoints() / "roberta-tiny-cased_DP_2024-12-17_02-17-40" / "checkpoint-3072"
         hp.archit_basemodel_class = RobertaBaseModel
+    elif id == 4:
+        hp.model_config_or_checkpoint = "answerdotai/ModernBERT-base"
+        hp.archit_basemodel_class = ModernBertBaseModel
     else:
         raise RuntimeError()
 
@@ -161,12 +165,12 @@ def tst_tuner():
 
 
 if __name__ == "__main__":
-    setModel(id=1)
+    setModel(id=4)
 
     # tst_glue()
     # tst_qnli()
     # tst_sts()
-    # tst_pos()
+    tst_pos()
     # tst_ner()
     # tst_cola()
     # tst_dp()
@@ -175,7 +179,7 @@ if __name__ == "__main__":
     # tst_record()
     # tst_mbr()
 
-    tst_wic()
+    # tst_wic()
     # tst_squadv1()
     # tst_squadv2()
 

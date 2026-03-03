@@ -175,10 +175,52 @@ class Task(ABC, Generic[HC]):
                self.archit_class.headClass().hfEquivalentSuffix() in architecture_name and \
                self.archit_class.headClass().hfEquivalentSuffix() != architecture_name
 
-    def train(self, hyperparameters: TaskHyperparameters[HC], model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Tuple[str, Dict[str, float]]:
+    @classmethod
+    def getDefaultHyperparameters(cls) -> TaskHyperparameters[HC]:
+        from ..training.auxiliary.hyperparameters import AfterNEpochs, Intervals, EveryNDescents
+        from archit.instantiation.basemodels import RobertaBaseModel
+        return TaskHyperparameters(
+            save_as=None,
+            wandb_project=None,
+            discard_artifacts=False,
+            discard_results=False,
+            store_in_hf_cache=False,
+
+            examples_per_effective_batch=32,
+            examples_per_device_batch=32,
+            effective_batches_warmup=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
+            hard_stopping_condition=AfterNEpochs(epochs=10),
+
+            examples_per_evaluation=None,
+            eval_vs_save_intervals=Intervals(
+                evaluation=EveryNDescents(descents=512),  # Not relative to epoch size because epochs can be insanely massive.
+                checkpointing=None
+            ),
+            evals_of_patience=5,
+            track_best_checkpoint=True,
+            rank_checkpoints_using_loss=True,
+
+            seed=69420,
+            init_weights=True,
+            load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
+            model_config_or_checkpoint="roberta-base",
+            archit_basemodel_class=RobertaBaseModel,
+            archit_head_config=None,
+            custom_hf_class=None,
+
+            learning_rate=2e-5,
+            adamw_decay_rate=0.01,
+            gradient_clipping_norm=None,
+            gradient_checkpointing_if_possible=False,
+
+            tokeniser=None,
+            add_special_tokens=True
+        )
+
+    def train(self, hyperparameters: TaskHyperparameters[HC]=None, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Tuple[str, Dict[str, float]]:
         from ..training.training import TaskTrainer  # Import happens here to prevent circular importing.
         return TaskTrainer(model_augmentation).train(
-            task=self, hyperparameters=hyperparameters, resume_from_folder=resume_from_folder
+            task=self, hyperparameters=hyperparameters or self.getDefaultHyperparameters(), resume_from_folder=resume_from_folder
         )
 
 

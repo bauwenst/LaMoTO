@@ -1,5 +1,5 @@
 from typing import Optional, Union, Generic, Type
-from typing_extensions import Self
+from typing_extensions import Self, deprecated
 from abc import ABC, abstractmethod, ABCMeta
 from dataclasses import dataclass
 from pathlib import Path
@@ -319,49 +319,10 @@ def hyperparametersFromDict(hp_as_dict: dict) -> TaskHyperparameters:
     return hp
 
 
-from archit.instantiation.basemodels import RobertaBaseModel
-
-SUGGESTED_HYPERPARAMETERS = TaskHyperparameters(
-    save_as=None,
-    wandb_project=None,
-    discard_artifacts=False,
-    discard_results=False,
-    store_in_hf_cache=False,
-
-    examples_per_effective_batch=32,
-    examples_per_device_batch=32,
-    effective_batches_warmup=100,  # The RoBERTa paper says, for GLUE tasks, they warm up for 6% of all batches across 10 epochs. That's in the ballpark of 100 batches.
-    hard_stopping_condition=AfterNEpochs(epochs=10),
-
-    examples_per_evaluation=None,
-    eval_vs_save_intervals=Intervals(
-        evaluation=EveryNDescents(descents=512),  # Not relative to epoch size because epochs can be insanely massive.
-        checkpointing=None
-    ),
-    evals_of_patience=5,
-    track_best_checkpoint=True,
-    rank_checkpoints_using_loss=True,
-
-    seed=69420,
-    init_weights=True,
-    load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
-    model_config_or_checkpoint="roberta-base",
-    archit_basemodel_class=RobertaBaseModel,
-    archit_head_config=None,
-    custom_hf_class=None,
-
-    learning_rate=2e-5,
-    adamw_decay_rate=0.01,
-    gradient_clipping_norm=None,
-    gradient_checkpointing_if_possible=False,
-
-    tokeniser=None,
-    add_special_tokens=True
-)
-
-
+@deprecated("Use your task's .getDefaultHyperparameters() method instead.")
 def getDefaultHyperparameters() -> TaskHyperparameters:
-    return SUGGESTED_HYPERPARAMETERS.copy()
+    from ...tasks._core import Task
+    return Task.getDefaultHyperparameters()
 
 
 __all__ = ["TaskHyperparameters", "Intervals",

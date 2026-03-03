@@ -23,7 +23,7 @@ evaluation metric immediately (which is how `supar` does it). Here's how you cou
    before saving the logits. 
 
 The first two approaches have their place, namely when you want metrics that aren't logit-based, like strided
-PPL in causal LM. That's not the case for DP though. Here's how you could use the last method:
+PPL in causal LM. That's not the case for DP though. Here's how you could use the last approach:
 1. Instantiate the UAS/LAS metric
 2. Capture it inside the preprocess_logits_for_metrics function and compute it immediately
 3. Let preprocess_logits_for_metrics return empty tensors as logits and labels

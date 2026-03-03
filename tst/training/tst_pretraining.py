@@ -1,13 +1,17 @@
 from tst.preamble import *
 
+from lamoto.tasks import MLM, CLM, Fineweb
 
-def test_mlm_training():
-    from lamoto.tasks import MLM_C4, SUGGESTED_HYPERPARAMETERS_MLM
-    task = MLM_C4()
-    task.train(
-        hyperparameters=SUGGESTED_HYPERPARAMETERS_MLM
-    )
+
+def tst_roberta():
+    task = MLM(Fineweb("English"), use_perplexity=False)
+    task.train()
+
+
+def tst_gpt():
+    task = CLM(Fineweb("English"), use_perplexity=True)
+    task.train()
 
 
 if __name__ == "__main__":
-    test_mlm_training()
+    tst_roberta()
