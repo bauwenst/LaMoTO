@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 import shutil
+import warnings
 import os
 
 from torch import Tensor
@@ -18,7 +19,7 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from transformers.trainer import Trainer, DataLoader, EvalLoopOutput, denumpify_detensorize, deepspeed_init, logger, has_length
 from transformers.trainer_callback import TrainerCallback
-from transformers.trainer_utils import EvalPrediction
+from transformers.trainer_utils import EvalPrediction, speed_metrics
 from transformers.training_args import TrainingArguments
 
 from archit.instantiation.mixins import LoggingState, ReportDiagnosticsMixin
@@ -88,12 +89,35 @@ class ModelTrainer(Trainer):
         model.apply(f)
 
     def log(self, logs: Dict[str, float], start_time: Optional[float]=None):
-        print("Logs printed inside the trainer itself (will be sent to callback):", logs)
+        # In transformers, the log() method figures out that you're training based on whether start_time is None... no.
+        counts = {"train": 0, "eval": 0, "test": 0}
+        for key in logs:
+            for prefix in counts:
+                if key.startswith(prefix + "_"):
+                    counts[prefix] += 1
+                    break
+            else:  # Unprefixed metrics are counted as train metrics.
+                counts["train"] += 1
+        split = max(counts, key=counts.get)
+
+        # Compute extra logs from registrations.
         extra_logs = self._extra_log.compute(tensor_gathering_function=self._nested_gather, round_digits=None)
+
+        # Lastly, get extra diagnostic logs, namely for speed and total floating point operations.
+        #   - In transformers v4.49.0, the last version before .from_pretrained() is broken, the speed metrics are actually calculated in the super() call below, but they forget to add the results to the logs... yeah.
+        #   - The floating point operations are only counted during training, but they are also only outputted at the end of training. There's no good reason for that.
+        profiling_logs = {"train_flos": self.state.total_flos}
+        if split == "train" and start_time is not None:
+            profiling_logs |= speed_metrics(split, start_time, num_tokens=self.state.num_input_tokens_seen)
+        else:  # Then speed_metrics was run outside of self.log(). Bad design by HF that speed_metrics is run in two different places.
+            if split == "train" or not any(key.endswith("_runtime") for key in logs):
+                warnings.warn("Speed metrics could not be added to the logs.")
+
+        # Now call into the super method to add epoch and num_input_tokens_seen.
         try:
-            super().log(logs | extra_logs, start_time)
+            super().log(extra_logs | profiling_logs | logs, start_time)
         except TypeError:  # The start_time argument is not yet supported in transformers v4.46.3, the last version with stable DeBERTa.
-            super().log(logs | extra_logs)
+            super().log(extra_logs | profiling_logs | logs)
 
     def deleteCheckpointsInOrder(self, amount: int):
         assert amount > 0

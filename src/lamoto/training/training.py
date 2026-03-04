@@ -7,7 +7,7 @@ import wandb
 import transformers
 from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer, \
     PreTrainedTokenizerBase, EvalPrediction, PretrainedConfig
-from transformers.trainer_utils import has_length
+from transformers.trainer_utils import has_length, TrainOutput
 from transformers.utils.logging import set_verbosity_error
 from huggingface_hub.constants import HF_HUB_CACHE
 
@@ -518,11 +518,10 @@ class TaskTrainer:
         # Train, and evaluate afterwards.
         try:
             log(f"Training starting with:\n\tModel: {model.__class__.__name__}\n\tTask: {task.task_name}\n\tRanking metric: {best_model_metric_handle if hyperparameters.track_best_checkpoint else 'None'}\n\tDevice: {model.device}...")
-            print(trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None))  # TODO: The surrounding print is experimental to check what exactly .train() returns and whether it has the train_runtime.
+            train_results: TrainOutput = trainer.train(resume_from_checkpoint=resume_from_folder.as_posix() if resume_from_folder else None)
             # trainer.save_model()  # Not needed since we already checkpoint the last model with a callback.
             # trainer.push_to_hub()
-            global_step = trainer.state.global_step
-            eval_and_test_results = {"train_global_step": global_step}
+            train_and_eval_and_test_results = train_results.metrics | {"train_global_step": train_results.global_step}  # .metrics contains training loss + profiling metrics (speed + FLOPs)
 
             log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on validation set...")
             env.use_test_not_validation = False
@@ -533,17 +532,17 @@ class TaskTrainer:
                 log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on test set...")
                 env.use_test_not_validation = True
                 test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
-                eval_and_test_results |= validation_results | test_results
+                train_and_eval_and_test_results |= validation_results | test_results
                 dprint(test_results, indent=1)
             else:
-                eval_and_test_results |= validation_results
+                train_and_eval_and_test_results |= validation_results
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
 
             # Save results
             if not hyperparameters.discard_results:
-                results_path = self._getEvalPath(global_model_identifier) / f"metrics-{global_step}.json"
+                results_path = self._getEvalPath(global_model_identifier) / f"metrics-{train_results.global_step}.json"
                 log(f"Saving results to {results_path.as_posix()} ...")
-                dictToJson(eval_and_test_results, results_path, do_indent=True)
+                dictToJson(train_and_eval_and_test_results, results_path, do_indent=True)
 
             # Delete all other artifacts if requested. (We have at most two checkpoints. Backups are not checkpoints, and are never deleted.)
             if hyperparameters.discard_artifacts:
@@ -552,7 +551,7 @@ class TaskTrainer:
                 trainer.tryDeleteFolder(unless_contains_subfolders=[_SaveModelMixin.BACKUPS_FOLDER])
 
             timer.soFar(echo=True)
-            return global_model_identifier, eval_and_test_results
+            return global_model_identifier, train_and_eval_and_test_results
 
         except Exception as e1:  # Catches any error that happens during training, and triggers a checkpoint (+ a callback event afterwards, if that's needed by any callback).
             log("Caught exception while training. A checkpoint will be saved.\nAfterwards, we will raise the exception, so your run shows up as failed rather than completed.")
