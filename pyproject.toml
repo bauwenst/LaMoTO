@@ -31,14 +31,17 @@ dependencies = [
     "zstandard"  # Needed for SlimPajama dataset. HuggingFace won't tell you, of course. Instead, SentencePiece will complain that your corpus has 0 sentences.
 ]
 
-# These GitHub dependencies aren't optional, but if you already have them installed as editable, pip will override
-# that installation with an installation in site-packages. Hence, if this is the case for you, install these manually.
 [project.optional-dependencies]
-github = [
-    "archit[github]   @ git+https://github.com/bauwenst/ArchIt",
-    "tktkt[github]    @ git+https://github.com/bauwenst/TkTkT",
-    "modest[github]   @ git+https://github.com/bauwenst/MoDeST",
-    "fiject           @ git+https://github.com/bauwenst/fiject",
-
-    "supar            @ git+https://github.com/bauwenst/supar"
+all = [  # All my packages, from PyPI.
+    "fiject",
+    "tktkt[all]",
+    "modest[all]",
+    "archit[all]",
+    "supar_bauwenst"
 ]
+github = [  # All my packages, from GitHub.
+]
+
+[project.urls]
+Source = "https://github.com/bauwenst/LaMoTO"
+Issues = "https://github.com/bauwenst/LaMoTO/issues"
