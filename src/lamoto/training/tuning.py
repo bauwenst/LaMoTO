@@ -9,6 +9,7 @@ import itertools
 from copy import deepcopy
 from math import prod
 import numpy.random as npr
+import torch
 
 from tktkt.util.printing import dprint, pluralise, ordinal
 from tktkt.util.iterables import deduplicate, take
@@ -236,6 +237,7 @@ class TaskTuner:
                 print("=" * 50)
 
         dictToJson(results_across_all_runs.checkpoint(), results_folder / "metrics-tuning-phase1.json")
+        dictToJson({"runtime_cumulative": sum(results_across_all_runs.data["train_runtime"]), "device": torch.cuda.get_device_name()}, results_folder / "time-tuning-phase1.json")
 
         if best_sample is None:
             raise RuntimeError(f"No hyperparameter sets resulted in the ranking metric '{ranking_metric_name}'.")
@@ -266,6 +268,7 @@ class TaskTuner:
         dprint(results, indent=1)
 
         dictToJson({"checkpoints": last_run_identifier} | results, results_folder / "metrics-tuning-phase2.json")
+        dictToJson({"runtime": results["train_runtime"], "device": torch.cuda.get_device_name()}, results_folder / "time-tuning-phase2.json")
         return results
 
     def _makeResultsFolder(self, task: Task, hp: TaskHyperparameters) -> Path:

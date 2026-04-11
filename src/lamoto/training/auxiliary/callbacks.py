@@ -10,6 +10,8 @@ import warnings
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl, PreTrainedTokenizerBase, Trainer
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
+from tktkt.util.dicts import dictToJson
+
 
 @deprecated("Evaluation before the first training step is now supported in HuggingFace transformers without needing a callback.")
 class EvaluateBeforeTrainingCallback(TrainerCallback):
@@ -199,7 +201,7 @@ class SaveTokeniserWithCheckpoints(TrainerCallback):
     def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         output_dir = Path(args.output_dir) / f"{PREFIX_CHECKPOINT_DIR}-{state.global_step}"  # NOTE: There is one case where this will use the wrong folder, which is when you run trainer.save_model manually since it will save to the parent folder without creating a folder and hence without using global_step.
         if not output_dir.is_dir():
-            warnings.warn(f"Tokeniser wasn't saved; tried predicting folder path for the latest checkpoint, but {output_dir.as_posix()} apparently doesn't exist.")
+            warnings.warn(f"Tokeniser wasn't saved; tried predicting folder path for the latest checkpoint, but apparently it doesn't exist:\n{output_dir.as_posix()}")
             return
 
         self.tokenizer.save_pretrained(output_dir)
@@ -220,6 +222,16 @@ class _SaveModelMixin:
 
         output_dir = Path(self._trainer.args.output_dir) / self.BACKUPS_FOLDER / f"{global_step}"  # The reason we don't use the 'checkpoint-' prefix is that I suspect that HuggingFace's rotation system hunts for it with .glob(). Not sure if it searches recursively, but better safe than sorry.
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save the latest train/eval log at that point, which contains the GPU time and FLOPs.
+        logs = self._trainer.state.log_history
+        for split in ["train", "eval"]:
+            for log in reversed(logs):
+                if any(key.startswith(split + "_") for key in log):
+                    dictToJson(log, output_dir / f"latest_log_{split}.json")
+                    break
+
+        # Save model last because it is most likely to error.
         self._trainer.save_model(output_dir.as_posix())
 
 
