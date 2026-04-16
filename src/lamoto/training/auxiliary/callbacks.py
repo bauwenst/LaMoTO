@@ -227,7 +227,7 @@ class _SaveModelMixin:
         logs = self._trainer.state.log_history
         for split in ["train", "eval"]:
             for log in reversed(logs):
-                if any(key.startswith(split + "_") for key in log):
+                if any(key.startswith(split + "_") for key in log):  # Note: this assumes that there is no interference between "train" and "eval", whereas any(eval) should never count as train.
                     dictToJson(log, output_dir / f"latest_log_{split}.json")
                     break
 

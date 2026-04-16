@@ -106,7 +106,7 @@ class ModelTrainer(Trainer):
         # Lastly, get extra diagnostic logs, namely for speed and total floating point operations.
         #   - In transformers v4.49.0, the last version before .from_pretrained() is broken, the speed metrics are actually calculated in the super() call below, but they forget to add the results to the logs... yeah.
         #   - The floating point operations are only counted during training, but they are also only outputted at the end of training. There's no good reason for that.
-        profiling_logs = {"train_flos": self.state.total_flos}
+        profiling_logs = {"train_flos": self.state.total_flos} if split == "train" else dict()
         if split == "train" and start_time is not None:
             profiling_logs |= speed_metrics(split, start_time, num_tokens=self.state.num_input_tokens_seen)
         else:  # Then speed_metrics was run outside of self.log(). Bad design by HF that speed_metrics is run in two different places.
