@@ -1,16 +1,27 @@
+"""
+Note that callbacks do not themselves execute much. They set TrainerControl flags which are then interpreted by
+the Trainer when the time comes to do so in its logic. They also don't communicate with the Trainer directly.
+Flags are generally set to True by callbacks and to False by the callback handler.
+
+In our case, because we wanted to add an extra TrainerControl that can't be assumed to be returned by all callbacks, we
+need the callbacks and the handler to have a reference to the trainer object to access that extra control. But again,
+the callbacks and the handler don't call any logic on the trainer; they're just for setting flags.
+"""
 from typing import Union
 from typing_extensions import deprecated
 from abc import abstractmethod, ABC
 from pathlib import Path
 from enum import Enum
+from dataclasses import dataclass
 
 import time
 import warnings
 
 from transformers import TrainerCallback, TrainingArguments, TrainerState, TrainerControl, PreTrainedTokenizerBase, Trainer
+from transformers.trainer_callback import CallbackHandler
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
-from tktkt.util.dicts import dictToJson
+from .backends import ModelTrainer
 
 
 @deprecated("Evaluation before the first training step is now supported in HuggingFace transformers without needing a callback.")
@@ -36,9 +47,19 @@ class EventType(Enum):
     EVALUATE   = 1
     CHECKPOINT = 2
     STOP       = 3
+    BACKUP     = 4  # For saving the model weights (and nothing else!) to a folder protected from the checkpoint rotation, WITHOUT notifying the callback system that a save has been made. This is not meant for checkpointing, which is mediated by .should_save and .on_save().
 
 
-class CombinedCallback(TrainerCallback, ABC):
+class TrainerAwareCallback(TrainerCallback):
+
+    def __init__(self):
+        self._trainer: ModelTrainer = None
+
+    def setTrainer(self, trainer: ModelTrainer):
+        self._trainer = trainer
+
+
+class CombinedCallback(TrainerAwareCallback, ABC):
     """
     Combined callback for evaluating, checkpointing and stopping.
     It would be ridiculous to have a separate implementation of on_step_end for each field that could be changed as
@@ -47,6 +68,7 @@ class CombinedCallback(TrainerCallback, ABC):
     """
 
     def __init__(self, events: Union[EventType, set[EventType]]):
+        super().__init__()
         self.event_types = events if isinstance(events, set) else {events}
 
     @abstractmethod
@@ -70,6 +92,8 @@ class CombinedCallback(TrainerCallback, ABC):
                 control.should_evaluate = True  # An evaluation will be started, and when it finishes, the timer is reset.
             if EventType.STOP in self.event_types:
                 control.should_training_stop = True
+            if EventType.BACKUP in self.event_types:
+                self._trainer.extra_control.should_backup = True
 
     def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if EventType.CHECKPOINT in self.event_types:
@@ -81,6 +105,10 @@ class CombinedCallback(TrainerCallback, ABC):
 
     def on_train_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if EventType.STOP in self.event_types:
+            self.on_event_happens()
+
+    def on_backup(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if EventType.BACKUP in self.event_types:
             self.on_event_happens()
 
 
@@ -207,66 +235,6 @@ class SaveTokeniserWithCheckpoints(TrainerCallback):
         self.tokenizer.save_pretrained(output_dir)
 
 
-class _SaveModelMixin:
-    BACKUPS_FOLDER = "backups"
-
-    def __init__(self):
-        self._trainer: Trainer = None  # Not set at construction so that you can construct a Trainer with a callback of this class first.
-
-    def setTrainer(self, trainer: Trainer):
-        self._trainer = trainer
-
-    def saveModel(self, global_step: int):
-        if self._trainer is None:
-            raise RuntimeError("You should set the Trainer to which this callback belongs first!")
-
-        output_dir = Path(self._trainer.args.output_dir) / self.BACKUPS_FOLDER / f"{global_step}"  # The reason we don't use the 'checkpoint-' prefix is that I suspect that HuggingFace's rotation system hunts for it with .glob(). Not sure if it searches recursively, but better safe than sorry.
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save the latest train/eval log at that point, which contains the GPU time and FLOPs.
-        logs = self._trainer.state.log_history
-        for split in ["train", "eval"]:
-            for log in reversed(logs):
-                if any(key.startswith(split + "_") for key in log):  # Note: this assumes that there is no interference between "train" and "eval", whereas any(eval) should never count as train.
-                    dictToJson(log, output_dir / f"latest_log_{split}.json")
-                    break
-
-        # Save model last because it is most likely to error.
-        self._trainer.save_model(output_dir.as_posix())
-
-
-class SaveModelOnLinearInterval(CallbackAtLinearInterval, _SaveModelMixin):
-    """
-    Saves the model weights (and nothing else!) on a linear interval, to a folder protected from the checkpoint rotation,
-    WITHOUT notifying the callback system that a save has been made.
-    This is not meant for checkpointing, which is mediated by .should_save and .on_save().
-    """
-
-    def __init__(self, start: int, step: int):
-        super().__init__(start=start, step=step, events=set())
-        _SaveModelMixin.__init__(self)  # This constructor isn't run by default in multiple inheritance.
-
-    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if self.should_event_happen(state.global_step):
-            self.saveModel(state.global_step)
-            self.on_event_happens()
-
-
-class SaveModelOnTimeInterval(CallbackAtTimeInterval, _SaveModelMixin):
-    """
-    Same as SaveModelOnLinearInterval except using minutes.
-    """
-
-    def __init__(self, minutes: int):
-        super().__init__(minutes=minutes, events=set())
-        _SaveModelMixin.__init__(self)
-
-    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if self.should_event_happen(state.global_step):
-            self.saveModel(state.global_step)
-            self.on_event_happens()
-
-
 class CheckpointLastModel(TrainerCallback):
     """
     In the context of checkpoints (which include model, Adam momenta, learning schedule state, ...), "last" is used to
@@ -292,6 +260,70 @@ class CheckpointLastModel(TrainerCallback):
     def on_epoch_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if control.should_training_stop:  # Training is being exited as we speak.
             control.should_save = True
+
+
+@dataclass
+class LamotoTrainerControl:
+    """Extra control variables. Not a subclass of TrainerControl and not handled like TrainerControl because that's basically impossible to achieve."""
+    should_backup: bool = False
+
+
+class LamotoCallbackHandler(CallbackHandler):
+    """
+    Extension of the official callback handler that adds more on_xyz methods called specifically by LaMoTO's Trainer.
+    Also ensures the bidirectional association between these new callbacks and the Trainer.
+    """
+
+    @classmethod
+    def fromExisting(cls, callback_handler: CallbackHandler) -> "LamotoCallbackHandler":
+        result = LamotoCallbackHandler(
+            callbacks=callback_handler.callbacks,
+            model=callback_handler.model,
+            processing_class=callback_handler.processing_class,
+            optimizer=callback_handler.optimizer,
+            lr_scheduler=callback_handler.lr_scheduler
+        )
+        result.train_dataloader = callback_handler.train_dataloader
+        result.eval_dataloader  = callback_handler.eval_dataloader
+        return result
+
+    def setTrainer(self, trainer: ModelTrainer):
+        self._trainer = trainer
+        for callback in self.callbacks:
+            if isinstance(callback, TrainerAwareCallback):
+                callback.setTrainer(trainer)
+
+    def on_backup(self, args: TrainingArguments, state: TrainerState, control: TrainerControl):
+        self._trainer.extra_control.should_backup = False
+        return self.call_event("on_backup", args, state, control)
+
+    ####################################################################################################################
+
+    def add_callback(self, callback):
+        super().add_callback(callback)
+        callback = self.callbacks[-1]
+        if isinstance(callback, TrainerAwareCallback):
+            callback.setTrainer(self._trainer)
+
+    def call_event(self, event, args, state, control, **kwargs):
+        for callback in self.callbacks:
+            if not hasattr(callback, event):
+                continue
+            result = getattr(callback, event)(
+                args,
+                state,
+                control,
+                model=self.model,
+                processing_class=self.processing_class,
+                optimizer=self.optimizer,
+                lr_scheduler=self.lr_scheduler,
+                train_dataloader=self.train_dataloader,
+                eval_dataloader=self.eval_dataloader,
+                **kwargs,
+            )
+            if result is not None:
+                control = result
+        return control
 
 
 __all__ = ["EvaluateBeforeTrainingCallback", "EventType", "CallbackAtTimeInterval", "SaveTokeniserWithCheckpoints", "CheckpointLastModel"]

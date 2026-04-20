@@ -1,5 +1,5 @@
 """
-Backend classes that do the actual model training itself.
+Extensions of the HuggingFace Trainer, which implement the training loop behind LaMoTO's train() methods.
 """
 from typing import Optional, List, Dict, Tuple, Callable, Union, Any
 from pathlib import Path
@@ -11,26 +11,25 @@ import os
 
 from torch import Tensor
 from torch.nn import Module
-from transformers.data.data_collator import DataCollator
 from torch.optim.lr_scheduler import LambdaLR
 from torch.optim.optimizer import Optimizer as Optimizer
 from torch.utils.data import Dataset, IterableDataset
-from transformers.modeling_utils import PreTrainedModel
-from transformers.tokenization_utils_base import PreTrainedTokenizerBase
-from transformers.trainer import Trainer, DataLoader, EvalLoopOutput, denumpify_detensorize, deepspeed_init, logger, has_length
-from transformers.trainer_callback import TrainerCallback
-from transformers.trainer_utils import EvalPrediction, speed_metrics
-from transformers.training_args import TrainingArguments
+from transformers.trainer import Trainer, PreTrainedModel, TrainingArguments, DataCollator, PreTrainedTokenizerBase, EvalPrediction, DataLoader, EvalLoopOutput, denumpify_detensorize, deepspeed_init, logger, has_length, TrainerCallback
+from transformers.trainer_utils import speed_metrics
 
 from archit.instantiation.mixins import LoggingState, ReportDiagnosticsMixin
+from tktkt.util.dicts import dictToJson
+
+BACKUPS_FOLDER = "backups"
 
 
 class ModelTrainer(Trainer):
     """
-    Adds two features on top of Trainer:
+    Adds three features on top of Trainer:
         1. Modules that extend ArchIt's ReportDiagnosticsMixin can call .report() to log any runtime value, e.g. to make it
            show up in WandB aside from metrics.
         2. Adds a method to delete checkpoints.
+        3. Adds more callbacks.
     """
     def __init__(
         self,
@@ -75,6 +74,13 @@ class ModelTrainer(Trainer):
                 preprocess_logits_for_metrics=preprocess_logits_for_metrics
             )
 
+        # Callbacks
+        from .callbacks import LamotoCallbackHandler, LamotoTrainerControl  # To avoid circular import.
+        self.callback_handler = LamotoCallbackHandler.fromExisting(self.callback_handler)
+        self.callback_handler.setTrainer(self)
+        self.extra_control = LamotoTrainerControl()
+
+        # ArchIt mixins
         self._extra_log = LoggingState(self.args)
         if model is not None:
             self._activateExtraLog(model)
@@ -106,18 +112,46 @@ class ModelTrainer(Trainer):
         # Lastly, get extra diagnostic logs, namely for speed and total floating point operations.
         #   - In transformers v4.49.0, the last version before .from_pretrained() is broken, the speed metrics are actually calculated in the super() call below, but they forget to add the results to the logs... yeah.
         #   - The floating point operations are only counted during training, but they are also only outputted at the end of training. There's no good reason for that.
-        profiling_logs = {"train_flos": self.state.total_flos} if split == "train" else dict()
-        if split == "train" and start_time is not None:
-            profiling_logs |= speed_metrics(split, start_time, num_tokens=self.state.num_input_tokens_seen)
-        else:  # Then speed_metrics was run outside of self.log(). Bad design by HF that speed_metrics is run in two different places.
-            if split == "train" or not any(key.endswith("_runtime") for key in logs):
-                warnings.warn("Speed metrics could not be added to the logs.")
+        profiling_logs = {f"{split}_device": torch.cuda.get_device_name()}
+        if split == "train":
+            profiling_logs |= {"train_flos": self.state.total_flos}
+            if start_time is not None:
+                profiling_logs |= speed_metrics(split, start_time, num_tokens=self.state.num_input_tokens_seen)
+        if (split == "train" and start_time is None) or not any(key.endswith("_runtime") for key in logs):  # Then speed_metrics was run outside of self.log(). Bad design by HF that speed_metrics is run in two different places.
+            warnings.warn("Speed metrics could not be added to the logs.")
 
         # Now call into the super method to add epoch and num_input_tokens_seen.
         try:
             super().log(extra_logs | profiling_logs | logs, start_time)
         except TypeError:  # The start_time argument is not yet supported in transformers v4.46.3, the last version with stable DeBERTa.
             super().log(extra_logs | profiling_logs | logs)
+
+    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch: int, ignore_keys_for_eval, start_time: Optional[float]=None):
+        # maybe_log_save_evaluate (which should actually be called maybe_log_evaluate_save) is run AFTER on_step_end,
+        # which means that anything that requires the latest logs, latest evals or latest checkpoint, needs to wait until then.
+        try:
+            super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time)
+        except TypeError:
+            super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
+
+        if self.extra_control.should_backup:
+            self.save_backup()
+            self.control = self.callback_handler.on_backup(self.args, self.state, self.control)
+
+    def save_backup(self):
+        output_dir = Path(self.args.output_dir) / BACKUPS_FOLDER / f"{self.state.global_step}"  # The reason we don't use the 'checkpoint-' prefix is that I suspect that HuggingFace's rotation system hunts for it with .glob(). Not sure if it searches recursively, but better safe than sorry.
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save the latest train/eval log at that point, which contains the GPU time and FLOPs.
+        logs = self.state.log_history
+        for split in ["train", "eval"]:
+            for log in reversed(logs):
+                if any(key.startswith(split + "_") for key in log):  # Note: this assumes that there is no interference between "train" and "eval", whereas any(eval) should never count as train.
+                    dictToJson(log, output_dir / f"latest_log_{split}.json")
+                    break
+
+        # Save model as the last thing you do, because that operation is most likely to error.
+        self.save_model(output_dir.as_posix())
 
     def deleteCheckpointsInOrder(self, amount: int):
         assert amount > 0

@@ -30,10 +30,10 @@ from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import log, printLamotoWelcome
 from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType, \
-    SaveModelOnLinearInterval, SaveModelOnTimeInterval, _SaveModelMixin, TrainerCallback
+    TrainerCallback, CallbackAtLinearInterval
 from .auxiliary.hyperparameters import *
 from .auxiliary.hyperparameters import _CallbackInterval, _FixedBatchesInterval
-from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop
+from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop, BACKUPS_FOLDER
 
 LamotoPaths = PathManager("lamoto")
 
@@ -53,12 +53,15 @@ class TaskTrainer:
     def train(
         self,
         task: Task,
-        hyperparameters: TaskHyperparameters[HC]=getDefaultHyperparameters(),
+        hyperparameters: TaskHyperparameters[HC]=None,
         resume_from_folder: Path=None
     ) -> Tuple[str, Dict[str, float]]:
         """
         Encapsulation of everything you need to do to get a (modified) `transformers.Trainer` running.
         """
+        if hyperparameters is None:
+            hyperparameters = task.getDefaultHyperparameters()
+
         printLamotoWelcome()
         timer = Timer()
         timer.start(echo=True)
@@ -396,9 +399,9 @@ class TaskTrainer:
         if backup_interval is not None:  # => There is a backup strategy.
             if isinstance(backup_interval, _FixedBatchesInterval):  # => It can even be expressed using linear steps.
                 assert batches_between_backups is not None
-                callbacks.append(SaveModelOnLinearInterval(start=batches_between_backups, step=batches_between_backups))
+                callbacks.append(CallbackAtLinearInterval(start=batches_between_backups, step=batches_between_backups, events=EventType.BACKUP))
             elif isinstance(backup_interval, EveryNMinutes):
-                callbacks.append(SaveModelOnTimeInterval(minutes=backup_interval.minutes))
+                callbacks.append(CallbackAtTimeInterval(minutes=backup_interval.minutes, events=EventType.BACKUP))
             elif not isinstance(backup_interval, Never):
                 raise ValueError(f"Cannot handle backup interval: {backup_interval.__class__.__name__}")
 
@@ -459,9 +462,6 @@ class TaskTrainer:
 
         # Bidirectional associations with the trainer
         env.trainer = trainer
-        for cb in callbacks:
-            if isinstance(cb, _SaveModelMixin):
-                cb.setTrainer(trainer)
 
         # Lastly, do some prints (not logs).
         # Print the loaded model and a breakdown of its parameter counts.
@@ -548,7 +548,7 @@ class TaskTrainer:
             if hyperparameters.discard_artifacts:
                 log("Deleting models...")
                 trainer.deleteCheckpointsInOrder(amount=2)
-                trainer.tryDeleteFolder(unless_contains_subfolders=[_SaveModelMixin.BACKUPS_FOLDER])
+                trainer.tryDeleteFolder(unless_contains_subfolders=[BACKUPS_FOLDER])
 
             timer.soFar(echo=True)
             return global_model_identifier, train_and_eval_and_test_results
