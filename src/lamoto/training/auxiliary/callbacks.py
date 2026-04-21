@@ -303,7 +303,10 @@ class LamotoCallbackHandler(CallbackHandler):
         super().add_callback(callback)
         callback = self.callbacks[-1]
         if isinstance(callback, TrainerAwareCallback):
-            callback.setTrainer(self._trainer)
+            try:
+                callback.setTrainer(self._trainer)
+            except AttributeError:  # I do it this way because I want to inherit __init__ from CallbackHandler.
+                pass
 
     def call_event(self, event, args, state, control, **kwargs):
         for callback in self.callbacks:
