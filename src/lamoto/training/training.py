@@ -29,8 +29,7 @@ from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
 from ..util.visuals import log, printLamotoWelcome
-from .auxiliary.callbacks import CallbackAtTimeInterval, SaveTokeniserWithCheckpoints, CheckpointLastModel, EventType, \
-    TrainerCallback, CallbackAtLinearInterval
+from .auxiliary.callbacks import *
 from .auxiliary.hyperparameters import *
 from .auxiliary.hyperparameters import _CallbackInterval, _FixedBatchesInterval
 from .auxiliary.backends import ModelTrainer, ModelTrainerWithoutEvaluationLoop, BACKUPS_FOLDER
@@ -378,7 +377,7 @@ class TaskTrainer:
         scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=n_descents_of_warmup)  # Not using a linear decay because that's the whole point of having Adam.
 
         # - Build callbacks
-        callbacks: List[TrainerCallback] = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(task.tokenizer)]
+        callbacks: List[TrainerCallback] = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(task.tokenizer), StatefulTokeniserCallback()]
         if hyperparameters.track_best_checkpoint and hyperparameters.evals_of_patience is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.evals_of_patience))  # Patience is the amount of eval calls you can tolerate worsening loss.
 

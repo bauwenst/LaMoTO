@@ -8,6 +8,7 @@ need the callbacks and the handler to have a reference to the trainer object to 
 the callbacks and the handler don't call any logic on the trainer; they're just for setting flags.
 """
 from typing import Union
+
 from typing_extensions import deprecated
 from abc import abstractmethod, ABC
 from pathlib import Path
@@ -21,6 +22,8 @@ from transformers import TrainerCallback, TrainingArguments, TrainerState, Train
 from transformers.trainer_callback import CallbackHandler
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 
+from tktkt.interfaces.huggingface import TktktToHuggingFace
+from tktkt.models.stateful.base import StatefulTokeniser
 from .backends import ModelTrainer
 
 
@@ -262,6 +265,16 @@ class CheckpointLastModel(TrainerCallback):
             control.should_save = True
 
 
+class StatefulTokeniserCallback(TrainerAwareCallback):
+    """
+    At the end of every training step, lets the relevant tokenisers know that the step just finished.
+    """
+    def on_step_end(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        tk = self._trainer.tokenizer
+        if isinstance(tk, TktktToHuggingFace) and isinstance(tk.backend, StatefulTokeniser):
+            tk.backend.advanceOnDownstream()
+
+
 @dataclass
 class LamotoTrainerControl:
     """Extra control variables. Not a subclass of TrainerControl and not handled like TrainerControl because that's basically impossible to achieve."""
@@ -329,4 +342,6 @@ class LamotoCallbackHandler(CallbackHandler):
         return control
 
 
-__all__ = ["EvaluateBeforeTrainingCallback", "EventType", "CallbackAtTimeInterval", "SaveTokeniserWithCheckpoints", "CheckpointLastModel"]
+__all__ = ["TrainerCallback", "EventType", "TrainerAwareCallback", "LamotoCallbackHandler",
+           "CallbackAtTimeInterval", "CallbackAtExpInterval", "CallbackAtRatchetingInterval", "CallbackAtLinearInterval",
+           "EvaluateBeforeTrainingCallback", "CheckpointLastModel", "SaveTokeniserWithCheckpoints", "StatefulTokeniserCallback"]
