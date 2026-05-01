@@ -369,7 +369,7 @@ class TaskTrainer:
 
             # Data
             remove_unused_columns=False,  # Otherwise, only those keys that match input arguments of the model are allowed to survive the preprocessor. Very weird system. They are already gone before the DataCollator gets to see anything. You'll get an "IndexError: is out of bounds for size 0" because the dataset looks like it has no columns.
-            # dataloader_num_workers=4*IS_NOT_LINUX  # My wishful thinking was that this speeds up tokenisation by a factor of 4 for an IterableDataset.
+            # dataloader_num_workers=4*(not is_cluster())  # My wishful thinking was that this speeds up tokenisation by a factor of 4 for an IterableDataset.
         )
 
         # - Build optimiser

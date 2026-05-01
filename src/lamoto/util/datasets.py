@@ -15,13 +15,13 @@ from datasets.arrow_dataset import DatasetInfoMixin
 
 from tktkt.util.iterables import mapExtend
 from tktkt.util.printing import pluralise, ordinal
-from tktkt.util.environment import IS_NOT_LINUX
+from tktkt.util.environment import is_cluster
 
 from .schedules import Schedule
 from .exceptions import ImpossibleBranchError
 
 
-N_THREADS_DATASET_MAP = 1 if IS_NOT_LINUX else 6
+N_THREADS_DATASET_MAP = 1 if not is_cluster() else 6
 
 HuggingfaceExample     = Dict[str,Any]
 HuggingfaceBatch       = Dict[str,List[Any]]

@@ -31,30 +31,16 @@ from modest.interfaces.datasets import ModestDataset
 from modest.languages.english import English_Celex
 from archit.instantiation.heads import TokenClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
-from archit.instantiation.basemodels import CanineBaseModel
 
 from ._core import *
-from ..training.auxiliary.hyperparameters import NEveryEpoch, AfterNEpochs
 from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, ListOfField, ClassLabel
 from ..util.visuals import log
-
-##################################
-SUGGESTED_HYPERPARAMETERS_MBR = getDefaultHyperparameters()
-SUGGESTED_HYPERPARAMETERS_MBR.archit_basemodel_class = CanineBaseModel
-SUGGESTED_HYPERPARAMETERS_MBR.model_config_or_checkpoint = "google/canine-c"
-SUGGESTED_HYPERPARAMETERS_MBR.tokeniser                  = "google/canine-c"
-SUGGESTED_HYPERPARAMETERS_MBR.effective_batches_warmup = 1000
-SUGGESTED_HYPERPARAMETERS_MBR.eval_vs_save_intervals.evaluation = NEveryEpoch(per_epoch=9)
-SUGGESTED_HYPERPARAMETERS_MBR.archit_head_config = TokenClassificationHeadConfig()
-SUGGESTED_HYPERPARAMETERS_MBR.evals_of_patience = 30
-SUGGESTED_HYPERPARAMETERS_MBR.hard_stopping_condition = AfterNEpochs(100)
-##################################
 
 
 # TODO: In the future, ArchIt will probably have to be refactored so that all the "buildSomething()" methods are instance
 #       methods on a separate class like a ForTaskFactory accompanying every ForTask, like below.
 #       Alternatively, CombinedConfig should actually be (base, head, loss) and give a config to buildLoss() which may have label weights.
-from archit.instantiation.configs import CombinedConfig, PretrainedConfig
+from archit.instantiation.configs import CombinedConfig, PretrainedConfig, HC
 from archit.instantiation.abstracts import BaseModel, ModelWithHead
 from archit.util import dataclass_from_dict
 from torch.nn.modules.loss import CrossEntropyLoss
@@ -216,5 +202,17 @@ class MBR(Task[TokenClassificationHeadConfig]):
 
         return predictions[mask].tolist(), labels[mask].tolist()
 
-    def train(self, hyperparameters: TaskHyperparameters=SUGGESTED_HYPERPARAMETERS_MBR, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None):
-        return super().train(hyperparameters, model_augmentation=model_augmentation, resume_from_folder=resume_from_folder)
+    @classmethod
+    def getDefaultHyperparameters(cls) -> TaskHyperparameters[TokenClassificationHeadConfig]:
+        from archit.instantiation.basemodels import CanineBaseModel
+        from ..training.auxiliary.hyperparameters import NEveryEpoch, AfterNEpochs
+        hp = super().getDefaultHyperparameters()
+        hp.archit_basemodel_class       = CanineBaseModel
+        hp.model_config_or_checkpoint   = "google/canine-c"
+        hp.tokeniser                    = "google/canine-c"
+        hp.effective_batches_warmup     = 1000  # TODO: No idea if still relevant.
+        hp.eval_vs_save_intervals.evaluation = NEveryEpoch(per_epoch=9)
+        hp.evals_of_patience       = 30
+        hp.hard_stopping_condition = AfterNEpochs(100)
+        hp.archit_head_config      = TokenClassificationHeadConfig()
+        return hp

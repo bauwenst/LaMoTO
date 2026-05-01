@@ -18,7 +18,7 @@ from tktkt.util.dicts import dictToJson
 from fiject import MultiHistogram
 
 from ..tasks._core import Task, RankingMetricSpec, ModelAugmentation
-from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch, getDefaultHyperparameters
+from .auxiliary.hyperparameters import TaskHyperparameters, AfterNExamples, EveryNExamplesOrOncePerEpoch
 from .training import log, TaskTrainer, LamotoPaths, TrainerCallback
 
 
@@ -101,7 +101,7 @@ class HyperparameterGrid:
         ]
 
     def domainSize(self) -> int:
-        return prod(map(len, self.getFullGrid(defaults=getDefaultHyperparameters())))
+        return prod(map(len, self.getFullGrid(defaults=Task.getDefaultHyperparameters())))  # Note: The value of the defaults= parameter is irrelevant here. We just need some kind of substitute so that the non-tuned hyperparameters have a grid dimension of size 1 when we take the product.
 
     def enumerate(self, defaults: TaskHyperparameters) -> Iterable["HyperparameterGrid.Sample"]:
         for seed, wu, bs, lr, dr in itertools.product(*self.getFullGrid(defaults)):

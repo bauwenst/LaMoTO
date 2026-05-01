@@ -65,12 +65,14 @@ class NER(Task[TokenClassificationHeadConfig]):
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.
         assert predictions.shape == labels.shape
 
+        N, L = labels.shape
+
         all_predictions = []
         all_labels      = []
-        for example_id in range(labels.shape[0]):
+        for example_id in range(N):
             all_predictions.append([])
             all_labels.append([])
-            for position_id in range(labels.shape[1]):
+            for position_id in range(L):
                 if labels[example_id, position_id] != -100:
                     all_predictions[-1].append(self.tagset[predictions[example_id, position_id]])  # seqeval requires string labels rather than ints. It's weird like that.
                     all_labels[-1].append(     self.tagset[labels[example_id, position_id]])
