@@ -5,6 +5,14 @@ Language Modelling Tasks as Objects (LaMoTO) provides a framework for language m
 It abstracts over the HuggingFace `transformers.Trainer` with one goal: reduce the entire model training process to a single
 method call `task.train(hyperparameters)`.
 
+```
+pip install lamoto[all]
+```
+_Note:_ to be able to use the W&B integration, make sure you first run `wandb login` in a command-line terminal 
+on the system you want to run on.
+
+<!-- If you are me from the future: don't include the `[all]` tag, it will fuck up the editable installs for the packages I maintain. -->
+
 ## Usage
 Let's say you want to train a RoBERTa-base model for dependency parsing (for which, by the way, there is no HuggingFace
 class). This is how you would do that in LaMoTO, supported by the magic of [ArchIt](https://github.com/bauwenst/ArchIt):
@@ -40,23 +48,7 @@ task.train(hyperparameters=hp)
 - [x] Evaluate models with a superset of the metrics in HuggingFace's `evaluate`, with custom inference procedures (see e.g. strided pseudo-perplexity or bits-per-character).
 - [x] Augment datasets before training or evaluating by somehow perturbing them.
 - [x] Supports [TkTkT](https://github.com/bauwenst/TkTkT) tokenisers.
-- [x] Weights-and-Biases integration.
-
-## Installation
-If you don't want to edit the source code yourself, run
-```
-pip install "lamoto[github] @ git+https://github.com/bauwenst/LaMoTO"
-```
-and if you do, instead run
-```
-git clone https://github.com/bauwenst/LaMoTO
-cd LaMoTO
-pip install -e .[github]
-```
-To be able to use the Weights-and-Biases integration, make sure you first run `wandb login` in a command-line terminal 
-on the system you want to run on.
-
-<!-- If you are me from the future: don't include the `[github]` tag, it will fuck up the editable installs for the packages I maintain. -->
+- [x] W&B integration.
 
 ## Alternative packages
 There exist other libraries that abstract across training tasks in an effort to avoid heavily dedicated training scripts.
