@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lamoto"
-version = "v2026.04.01"  # Don't forget to change to change the lamoto.__version__ variable.
+version = "v2026.05.01"  # Don't forget to change to change the lamoto.__version__ variable.
 requires-python = ">= 3.9"
 authors = [
   {name = "Thomas Bauwens", email = "thomas.bauwens@kuleuven.be"}
