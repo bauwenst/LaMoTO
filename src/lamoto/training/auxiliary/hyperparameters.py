@@ -213,8 +213,8 @@ class TaskHyperparameters(Generic[HC]):
 
     # Side-effects
     wandb_project: Optional[str]
-    discard_artifacts: bool  # If true, any model and any graph of intermediate results will be removed after training. Does not apply to backups.
-    discard_results: bool    # If true, the eval/test results will not be stored on disk, only returned as a Python dictionary after training.
+    discard_artifacts: bool  # If true, all artifacts (any model and any graph of intermediate results) will be removed after training. Does not apply to backups.
+    discard_results: bool    # If true, the eval/test results (a dictionary of numbers) will not be stored on disk, only returned as a Python dictionary after training.
     store_in_hf_cache: bool  # Whether to store model checkpoints in the HF_HOME cache folder, or just the CWD.
 
     # Sizes

@@ -48,6 +48,7 @@ class TaskTrainer:
     def __init__(self, model_augmentation: ModelAugmentation=None, custom_callbacks: List[TrainerCallback]=None):
         self._model_augmentation = model_augmentation
         self._extra_callbacks = custom_callbacks or []
+        self._is_tuning = False
 
     def train(
         self,
@@ -538,7 +539,7 @@ class TaskTrainer:
             wandb.finish()  # Finish because otherwise, running .train() in the same process after .init() has been called once already will raise an error.
 
             # Save results
-            if not hyperparameters.discard_results:
+            if not self._is_tuning and not hyperparameters.discard_results:
                 results_path = self._getEvalPath(global_model_identifier) / f"metrics-{train_results.global_step}.json"
                 log(f"Saving results to {results_path.as_posix()} ...")
                 dictToJson(train_and_eval_and_test_results, results_path, do_indent=True)
@@ -570,6 +571,10 @@ class TaskTrainer:
             wandb.finish(exit_code=1)
             time.sleep(1)
             raise e1
+
+    def _alwaysDiscardResults(self):
+        """Internal method used when saving results is handled by something that wraps the Trainer."""
+        self._is_tuning = True
 
     def _prefixMetrics(self, metrics: Dict[str,Any], metric_key_prefix: str) -> Dict[str,Any]:
         metrics = metrics.copy()

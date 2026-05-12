@@ -147,6 +147,7 @@ class TaskTuner:
         self._guaranteed      = guaranteed_grid
         self._sampling_domain = sampling_grid
         self._trainer = TaskTrainer(model_augmentation, custom_callbacks)
+        self._trainer._alwaysDiscardResults()
 
     def withAugmentation(self, model_augmentation: Optional[ModelAugmentation]) -> "TaskTuner":
         return TaskTuner(
@@ -197,19 +198,18 @@ class TaskTuner:
         # if results_across_all_runs.needs_computation:  # TODO: Really, if we could hash everything that determines an experiment (task, tuning grid, metahyperparameters, rest of the hyperparameters including PretrainedConfig and ArchIt base class) you could use Fiject's caching functionality to skip phase 1 of tuning entirely if it has been done already.
 
         samples_so_far = set()
-        cached_hp = hp.copy()  # Save these defaults for the second grid's loop. Otherwise, if it the second grid has a None where the first did not, the last HP value of the first grid will be used rather than the given default.
+        default_hp = hp.copy()  # Save these defaults for the second grid's loop. Otherwise, if e.g. the second grid keeps learning rate fixed but the first grid varies it, then the last value of the first grid will be used rather than the default given as argument to this method.
         for stochastic in [False, True]:
             if not stochastic:
                 if self._guaranteed is None:
                     continue
-                samples    = self._guaranteed.enumerate(defaults=hp)
+                samples    = self._guaranteed.enumerate(defaults=default_hp)
                 n_possible = self._guaranteed.domainSize()
                 n_target   = n_possible
             else:
                 if self._sampling_domain is None:
                     continue
-                hp = cached_hp
-                samples    = self._sampling_domain.sample(sampling_seed=hp.seed + meta.meta_seed, n_samples=meta.n_grid_samples, defaults=hp, excluded=samples_so_far)  # TODO: This makes reporting slightly more difficult since you're tuning across more samples than meta.n_grid_samples... idk
+                samples    = self._sampling_domain.sample(sampling_seed=default_hp.seed + meta.meta_seed, n_samples=meta.n_grid_samples, defaults=default_hp, excluded=samples_so_far)  # TODO: This makes reporting slightly more difficult since you're tuning across more samples than meta.n_grid_samples... idk
                 n_possible = self._sampling_domain.domainSize()
                 n_target   = meta.n_grid_samples
 
@@ -236,17 +236,22 @@ class TaskTuner:
                         best_sample = grid_sample
                 print("=" * 50)
 
-        dictToJson(results_across_all_runs.checkpoint(), results_folder / "metrics-tuning-phase1.json")
-        dictToJson({"runtime_cumulative": sum(results_across_all_runs.data["train_runtime"]), "device": torch.cuda.get_device_name()}, results_folder / "time-tuning-phase1.json")
-
-        if best_sample is None:
-            raise RuntimeError(f"No hyperparameter sets resulted in the ranking metric '{ranking_metric_name}'.")
-        log(f"Best hyperparameters out of {pluralise(len(samples_so_far), 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
-        dictToJson(asdict(best_sample), results_folder / "best-sample.json")
-
         hp.hard_stopping_condition = original_stopping_condition  # FIXME: We override this in phase 2 regardless... Maybe allow both custom stopping condition and automatic stopping condition?
         hp.discard_artifacts       = original_da
         hp.discard_results         = original_dr
+
+        # Logging
+        if not hp.discard_results:
+            dictToJson(results_across_all_runs.checkpoint(), results_folder / "metrics-tuning-phase1.json")
+            dictToJson({"runtime_cumulative": sum(results_across_all_runs.data["train_runtime"]), "device": torch.cuda.get_device_name()}, results_folder / "time-tuning-phase1.json")
+
+        if best_sample is None:
+            raise RuntimeError(f"No hyperparameter sets resulted in the ranking metric '{ranking_metric_name}'.")
+
+        log(f"Best hyperparameters out of {pluralise(len(samples_so_far), 'sample')} as measured by {ranking_metric_name}:", best_sample, f"with metric value {best_ranking_value}.")
+        if not hp.discard_results:
+            dictToJson(asdict(best_sample), results_folder / "best-sample.json")
+
         return best_sample
 
     def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: HyperparameterGrid.Sample, results_folder: Path) -> Dict[str,float]:
@@ -267,8 +272,9 @@ class TaskTuner:
         print("Results:")
         dprint(results, indent=1)
 
-        dictToJson({"checkpoints": last_run_identifier} | results, results_folder / "metrics-tuning-phase2.json")
-        dictToJson({"runtime": results["train_runtime"], "device": torch.cuda.get_device_name()}, results_folder / "time-tuning-phase2.json")
+        if not hp.discard_results:
+            dictToJson({"checkpoints": last_run_identifier} | results, results_folder / "metrics-tuning-phase2.json")
+            dictToJson({"runtime": results["train_runtime"], "device": torch.cuda.get_device_name()}, results_folder / "time-tuning-phase2.json")
         return results
 
     def _makeResultsFolder(self, task: Task, hp: TaskHyperparameters) -> Path:
