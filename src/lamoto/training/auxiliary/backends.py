@@ -74,6 +74,9 @@ class ModelTrainer(Trainer):
                 preprocess_logits_for_metrics=preprocess_logits_for_metrics
             )
 
+        # We store a reference to the tokeniser so that we can un-redirect HF's access to self.tokenizer.
+        self._tokenizer = tokenizer
+
         # Callbacks
         from .callbacks import LamotoCallbackHandler, LamotoTrainerControl  # To avoid circular import.
         self.callback_handler = LamotoCallbackHandler.fromExisting(self.callback_handler)
@@ -178,6 +181,10 @@ class ModelTrainer(Trainer):
 
         if delete_everything:
             shutil.rmtree(main_folder_path)
+
+    @property
+    def tokenizer(self) -> Optional[PreTrainedTokenizerBase]:
+        return self._tokenizer
 
 
 class ModelTrainerWithoutEvaluationLoop(ModelTrainer):

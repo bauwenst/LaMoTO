@@ -89,9 +89,9 @@ class WordLevelPreprocessor:
 
         return subword_ids_per_word, indexing_labels_truncated, other_labels_truncated
 
-    def addSpecialsAndShiftIndices(self, tokens: List[List[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
-        # Now we introduce specials anywhere in the sequence.
-        tokens_with_specials: List[Union[List[int],int]] = self._tokenizer.build_inputs_with_special_tokens(tokens)
+    def addSpecialsAndShiftIndices(self, tokens: list[list[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+        # Now we introduce specials anywhere in the sequence. You get a list that looks like [special, [subword, subword], [subword, subword, subword], [subword], special] and so on.
+        tokens_with_specials: list[Union[list[int],int]] = self._tokenizer.build_inputs_with_special_tokens(tokens)
 
         # The tokeniser's build_inputs_with_special_tokens has inserted special tokens in places we don't know. We now
         # want to transfer this to the labels, but the labels currently have the wrong length. The only way to correct
