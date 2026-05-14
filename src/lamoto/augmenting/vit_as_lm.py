@@ -51,8 +51,11 @@ def replaceRobertaEncoder(any_roberta_model: RobertaPreTrainedModel, any_vit_mod
 class InjectEncoder(ModelAugmentation):
 
     def __init__(self, other_model: PreTrainedModel):
-        super().__init__("WithEncoderOf(" + getSubstringAfterLastSlash(other_model.name_or_path) + ")")
         self.encoder = other_model.base_model.encoder  # Should be among the lighter parts of the model.
+        self._checkpoint = other_model.name_or_path
+
+    def name(self) -> str:
+        return "WithEncoderOf(" + getSubstringAfterLastSlash(self._checkpoint) + ")"
 
     def augment(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase) -> PreTrainedModel:
         model.base_model.encoder = self.encoder
@@ -151,12 +154,14 @@ class Augmentation_VisionToLanguageEmbedding(ModelAugmentation):
                                             embedding matrix L x H) to use instead. Will obviously mismatch with the
                                             embedding space of the ViT, but may be better than random.
         """
-        super().__init__(name="V2L")
         if replace_by_these_embeddings is None and max_context_length is None:
             raise ValueError("If no existing embeddings are given, a maximum context length must be specified to initialise positional embeddings.")
 
         self.weights = replace_by_these_embeddings
         self.n_positional_embeddings = max_context_length
+
+    def name(self) -> str:
+        return "V2L"
 
     def augment(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase) -> PreTrainedModel:
         assert isinstance(model, ViTMAEPreTrainedModel)
@@ -186,8 +191,8 @@ class Augmentation_VisionToLanguageEmbedding(ModelAugmentation):
 
 class Augmentation_AddHeadForMaskedLM(ModelAugmentation):
 
-    def __init__(self):
-        super().__init__(name="MLM")
+    def name(self) -> str:
+        return "MLM"
 
     def augment(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase) -> PreTrainedModel:
         # Instantiate a new (embeddings+encoder)+head model, and sub in the embeddings+encoder part.

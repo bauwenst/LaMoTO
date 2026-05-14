@@ -10,8 +10,9 @@ class ModelAugmentation(ABC):
     The reason it is in-place is that it makes little sense to make a copy of the model every time you modify it slightly.
     """
 
-    def __init__(self, name: str):
-        self.name = name
+    @abstractmethod
+    def name(self) -> str:
+        pass
 
     @abstractmethod
     def augment(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase):
@@ -45,8 +46,10 @@ class ModelAugmentation(ABC):
 class ModelAugmentationSequence(ModelAugmentation):
 
     def __init__(self, augmentations: List[ModelAugmentation]):
-        super().__init__("+".join([a.name for a in augmentations]))
         self.augmentations = augmentations
+
+    def name(self) -> str:
+        return "+".join([a.name() for a in self.augmentations])
 
     def augment(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase):
         for a in self.augmentations:
@@ -65,8 +68,8 @@ class ModelAugmentationSequence(ModelAugmentation):
 
 class FreezeBackbone(ModelAugmentation):
 
-    def __init__(self):
-        super().__init__(name="frozen")
+    def name(self) -> str:
+        return "frozen"
 
     def augment(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase):
         for param in model.base_model.parameters():

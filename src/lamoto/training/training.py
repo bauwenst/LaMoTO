@@ -274,7 +274,7 @@ class TaskTrainer:
             project=hyperparameters.wandb_project,
             group=model_identifier,
             name=global_model_identifier,
-            tags=[task.task_name, torch.cuda.get_device_name()] + ([self._model_augmentation.name] if self._model_augmentation else []),
+            tags=[task.task_name, torch.cuda.get_device_name()] + ([self._model_augmentation.name()] if self._model_augmentation else []),
 
             dir=folder_wandb.as_posix()
         )
@@ -593,7 +593,7 @@ class TaskTrainer:
 
         return (
             model_name,
-            model_name + ("" if not self._model_augmentation else ("+" + self._model_augmentation.name)) \
+            model_name + ("" if not self._model_augmentation else ("+" + self._model_augmentation.name())) \
                        + f"_{task.task_name}" \
                        + f"_{datetimeDashed()}"
         )
