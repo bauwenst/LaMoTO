@@ -435,7 +435,7 @@ class TaskTrainer:
                     FijectCallback(global_model_identifier + "_eval_tracked",
                                    evals_between_commits=4,
                                    metric_names_with_formatting={(metric_name + "_" + result_name): formatting
-                                                                 for metric_name, result_formats in task.metric_config.to_track.items()
+                                                                 for metric_name, result_formats in metrics_to_track.items()
                                                                  for result_name, formatting in result_formats.items()})
                 )
 

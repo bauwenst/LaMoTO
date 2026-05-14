@@ -44,7 +44,7 @@ def printLamotoWelcome():
 
     line_length = len(lines[0])
     lines.insert(0, "+" + "-"*(line_length-2) + "+")
-    version_string = "--" + "v" + __version__
+    version_string = "--" + __version__
     lines.append("+" + version_string + "-"*(line_length-2 - len(version_string)) + "+")
 
     # Print
