@@ -234,7 +234,8 @@ class TaskTrainer:
                 self._model_augmentation.augment(model, task.tokenizer)
         model.to("cuda")
         log("Model sent to GPU.")
-        print("\tAttention implementation:", model.config._attn_implementation)
+        print("\t Attention implementation:", model.config._attn_implementation)
+        print("\tPrecision at construction:", model.dtype)  # Note: the way this is computed is just by looking at the dtype of the last model parameter. So let's hope it's not an exception to the rule.
 
         # ...and verify that after all of this, the model, the config and the tokeniser all agree about the pad token.
         pad_tk = task.tokenizer.pad_token_id

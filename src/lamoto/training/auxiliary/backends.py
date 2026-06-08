@@ -77,6 +77,9 @@ class ModelTrainer(Trainer):
         # We store a reference to the tokeniser so that we can un-redirect HF's access to self.tokenizer.
         self._tokenizer = tokenizer
 
+        # Keep loss scale independent of the amount of gradient accumulation.
+        self.model_accepts_loss_kwargs = False
+
         # Callbacks
         from .callbacks import LamotoCallbackHandler, LamotoTrainerControl  # To avoid circular import.
         self.callback_handler = LamotoCallbackHandler.fromExisting(self.callback_handler)
