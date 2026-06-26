@@ -15,7 +15,7 @@ class POS(Task[TokenClassificationHeadConfig]):
 
     def __init__(self):
         log("Generating PoS tagset...")
-        self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"].feature.names]
+        self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"][0].names]  # At some point they changed .feature to just [0], but I don't know when.
         super().__init__(
             task_name="POS",
             text_fields=[ListOfField(TextField("tokens"))],
