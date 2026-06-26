@@ -1,14 +1,27 @@
-from typing import List, Dict, Tuple, Union
+from typing import Union
+
+from datasets import load_dataset, DatasetDict
 
 from tktkt.util.printing import gridify
 
 
+class UniversalDependenciesDataset:
+    def __init__(self, name: str):
+        self.name = name
+
+    def load(self) -> DatasetDict:  # Takes care of remote code and renaming splits and so on.
+        dataset = load_dataset("universal-dependencies/universal_dependencies", self.name, trust_remote_code=True)
+        if "dev" in dataset:
+            dataset["validation"] = dataset.pop("dev")
+        return dataset
+
+
 class FilterAndCorrectUDtypes:
 
-    def __init__(self, dependency_tag_mapping: Dict[str, int]=None):
+    def __init__(self, dependency_tag_mapping: dict[str, int]=None):
         self._tag_mapping = dependency_tag_mapping or dict()
 
-    def preprocess(self, words: List[str], heads: List[Union[int,str]], relations: List[str]=None, pos_tags: List[Union[int,str]]=None) -> Tuple[List[str], List[int], List[int], List[int]]:
+    def preprocess(self, words: list[str], heads: list[Union[int,str]], relations: list[str]=None, pos_tags: list[Union[int,str]]=None) -> tuple[list[str], list[int], list[int], list[int]]:
         """
         First take out all unlabelled words and their corresponding labels. There are two classes of them:
           - MWEs, in which case the words that follow are the decomposition of said word. For example, the MWE

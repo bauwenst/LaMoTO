@@ -12,7 +12,7 @@ from archit.instantiation.tasks import ForDependencyParsing, DependencyParsingHe
 
 from ._core import *
 from ..measuring import DependencyParsingMetrics, Metric
-from ..preprocessing.ud import FilterAndCorrectUDtypes
+from ..preprocessing.ud import FilterAndCorrectUDtypes, UniversalDependenciesDataset
 from ..preprocessing.wordlevel import WordLevelPreprocessorWithDummies
 from ..util.visuals import log
 from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, WordIndex, ListOfField, TextField, ClassLabel
@@ -143,7 +143,7 @@ class DP(Task[DependencyParsingHeadConfig]):
         return torch.tensor([[1]], device=logits[0].device)
 
     def _loadDataset(self) -> DatasetDict:
-        return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
+        return UniversalDependenciesDataset("en_ewt").load()
 
     def getTagset(self) -> Counter:
         log("Generating DP tagset...")

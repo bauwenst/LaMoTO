@@ -1,11 +1,10 @@
-from datasets import load_dataset
 from transformers import AutoModelForTokenClassification, DataCollatorForTokenClassification
 
 from archit.instantiation.heads import TokenClassificationHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
-from ..preprocessing.ud import FilterAndCorrectUDtypes
+from ..preprocessing.ud import FilterAndCorrectUDtypes, UniversalDependenciesDataset
 from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
 from ..util.visuals import log
 from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, TextField, ListOfField, ClassLabel
@@ -39,7 +38,7 @@ class POS(Task[TokenClassificationHeadConfig]):
         For example, you can actually reuse the entirety of the NER task and just replace "ner_tags" by "pos_tags" since
         CoNLL-2003 also has those (although they're not in BIO format).
         """
-        return load_dataset("universal-dependencies/universal_dependencies", "en_ewt", trust_remote_code=True)
+        return UniversalDependenciesDataset("en_ewt").load()
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         sanitiser = FilterAndCorrectUDtypes()
