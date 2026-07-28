@@ -23,12 +23,13 @@ Then after this, you create a script that parses command-line arguments and uses
     REGISTRYNAME.get(LINEAGENAME).run(NODENAME)
 to run an experiment.
 """
-from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator, Tuple, Callable
+from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator, Tuple, Callable, Generic
 from typing_extensions import Self
 from pathlib import Path
 from collections import Counter
 from abc import ABC, abstractmethod
 from transformers import PretrainedConfig
+from dataclasses import asdict
 
 import itertools
 
@@ -54,40 +55,18 @@ Checkpoint = Union[str,Path]
 Config     = Union[PretrainedConfig,ConfigFactory]
 NodeOutput = Union[Config,Checkpoint]
 
+T  = TypeVar("T")
 LN = TypeVar("LN", bound="_LineageNode")
 class _LineageNode(ABC):
     """
     Tree node representing one operation that advances a lineage.
     """
 
-    def __init__(self, handle: str, hp: TaskHyperparameters, out: Optional[NodeOutput]=None):
-        """
-        Some of the given hyperparameters will be ignored, e.g. the base model type and the tokeniser, and for
-        finetuning, every hyperparameter in the grid.
-
-        :param out: Checkpoint identifier indicating the RESULT of running this lineage node.
-                    You leave this parameter None when you run your experiment, and then fill it in when you want to
-                    do follow-up experiments.
-        """
-        self.handle        = handle
-        self._out_as_field = out
-        self._hp           = hp
-
-        self._include_handle_in_checkpoint = False
+    def __init__(self, handle: str):
+        self.handle = handle
 
         self._children: List[_LineageNode] = []
         self._parent: Optional[_LineageNode] = None
-
-    @property
-    def _out(self) -> NodeOutput:
-        return self._out_as_field
-
-    def out(self, node_output: NodeOutput) -> Self:
-        """Sets the output of this node in-place. (If a file path, we warn about its inexistence, but don't error on it.)"""
-        if isinstance(node_output, (str, Path)) and not Path(node_output).exists():
-            warn(f"Output of lineage node does not exist yet: {Path(node_output)}")
-        self._out_as_field = node_output
-        return self
 
     def next(self, child: LN) -> LN:
         """Add a node to the list of nodes that use the output of this node as their starting checkpoint.
@@ -106,6 +85,15 @@ class _LineageNode(ABC):
         child._parent = self
         return child
 
+    @property
+    @abstractmethod
+    def _out(self) -> NodeOutput:
+        pass
+
+    @abstractmethod
+    def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
+        pass
+
     def nextInParalllel(self, children: List["_LineageNode"]):
         for child in children:
             self.next(child)
@@ -123,14 +111,7 @@ class _LineageNode(ABC):
             this_copy.next(child.duplicateTree())
         return this_copy
 
-    def doIncludeHandleInOutput(self):
-        """Mention the name of the node in output created by it."""
-        self._include_handle_in_checkpoint = True
-
-    @abstractmethod
-    def _run(self):
-        """Do what this node should do to generate its output checkpoint. (Protected method so that users building lineages don't have it suggested to them.)"""
-        pass
+    # Walking up the tree
 
     def _getAncestors(self) -> List["_LineageNode"]:
         """Trace back the parent relationship until the top of the tree."""
@@ -148,40 +129,13 @@ class _LineageNode(ABC):
         root = self._getRoot()
         return None if root is None else root._lineage
 
-    def _buildHyperparameters(self) -> TaskHyperparameters:
-        """
-        Retrieve the node's hyperparameters while imputing the tokeniser and base model from the lineage this node belongs
-        to, and imputing the checkpoint from the parent node.
-        """
-        lineage = self._getLineage()
-        assert lineage is not None
-        if self._parent._out is None:
-            raise RuntimeError(f"Node '{self.handle}' of lineage '{lineage.name}' is downstream of a node without a checkpoint. Run that node first.")
+    def _getTokeniserFactory(self) -> SerialisedTokeniser:
+        return self._parent._getTokeniserFactory()
 
-        basemodel_node = self
-        while not(isinstance(basemodel_node, _AnchorNode) and basemodel_node._base_model is not None):
-            basemodel_node = basemodel_node._parent
-        assert basemodel_node._base_model is not None
+    def _getBaseModelClass(self) -> type[BaseModel]:
+        return self._parent._getBaseModelClass()
 
-        tokeniser_node = self
-        while not(isinstance(tokeniser_node, _AnchorNode) and tokeniser_node._tokeniser is not None):
-            tokeniser_node = tokeniser_node._parent
-        assert tokeniser_node._tokeniser is not None
-
-        parent_out = self._parent._out
-        base_model = basemodel_node._base_model
-        tokeniser  = tokeniser_node._tokeniser
-
-        # Copy HPs because e.g. storing the built tokeniser permanently in this node's HPs would be a memory leak in case we want to run multiple lineage nodes back-to-back in the same runtime session.
-        hp = self._hp.copy()
-        hp.model_config_or_checkpoint = parent_out if not isinstance(parent_out, ConfigFactory) else parent_out.buildConfig(serialised_tokeniser=tokeniser, base_model=base_model)
-        hp.archit_basemodel_class = base_model
-        hp.tokeniser              = tokeniser
-        hp.init_weights           = isinstance(hp.model_config_or_checkpoint, (str, Path))  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
-
-        # Identify the run by the full name of the lineage and possibly the node.
-        hp.save_as = lineage.name + ("_" + self.handle) * self._include_handle_in_checkpoint
-        return hp
+    # Walking down the tree
 
     def __iter__(self) -> Iterator["_LineageNode"]:
         yield self
@@ -189,13 +143,7 @@ class _LineageNode(ABC):
             yield from node.__iter__()
 
     def __repr__(self):
-        s = (self.handle or "{anchor}") + ": " + self.__class__.__name__ + "(" + self._repr__args() + ")" + "\n"
-        for child in self._children:
-            s += indent(1, child.__repr__(), tab="|   ")
-        return s
-
-    def _repr__args(self) -> str:
-        return ""
+        return self.accept(StringifyLineage())
 
 
 class _AnchorNode(_LineageNode, ABC):
@@ -203,26 +151,22 @@ class _AnchorNode(_LineageNode, ABC):
     Node from which each property (e.g. the tokeniser) that isn't None is copied by all descendants for which there is
     no anchor node between this and them with the same property not None.
     """
-    def __init__(self, base_model: Optional[Type[BaseModel]], tokeniser: Optional[SerialisedTokeniser],
-                 config_or_checkpoint: Optional[NodeOutput]):
-        super().__init__("", hp=None, out=config_or_checkpoint)
+    def __init__(self, base_model: Optional[Type[BaseModel]], tokeniser: Optional[SerialisedTokeniser]):
+        super().__init__(handle="")
         self._base_model: Optional[Type[BaseModel]]    = base_model
         self._tokeniser: Optional[SerialisedTokeniser] = tokeniser
 
-    def _run(self):
-        raise NotImplementedError("Anchor nodes cannot be run.")
+    def _getTokeniserFactory(self) -> SerialisedTokeniser:
+        return super()._getTokeniserFactory() if self._tokeniser is None else self._tokeniser
 
-    def _buildHyperparameters(self) -> TaskHyperparameters:  # This also prevents root nodes from needing to access self._parent._out.
-        raise NotImplementedError("Anchor nodes have no hyperparameters.")
+    def _getBaseModelClass(self) -> type[BaseModel]:
+        return super()._getBaseModelClass() if self._base_model is None else self._base_model
 
 
 class LineageAnchorNode(_AnchorNode):
     """
     Resets the tokeniser and/or the base model architecture for all descendant nodes in the lineage.
     """
-    def __init__(self, base_model: Optional[Type[BaseModel]]=None, tokeniser: Optional[SerialisedTokeniser]=None):
-        super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=None)
-
     @property
     def _out(self):
         return self._parent._out
@@ -230,29 +174,31 @@ class LineageAnchorNode(_AnchorNode):
     def duplicate(self) -> Self:
         return LineageAnchorNode(tokeniser=self._tokeniser, base_model=self._base_model)
 
-    def _repr__args(self) -> str:
-        fields_reset = []
-        if self._base_model:
-            fields_reset.append("basemodel")
-        if self._tokeniser:
-            fields_reset.append("tokeniser")
-
-        return ",".join(fields_reset)
+    def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
+        return visitor.visitAnchorNode(self)
 
 
 class LineageRootNode(_AnchorNode):
     def __init__(self, name: str, starting_config_or_checkpoint: NodeOutput,
                  base_model: Type[BaseModel], tokeniser: SerialisedTokeniser):
-        super().__init__(tokeniser=tokeniser, base_model=base_model, config_or_checkpoint=starting_config_or_checkpoint)
+        super().__init__(tokeniser=tokeniser, base_model=base_model)
+        self._config_or_checkpoint = starting_config_or_checkpoint
         self._lineage: Lineage = None
         self.name = name
+
+    @property
+    def _out(self):
+        return self._config_or_checkpoint
 
     def _registerLineage(self, lineage: "Lineage"):
         self._lineage = lineage
 
     def duplicate(self) -> Self:
-        return LineageRootNode(name=self.name, starting_config_or_checkpoint=self._out,
+        return LineageRootNode(name=self.name, starting_config_or_checkpoint=self._config_or_checkpoint,
                                tokeniser=self._tokeniser, base_model=self._base_model)
+
+    def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
+        return visitor.visitRootNode(self)
 
 
 class LineagePlaceholderNode(_LineageNode):
@@ -262,22 +208,7 @@ class LineagePlaceholderNode(_LineageNode):
     """
 
     def __init__(self):
-        super().__init__(handle="", hp=None, out=None)
-
-    def _run(self):
-        raise NotImplementedError
-
-    def _buildHyperparameters(self) -> TaskHyperparameters:
-        raise NotImplementedError
-
-    def _out(self) -> NodeOutput:
-        raise NotImplementedError
-
-    def _getLineage(self) -> "Lineage":
-        raise NotImplementedError
-
-    def doIncludeHandleInOutput(self):
-        raise NotImplementedError
+        super().__init__(handle="")
 
     def duplicate(self) -> Self:
         return LineagePlaceholderNode()
@@ -312,6 +243,22 @@ class LineagePlaceholderNode(_LineageNode):
             if not quiet:
                 print(lineage)
         return registry
+
+    @property
+    def _out(self) -> NodeOutput:
+        raise RuntimeError("Placeholder nodes cannot produce anything.")
+
+    def _getTokeniserFactory(self) -> SerialisedTokeniser:
+        raise RuntimeError("Placeholder nodes have no tokeniser.")
+
+    def _getBaseModelClass(self) -> type[BaseModel]:
+        raise RuntimeError("Placeholder nodes have no base model.")
+
+    def _getLineage(self) -> Optional["Lineage"]:
+        raise RuntimeError("Placeholder nodes are lineage-agnostic.")
+
+    def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
+        raise RuntimeError("Placeholder nodes cannot be visited.")
 
 
 class Lineage:
@@ -349,12 +296,14 @@ class Lineage:
     def out(self, node_handle: str, node_output: NodeOutput):
         return self._get(node_handle).out(node_output)
 
-    def _get(self, node_handle: str) -> _LineageNode:
+    def _get(self, node_handle: str) -> "_RunnableNode":
         if not node_handle:
             raise ValueError(f"Cannot retrieve empty node handle.")
 
         for node in self:
             if node.handle == node_handle:
+                if not isinstance(node, _RunnableNode):
+                    raise RuntimeError("Lineages only allow looking up runnable nodes.")
                 return node
         else:
             raise ValueError(f"Handle not in lineage: {node_handle}")
@@ -363,13 +312,14 @@ class Lineage:
         return [node.handle for node in self]
 
     def __repr__(self):
-        s = f"Lineage {self.handle}: \"{self.name}\"\n"
-        s += indent(1, self._node_tree.__repr__(), tab="|   ")
-        return s
+        return self.accept(StringifyLineage())
 
     @property
     def name(self):
         return self._node_tree.name
+
+    def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
+        return visitor.visitLineage(self)
 
 
 class LineageRegistry:
@@ -420,7 +370,68 @@ class LineageRegistry:
         return reversed(results)
 
 
-class TrainingNode(_LineageNode):
+class _RunnableNode(_LineageNode):
+
+    def __init__(self, handle: str, hp: TaskHyperparameters, out: Optional[NodeOutput]=None):
+        """
+        :param hp: Some of the given hyperparameter values will always be ignored, e.g. the base model type and the tokeniser (because
+                   those come from the lineage), and for finetuning, every hyperparameter in the grid.
+        :param out: Checkpoint identifier indicating the RESULT of running this lineage node.
+                    You leave this parameter None when you run your experiment, and then fill it in when you want to
+                    do follow-up experiments.
+        """
+        super().__init__(handle=handle)
+        self._hp           = hp
+        self._include_handle_in_checkpoint = False
+        self._out_as_field = out
+
+    @property
+    def _out(self) -> NodeOutput:
+        return self._out_as_field
+
+    def out(self, node_output: NodeOutput) -> Self:
+        """Sets the output of this node in-place. (If a file path, we warn about its inexistence, but don't error on it.)"""
+        if isinstance(node_output, (str, Path)) and not Path(node_output).exists():
+            warn(f"Output of lineage node does not exist yet: {Path(node_output)}")
+        self._out_as_field = node_output
+        return self
+
+    def doIncludeHandleInOutput(self):
+        """Mention the name of the node in output created by it."""
+        self._include_handle_in_checkpoint = True
+
+    @abstractmethod
+    def _run(self):
+        """Do what this node should do to generate its output checkpoint. (Protected method so that users building lineages don't have it suggested to them.)"""
+        pass
+
+    def _buildHyperparameters(self) -> TaskHyperparameters:
+        """
+        Retrieve the node's hyperparameters while imputing the tokeniser and base model from the lineage this node belongs
+        to, and imputing the checkpoint from the parent node.
+        """
+        lineage = self._getLineage()
+        assert lineage is not None
+        if self._parent._out is None:
+            raise RuntimeError(f"Node '{self.handle}' of lineage '{lineage.name}' is downstream of a node without a checkpoint. Run that node first.")
+
+        parent_out = self._parent._out
+        base_model = self._getBaseModelClass()
+        tokeniser  = self._getTokeniserFactory()
+
+        # Copy HPs because e.g. storing the built tokeniser permanently in this node's HPs would be a memory leak in case we want to run multiple lineage nodes back-to-back in the same runtime session.
+        hp = self._hp.copy()
+        hp.model_config_or_checkpoint = parent_out if not isinstance(parent_out, ConfigFactory) else parent_out.buildConfig(serialised_tokeniser=tokeniser, base_model=base_model)
+        hp.archit_basemodel_class = base_model
+        hp.tokeniser              = tokeniser
+        hp.init_weights           = isinstance(hp.model_config_or_checkpoint, (str, Path))  # In the event that you want to use a checkpoint's config only, pass in that config directly with AutoConfig.from_pretrained(chkpt).
+
+        # Identify the run by the full name of the lineage and possibly the node.
+        hp.save_as = lineage.name + ("_" + self.handle)*self._include_handle_in_checkpoint
+        return hp
+
+
+class TrainingNode(_RunnableNode):
 
     def __init__(self, handle: str, hp: TaskHyperparameters, trainer: TaskTrainer, task: Task, out: Optional[Checkpoint]=None):
         super().__init__(handle=handle, hp=hp, out=out)
@@ -436,11 +447,11 @@ class TrainingNode(_LineageNode):
     def duplicate(self) -> Self:
         return TrainingNode(self.handle, self._hp, self._trainer, self._task)
 
-    def _repr__args(self) -> str:
-        return self._task.task_name
+    def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
+        return visitor.visitTrainingNode(self)
 
 
-class TuningNode(_LineageNode):
+class TuningNode(_RunnableNode):
 
     def __init__(self, handle: str, hp: TaskHyperparameters, meta: MetaHyperparameters, tuner: TaskTuner, task: Task, out: Optional[Checkpoint]=None):
         super().__init__(handle=handle, hp=hp, out=out)
@@ -457,9 +468,6 @@ class TuningNode(_LineageNode):
     def duplicate(self) -> Self:
         return TuningNode(self.handle, self._hp, self._meta, self._tuner, self._task)
 
-    def _repr__args(self) -> str:
-        return self._task.task_name
-
     def _buildMetaHyperparameters(self) -> MetaHyperparameters:
         """Adjust meta-hyperparameters so that the seed for taking grid samples is unique per lineage, per node."""
         lineage = self._getLineage()
@@ -468,3 +476,139 @@ class TuningNode(_LineageNode):
         meta = self._meta.copy()
         meta.meta_seed += abs(hash(lineage.name)) + abs(hash(self.handle))
         return meta
+
+    def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
+        return visitor.visitTuningNode(self)
+
+
+########################################################################################################################
+
+
+class _LineageNodeVisitor(ABC, Generic[T]):
+    @abstractmethod
+    def visitRootNode(self, node: LineageRootNode) -> T:
+        pass
+
+    @abstractmethod
+    def visitAnchorNode(self, node: LineageAnchorNode) -> T:
+        pass
+
+    @abstractmethod
+    def visitTrainingNode(self, node: TrainingNode) -> T:
+        pass
+
+    @abstractmethod
+    def visitTuningNode(self, node: TuningNode) -> T:
+        pass
+
+    @abstractmethod
+    def visitLineage(self, lineage: Lineage) -> T:
+        pass
+
+
+class StringifyLineage(_LineageNodeVisitor[str]):
+
+    def stringifyNode(self, node: _LineageNode, extras: str):
+        s = (node.handle or "{anchor}") + ": " + node.__class__.__name__ + "(" + extras + ")" + "\n"
+        for child in node._children:
+            s += indent(1, child.accept(self), tab="|   ")
+        return s
+
+    def visitRootNode(self, node: LineageRootNode):
+        return self.stringifyNode(node, extras="")
+
+    def visitAnchorNode(self, node: LineageAnchorNode):
+        fields_reset = []
+        if node._base_model:
+            fields_reset.append("basemodel")
+        if node._tokeniser:
+            fields_reset.append("tokeniser")
+
+        return self.stringifyNode(node, extras=",".join(fields_reset))
+
+    def visitTrainingNode(self, node: TrainingNode):
+        return self.stringifyNode(node, extras=node._task.task_name)
+
+    def visitTuningNode(self, node: TuningNode):
+        return self.stringifyNode(node, extras=node._task.task_name)
+
+    def visitLineage(self, lineage: Lineage) -> T:
+        s = f"Lineage {lineage.handle}: \"{lineage.name}\"\n"
+        s += indent(1, lineage._node_tree.accept(self), tab="|   ")
+        return s
+
+
+class DictifyLineage(_LineageNodeVisitor[dict]):
+
+    def jsonifyHyperparameters(self, hp: TaskHyperparameters) -> dict:
+        d = hp.to_dict()
+        d.pop("archit_basemodel_class")
+        d.pop("custom_hf_class")
+        d.pop("model_config_or_checkpoint")
+        d.pop("tokeniser")
+        d.pop("init_weights")
+        d.pop("_hp_class")
+        d.pop("save_as")
+        return d
+
+    def recurse(self, node: _LineageNode, node_properties: dict) -> dict:
+        return {"type": node.__class__.__name__, "output": node._out is not None} | {"properties": node_properties} | {"children": [child.accept(self) for child in node._children]}
+
+    def visitRootNode(self, node: LineageRootNode):
+        d = dict()
+
+        # Deserialise config/checkpoint
+        output = node._config_or_checkpoint
+        if isinstance(output, Path):
+            output = output.as_posix()
+        elif isinstance(output, ConfigFactory):
+            output = output.buildConfig(base_model=node._getBaseModelClass(), serialised_tokeniser=node._getTokeniserFactory())
+
+        if isinstance(output, str):
+            d["checkpoint"] = output
+        elif isinstance(output, PretrainedConfig):
+            # d["config"] = output.to_dict()
+            d["config"] = output.__class__.__name__  # The entire config is uselessly big... better just send its class.
+        else:
+            raise NotImplementedError()
+
+        d["tokeniser"] = node._getTokeniserFactory().buildTokeniser().getName()
+        d["basemodel"] = node._getBaseModelClass().__name__
+        return self.recurse(node, d)
+
+    def visitAnchorNode(self, node: LineageAnchorNode):
+        d = dict()
+        if node._tokeniser is not None:
+            d["tokeniser"] = node._getTokeniserFactory().buildTokeniser().getName()
+        if node._base_model is not None:
+            d["basemodel"] = node._getBaseModelClass().__name__
+
+        return self.recurse(node, d)
+
+    def visitTrainingNode(self, node: TrainingNode):
+        d = dict()
+        d["task"] = node._task.task_name
+        if node._trainer._model_augmentation:
+            d["augmentation"] = node._trainer._model_augmentation.name()
+        d["hp"]   = self.jsonifyHyperparameters(node._hp)
+        return self.recurse(node, d)
+
+    def visitTuningNode(self, node: TuningNode):
+        d = dict()
+        d["task"] = node._task.task_name
+        if node._tuner._trainer._model_augmentation:
+            d["augmentation"] = node._tuner._trainer._model_augmentation.name()
+        d["meta"] = asdict(node._meta)
+        d["grids"] = {
+            "guaranteed": {k: v for k,v in asdict(node._tuner._guaranteed     ).items() if v is not None} if node._tuner._guaranteed      is not None else None,
+            "sampled":    {k: v for k,v in asdict(node._tuner._sampling_domain).items() if v is not None} if node._tuner._sampling_domain is not None else None,
+        }
+        d["hp"]   = self.jsonifyHyperparameters(node._hp)
+        return self.recurse(node, d)
+
+    def visitLineage(self, lineage: Lineage) -> T:
+        return {
+            "handle": lineage.handle,
+            "name": lineage.name,
+            "nodes": lineage._node_tree.accept(self)
+        }

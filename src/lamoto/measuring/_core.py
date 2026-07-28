@@ -1,4 +1,6 @@
 from typing import Protocol, Any, Dict, Type, Optional, Set, Union
+
+from archit.instantiation.configs import RecursiveSerialisable
 from typing_extensions import Self  # https://stackoverflow.com/a/77247460/9352077
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -29,7 +31,7 @@ class EvaluationEnvironment:
         return self.trainer.get_eval_dataloader(self.getDatasetWithoutCollator())
 
 
-class MetricHyperparameters:
+class MetricHyperparameters(RecursiveSerialisable):
 
     @classmethod
     def extractFromTask(cls, hyperparameters: TaskHyperparameters) -> Self:

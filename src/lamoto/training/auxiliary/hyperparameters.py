@@ -1,4 +1,4 @@
-from typing import Optional, Union, Generic, Type
+from typing import Optional, Union, Generic, Type, Any
 from typing_extensions import Self, deprecated
 from abc import ABC, abstractmethod, ABCMeta
 from dataclasses import dataclass
@@ -13,6 +13,7 @@ from datasets.arrow_dataset import DatasetInfoMixin
 from tktkt.interfaces import TokeniserWithVocabulary, TokeniserFactory
 from tktkt.interfaces.identifiers import _ProhibitDeclaringConstructor
 from archit.instantiation.abstracts import PC, HC, BaseModel
+from archit.instantiation.configs import RecursiveSerialisable, Dictable
 
 from ...util.datasets import getDatasetSize, totalBatches
 from .callbacks import CombinedCallback, EventType, CallbackAtExpInterval, CallbackAtRatchetingInterval, \
@@ -207,7 +208,7 @@ class Intervals:
 
 
 @dataclass
-class TaskHyperparameters(Generic[HC]):
+class TaskHyperparameters(RecursiveSerialisable, Generic[HC]):
     # Naming (not necessary in case a checkpoint name is given)
     save_as: Optional[str]  # Results in checkpoint names of the form "partialname+augmentation_taskname+taskaugmentation_2024-01-23_01-02-03"
 
@@ -265,16 +266,13 @@ class TaskHyperparameters(Generic[HC]):
         hp.archit_head_config = config
         return hp
 
-    def toDict(self) -> dict:
-        """
-        Convert this object to a dictionary that is safe for being stored as a JSON file.
-        """
-        hp_as_dict = dict(self.__dict__)
+    def _fields_to_dictables(self) -> dict[str, Union[Any,Dictable]]:
+        hp_as_dict = super()._fields_to_dictables()
         hp_as_dict["_hp_class"]               = self.__class__.__name__
         hp_as_dict["hard_stopping_condition"] = repr(self.hard_stopping_condition)
         hp_as_dict["eval_vs_save_intervals"]  = repr(self.eval_vs_save_intervals)
-        hp_as_dict["archit_basemodel_class"]  = self.archit_basemodel_class.__name__
-        hp_as_dict["custom_hf_class"]         = self.custom_hf_class.__name__ if self.custom_hf_class else None
+        hp_as_dict["archit_basemodel_class"]  = self.archit_basemodel_class.__name__ if self.archit_basemodel_class else None
+        hp_as_dict["custom_hf_class"]         = self.custom_hf_class.__name__        if self.custom_hf_class        else None
         if isinstance(self.model_config_or_checkpoint, PretrainedConfig):
             hp_as_dict["model_config_or_checkpoint"] = {
                 "_config_class":  self.model_config_or_checkpoint.__class__.__name__,
@@ -283,6 +281,30 @@ class TaskHyperparameters(Generic[HC]):
         if self.tokeniser is not None and not isinstance(self.tokeniser, str):
             hp_as_dict["tokeniser"] = repr(self.tokeniser)
         return hp_as_dict
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Self:
+        """
+        Inverse of TaskHyperparameters.to_dict(), with the possible exception of not restoring the tokeniser.
+        """
+        hp_class = eval(data.pop("_hp_class"))
+        hp = hp_class(**data)
+        hp.hard_stopping_condition = eval(hp.hard_stopping_condition)
+        hp.eval_vs_save_intervals = eval(hp.eval_vs_save_intervals)
+        hp.archit_basemodel_class = eval(hp.archit_basemodel_class)
+        hp.custom_hf_class = eval(hp.custom_hf_class) if hp.custom_hf_class is not None else None
+        if isinstance(hp.model_config_or_checkpoint, dict):
+            config_class = eval(hp.model_config_or_checkpoint["_config_class"])
+            config_fields = hp.model_config_or_checkpoint["_config_fields"]
+            hp.model_config_or_checkpoint = config_class(**config_fields)
+        if hp.tokeniser is not None:
+            try:
+                hp.tokeniser = eval(hp.tokeniser)
+            except:
+                hp.tokeniser = None
+                warnings.warn(
+                    f"Tokeniser set to 'None' (so the model's default tokeniser will be used) because it could not be reconstructed from the given value:\n{hp.tokeniser}")
+        return hp
 
     def __setattr__(self, key, value):
         """Ensures that all field assignments are case-insensitive. (The only part that is not case-insensitive are constructor arguments.)"""
@@ -294,29 +316,6 @@ class TaskHyperparameters(Generic[HC]):
             return getattr(self, item.lower())
         else:
             raise AttributeError(item)
-
-
-def hyperparametersFromDict(hp_as_dict: dict) -> TaskHyperparameters:
-    """
-    Inverse of TaskHyperparameters.toDict(), with the possible exception of not restoring the tokeniser.
-    """
-    hp_class = eval(hp_as_dict.pop("_hp_class"))
-    hp = hp_class(**hp_as_dict)
-    hp.hard_stopping_condition = eval(hp.hard_stopping_condition)
-    hp.eval_vs_save_intervals  = eval(hp.eval_vs_save_intervals)
-    hp.archit_basemodel_class  = eval(hp.archit_basemodel_class)
-    hp.custom_hf_class         = eval(hp.custom_hf_class) if hp.custom_hf_class is not None else None
-    if isinstance(hp.model_config_or_checkpoint, dict):
-        config_class = eval(hp.model_config_or_checkpoint["_config_class"])
-        config_fields = hp.model_config_or_checkpoint["_config_fields"]
-        hp.model_config_or_checkpoint = config_class(**config_fields)
-    if hp.tokeniser is not None:
-        try:
-            hp.tokeniser = eval(hp.tokeniser)
-        except:
-            hp.tokeniser = None
-            warnings.warn(f"Tokeniser set to 'None' (so the model's default tokeniser will be used) because it could not be reconstructed from the given value:\n{hp.tokeniser}")
-    return hp
 
 
 @deprecated("Use your task's .getDefaultHyperparameters() method instead.")
