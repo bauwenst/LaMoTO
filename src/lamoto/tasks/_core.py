@@ -1,7 +1,7 @@
 """
 Core fine-tuning script for any task.
 """
-from typing import Any, Dict, Type, List, Tuple, Generic, Optional, Union
+from typing import Any, Generic, Optional, Union
 from pathlib import Path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -32,8 +32,8 @@ class RankingMetricSpec:
 
 @dataclass
 class MetricSetup:
-    to_compute: List[str]               # Names of all the HuggingFace evaluate metrics to load and compute in the end.
-    to_track: Dict[str, Dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
+    to_compute: list[str]               # Names of all the HuggingFace evaluate metrics to load and compute in the end.
+    to_track: dict[str, dict[str,str]]  # metric name -> result name -> formatted name, used for graphing intermediate evaluations.
     to_rank: Optional[RankingMetricSpec] = None   # Which of these to measure for finding the best model with the validation set. Defaults to loss.
 
 
@@ -43,8 +43,8 @@ class Task(ABC, Generic[HC]):
     certain downstream task.
     """
 
-    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: List[Union[str,FieldType]], label_field: Union[Union[str,FieldType], List[Union[str,FieldType]]],
-                 archit_class: Type[ModelWithHead[PC,HC]], automodel_class: Type[_BaseAutoModelClass], **automodel_args):
+    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: list[Union[str,FieldType]], label_field: Union[Union[str,FieldType], list[Union[str,FieldType]]],
+                 archit_class: type[ModelWithHead[PC,HC]], automodel_class: type[_BaseAutoModelClass], **automodel_args):
         self.task_name       = task_name
         self.metric_config   = metric_config
         self.dataset_metadata = DatasetMetadata(
@@ -63,7 +63,7 @@ class Task(ABC, Generic[HC]):
         self.hyperparameters: Optional[TaskHyperparameters[HC]] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
         self.model_config: Optional[CombinedConfig] = None
-        self.metrics: Optional[Dict[str, Metric]] = None
+        self.metrics: Optional[dict[str, Metric]] = None
 
     def resetCaches(self):
         self._dataset_cache_raw      = None
@@ -92,7 +92,7 @@ class Task(ABC, Generic[HC]):
         pass
 
     @abstractmethod
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         pass
 
     def sneakyLogitTransform(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -135,7 +135,7 @@ class Task(ABC, Generic[HC]):
         self.hyperparameters = hp
     def _setModelConfig(self, mc: Optional[CombinedConfig]):
         self.model_config = mc
-    def _setMetrics(self, m: Optional[Dict[str, Metric]]):
+    def _setMetrics(self, m: Optional[dict[str, Metric]]):
         self.metrics = m
     def _setTokenizer(self, tk: Optional[PreTrainedTokenizerBase]):
         self.tokenizer = tk
@@ -217,11 +217,16 @@ class Task(ABC, Generic[HC]):
             add_special_tokens=True
         )
 
-    def train(self, hyperparameters: TaskHyperparameters[HC]=None, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None) -> Tuple[str, Dict[str, float]]:
+    def train(self, hyperparameters: TaskHyperparameters[HC]=None, model_augmentation: ModelAugmentation=None, resume_from_folder: Path=None, smoke: bool=False) -> tuple[str, dict[str, float]]:
         from ..training.training import TaskTrainer  # Import happens here to prevent circular importing.
         return TaskTrainer(model_augmentation).train(
-            task=self, hyperparameters=hyperparameters or self.getDefaultHyperparameters(), resume_from_folder=resume_from_folder
+            task=self, hyperparameters=hyperparameters or self.getDefaultHyperparameters(), resume_from_folder=resume_from_folder, smoke=smoke
         )
+
+    def smoke(self):
+        """Smoke test of the parts of training defined by this task using its default hyperparameters."""
+        from archit.instantiation.heads import HeadConfigWithLabels
+        self.train(hyperparameters=self.getDefaultHyperparameters().withHeadConfig(HeadConfigWithLabels(num_labels=10)), smoke=True)
 
 
 class TaskWrapper(Task[HC]):
@@ -253,7 +258,7 @@ class TaskWrapper(Task[HC]):
     def adjustHyperparameters(self, hp: TaskHyperparameters[HC]):
         return self._method_implementations.adjustHyperparameters(hp)
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         return self._method_implementations.getPredictionsAndReferences(eval)
 
     def sneakyLogitTransform(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -265,7 +270,7 @@ class TaskWrapper(Task[HC]):
         super()._setHyperparameters(hp)
         self._method_implementations._setHyperparameters(hp)
 
-    def _setMetrics(self, m: Optional[Dict[str, Metric]]):
+    def _setMetrics(self, m: Optional[dict[str, Metric]]):
         super()._setMetrics(m)
         self._method_implementations._setMetrics(m)
 
@@ -283,4 +288,4 @@ class TaskWrapper(Task[HC]):
 
 
 __all__ = ["Task", "MetricSetup", "RankingMetricSpec", "TaskHyperparameters", "getDefaultHyperparameters", "TaskWrapper",
-           "DatasetDict", "DataCollator", "Any", "Tuple", "Path", "ModelAugmentation", "EvalPrediction"]
+           "DatasetDict", "DataCollator", "Any", "Path", "ModelAugmentation", "EvalPrediction"]

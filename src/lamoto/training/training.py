@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, Any, List
+from typing import Any
 from pathlib import Path
 
 import time
@@ -28,7 +28,7 @@ from ..measuring._core import LamotoMetric, EvaluationEnvironment
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash
-from ..util.visuals import log, printLamotoWelcome
+from ..util.visuals import log, printLamotoWelcome, warn
 from .auxiliary.callbacks import *
 from .auxiliary.hyperparameters import *
 from .auxiliary.hyperparameters import _CallbackInterval, _FixedBatchesInterval
@@ -45,7 +45,7 @@ def showWarningsAndProgress(enabled: bool):
 
 class TaskTrainer:
 
-    def __init__(self, model_augmentation: ModelAugmentation=None, custom_callbacks: List[TrainerCallback]=None):
+    def __init__(self, model_augmentation: ModelAugmentation=None, custom_callbacks: list[TrainerCallback]=None):
         self._model_augmentation = model_augmentation
         self._extra_callbacks = custom_callbacks or []
         self._is_tuning = False
@@ -54,10 +54,14 @@ class TaskTrainer:
         self,
         task: Task,
         hyperparameters: TaskHyperparameters[HC]=None,
-        resume_from_folder: Path=None
-    ) -> Tuple[str, Dict[str, float]]:
+        resume_from_folder: Path=None,
+        smoke: bool=False
+    ) -> tuple[str, dict[str, float]]:
         """
         Encapsulation of everything you need to do to get a (modified) `transformers.Trainer` running.
+
+        :param smoke: If true, performs a smoke test that runs everything except loading the model and doing the training,
+                      so that you know the hyperparameters, dataset, tokeniser and metrics do not produce errors.
         """
         if hyperparameters is None:
             hyperparameters = task.getDefaultHyperparameters()
@@ -98,8 +102,13 @@ class TaskTrainer:
         # Imputation of device batch size specifically
         n_devices = torch.cuda.device_count()
         if n_devices == 0:
-            raise RuntimeError("No CUDA devices found on this machine.")
-        if hyperparameters.examples_per_effective_batch % n_devices != 0:  # This is an unsolvable issue by setting a new device batch size.
+            _message = "No CUDA devices found on this machine."
+            if smoke:
+                n_devices = 1
+                warn(_message)
+            else:
+                raise RuntimeError(_message)
+        elif hyperparameters.examples_per_effective_batch % n_devices != 0:  # This is an unsolvable issue by setting a new device batch size.
             raise ValueError(f"Effective batch size ({hyperparameters.examples_per_effective_batch}) must be a multiple of the amount of devices ({n_devices}).")
 
         n_examples_per_pass_per_device = hyperparameters.examples_per_device_batch
@@ -150,7 +159,7 @@ class TaskTrainer:
         task._setModelConfig(model_config)
 
         model_identifier, global_model_identifier = self._getRunIdentifiers(task, hyperparameters)
-        folder_of_this_models_checkpoints = self._getCheckpointPath(global_model_identifier, hyperparameters)
+        folder_of_this_models_checkpoints = self._getCheckpointPath(global_model_identifier, hyperparameters) if not smoke else Path(".")
 
         # Set up tokeniser
         log("Loading tokeniser...")
@@ -205,7 +214,9 @@ class TaskTrainer:
         hf_checkpoint_classname = task.model_config.architectures[0] if task.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
         is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and task._isHfCheckpointForThisTask(hf_checkpoint_classname)
         is_custom_hf_architecture = hyperparameters.custom_hf_class is not None
-        if not is_exact_hf_checkpoint and not is_custom_hf_architecture:  # Use ArchIt. This is the usual case.
+        if smoke:
+            model = None
+        elif not is_exact_hf_checkpoint and not is_custom_hf_architecture:  # Use ArchIt. This is the usual case.
             log("Instantiating an ArchIt model.")
             torch.set_default_dtype(task.automodel_args["torch_dtype"])
             if hyperparameters.init_weights:
@@ -227,31 +238,32 @@ class TaskTrainer:
                 raise ImpossibleBranchError()
 
         # ...and augment it in-place (possibly with the tokeniser). We assume the augmentation uses .base_model when it needs to.
-        if self._model_augmentation:
-            if hyperparameters.init_weights:
-                self._model_augmentation.augmentAndLoad(model, task.tokenizer, checkpoint=hyperparameters.model_config_or_checkpoint)
-            else:
-                self._model_augmentation.augment(model, task.tokenizer)
-        model.to("cuda")
-        log("Model sent to GPU.")
-        print("\t Attention implementation:", model.config._attn_implementation)
-        print("\tPrecision at construction:", model.dtype)  # Note: the way this is computed is just by looking at the dtype of the last model parameter. So let's hope it's not an exception to the rule.
+        if not smoke:
+            if self._model_augmentation:
+                if hyperparameters.init_weights:
+                    self._model_augmentation.augmentAndLoad(model, task.tokenizer, checkpoint=hyperparameters.model_config_or_checkpoint)
+                else:
+                    self._model_augmentation.augment(model, task.tokenizer)
+            model.to("cuda")
+            log("Model sent to GPU.")
+            print("\t Attention implementation:", model.config._attn_implementation)
+            print("\tPrecision at construction:", model.dtype)  # Note: the way this is computed is just by looking at the dtype of the last model parameter. So let's hope it's not an exception to the rule.
 
         # ...and verify that after all of this, the model, the config and the tokeniser all agree about the pad token.
-        pad_tk = task.tokenizer.pad_token_id
-        pad_model = model.config.pad_token_id
+        pad_tk     = task.tokenizer.pad_token_id
         pad_config = task.model_config.base_model_config.pad_token_id
+        pad_model  = model.config.pad_token_id if not smoke else pad_config
         print("Verifying that padding indices match:")
-        print("\t    Model:", pad_model)
-        print("\t   Config:", pad_config)
         print("\tTokeniser:", pad_tk)
+        print("\t   Config:", pad_config)
+        print("\t    Model:", pad_model)
         print()
+        if pad_config != pad_tk:
+            raise RuntimeError("Mismatch between padding token in the loaded model config and the tokeniser!")
         if pad_model != pad_tk:
             raise RuntimeError("Mismatch between padding token in the model and the tokeniser!")
         if pad_model != pad_config:
             raise RuntimeError("Mismatch between padding token in the model and in the loaded model config!")
-        if pad_config != pad_tk:
-            raise RuntimeError("Mismatch between padding token in the loaded model config and the tokeniser!")
 
         # Now that we have a reference to the dataset and model, build the metrics.
         # (Some need access to the ModelTrainer for collation, but since we don't know which trainer we'll instantiate
@@ -267,18 +279,19 @@ class TaskTrainer:
         task._setMetrics({name: METRICS.load(name,env) for name in task.metric_config.to_compute})
 
         # Set up reporting too
-        folder_wandb = folder_of_this_models_checkpoints / "wandb"
-        folder_wandb.mkdir(exist_ok=True)
-        wandb.init(
-            mode="disabled" if hyperparameters.discard_artifacts or not hyperparameters.wandb_project else "online",
+        if not smoke:
+            folder_wandb = folder_of_this_models_checkpoints / "wandb"
+            folder_wandb.mkdir(exist_ok=True)
+            wandb.init(
+                mode="disabled" if hyperparameters.discard_artifacts or not hyperparameters.wandb_project else "online",
 
-            project=hyperparameters.wandb_project,
-            group=model_identifier,
-            name=global_model_identifier,
-            tags=[task.task_name, torch.cuda.get_device_name()] + ([self._model_augmentation.name()] if self._model_augmentation else []),
+                project=hyperparameters.wandb_project,
+                group=model_identifier,
+                name=global_model_identifier,
+                tags=[task.task_name, torch.cuda.get_device_name()] + ([self._model_augmentation.name()] if self._model_augmentation else []),
 
-            dir=folder_wandb.as_posix()
-        )
+                dir=folder_wandb.as_posix()
+            )
 
         # Training arguments
         # - Sizes
@@ -375,11 +388,11 @@ class TaskTrainer:
         )
 
         # - Build optimiser
-        optimizer = torch.optim.AdamW(model.parameters(), lr=hyperparameters.learning_rate, weight_decay=hyperparameters.adamw_decay_rate, betas=(0.9, 0.999))  # Not using transformers.optimization because it gives a deprecation warning.
+        optimizer = torch.optim.AdamW(model.parameters() if not smoke else [torch.nn.Parameter(data=torch.zeros(1))], lr=hyperparameters.learning_rate, weight_decay=hyperparameters.adamw_decay_rate, betas=(0.9, 0.999))  # Not using transformers.optimization because it gives a deprecation warning.
         scheduler = transformers.optimization.get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=n_descents_of_warmup)  # Not using a linear decay because that's the whole point of having Adam.
 
         # - Build callbacks
-        callbacks: List[TrainerCallback] = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(task.tokenizer), StatefulTokeniserCallback()]
+        callbacks: list[TrainerCallback] = [CheckpointLastModel(), SaveTokeniserWithCheckpoints(task.tokenizer), StatefulTokeniserCallback()]
         if hyperparameters.track_best_checkpoint and hyperparameters.evals_of_patience is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping_patience=hyperparameters.evals_of_patience))  # Patience is the amount of eval calls you can tolerate worsening loss.
 
@@ -439,6 +452,10 @@ class TaskTrainer:
                                                                  for metric_name, result_formats in metrics_to_track.items()
                                                                  for result_name, formatting in result_formats.items()})
                 )
+
+        if smoke:
+            task.resetTemporaryFields()
+            return "", dict()
 
         # At last, the Trainer object.
         TrainerClass = ModelTrainer if compute_eval_loss else ModelTrainerWithoutEvaluationLoop
@@ -577,14 +594,14 @@ class TaskTrainer:
         """Internal method used when saving results is handled by something that wraps the Trainer."""
         self._is_tuning = True
 
-    def _prefixMetrics(self, metrics: Dict[str,Any], metric_key_prefix: str) -> Dict[str,Any]:
+    def _prefixMetrics(self, metrics: dict[str,Any], metric_key_prefix: str) -> dict[str,Any]:
         metrics = metrics.copy()
         for key in list(metrics.keys()):
             if not key.startswith(f"{metric_key_prefix}_"):
                 metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
         return metrics
 
-    def _getRunIdentifiers(self, task: Task, hp: TaskHyperparameters) -> Tuple[str,str]:
+    def _getRunIdentifiers(self, task: Task, hp: TaskHyperparameters) -> tuple[str,str]:
         if hp.save_as:
             model_name = hp.save_as
         elif isinstance(hp.model_config_or_checkpoint, str):
@@ -603,7 +620,7 @@ class TaskTrainer:
         if hp.store_in_hf_cache:
             return LamotoPaths.append(Path(HF_HUB_CACHE), global_identifier)  # If that first path doesn't exist yet, it will be created automatically.
         else:
-            return LamotoPaths.append(LamotoPaths.pathToCheckpoints(), global_identifier)
+            return LamotoPaths.pathToCheckpoints(global_identifier)
 
     def _getEvalPath(self, global_identifier: str, identifier_suffix: str=""):
-        return LamotoPaths.append(LamotoPaths.pathToEvaluations(), global_identifier + identifier_suffix)
+        return LamotoPaths.pathToEvaluations(global_identifier + identifier_suffix)

@@ -13,9 +13,6 @@ def log(*args, **kwargs):
     print(f"[LaMoTO | {time.strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
 
 
-from warnings import warn
-
-
 def _monkeypatched_print_warning(message, category, filename, lineno, file=None, line=None):
     bold = colorama.Style.BRIGHT
     unbold = colorama.Style.NORMAL
@@ -23,6 +20,9 @@ def _monkeypatched_print_warning(message, category, filename, lineno, file=None,
     print(f"{colorama.Fore.YELLOW}{bold}{category.__name__} ({path.parent.name}/{path.name} at L{lineno}):{unbold} {message}{colorama.Fore.RESET}")
 
 warnings.showwarning = _monkeypatched_print_warning
+
+from warnings import warn as _warn
+warn = _warn
 
 
 def printLamotoWelcome():
