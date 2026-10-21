@@ -13,8 +13,10 @@ from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, TextFi
 class POS(Task[TokenClassificationHeadConfig]):
 
     def __init__(self):
-        log("Generating PoS tagset...")
-        self.tagset = ["B-" + tag for tag in self._loadDataset()["train"].features["upos"][0].names]  # At some point they changed .feature to just [0], but I don't know when.
+        self._id_to_tag = self._generateTagset()
+        self._tag_to_id = {tag: i for i, tag in enumerate(self._id_to_tag)}
+        self._id_to_tag_seqeval = ["B-" + tag for tag in self._id_to_tag]  # We add the B- because seqeval (in getPredictionsAndReferences) doesn't work with tags that don't start with B- and
+
         super().__init__(
             task_name="POS",
             text_fields=[ListOfField(TextField("tokens"))],
@@ -29,8 +31,38 @@ class POS(Task[TokenClassificationHeadConfig]):
             archit_class=ForSingleLabelTokenClassification,
             automodel_class=AutoModelForTokenClassification,
 
-            num_labels=len(self.tagset)
+            num_labels=len(self._id_to_tag)
         )
+
+    def _generateTagset(self) -> list[str]:  # It used to be that the HF UD dataset exposed a feature where you could just get all the possible class labels. Sadly no longer the case.
+        # Taken from https://universaldependencies.org/u/pos/index.html
+        return [
+            "ADJ",    # adjective
+            "ADP",    # adposition
+            "ADV",    # adverb
+            "AUX",    # auxiliary
+            "CCONJ",  # coordinating conjunction
+            "DET",    # determiner
+            "INTJ",   # interjection
+            "NOUN",   # noun
+            "NUM",    # numeral
+            "PART",   # particle
+            "PRON",   # pronoun
+            "PROPN",  # proper noun
+            "PUNCT",  # punctuation
+            "SCONJ",  # subordinating conjunction
+            "SYM",    # symbol
+            "VERB",   # verb
+            "X",      # other
+        ]
+        # Empirical:
+        # # log("Generating PoS tagset...")
+        # counter = Counter()
+        # dataset = self._loadDataset()
+        # for split in dataset:
+        #     for example in dataset[split]:
+        #         counter.update(label_sequence["upos"])
+        # return sorted(counter.keys(), key=counter.get, reverse=True)
 
     def _loadDataset(self) -> DatasetDict:
         """
@@ -41,7 +73,7 @@ class POS(Task[TokenClassificationHeadConfig]):
         return UniversalDependenciesDataset("en_ewt").load()
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        sanitiser = FilterAndCorrectUDtypes()
+        sanitiser = FilterAndCorrectUDtypes(pos_tag_mapping=self._tag_to_id)
         flattener = FlattenWordLabels(tokenizer=self.tokenizer,
                                       max_tokens=self._getMaxInputLength(),
                                       add_specials=self.hyperparameters.add_special_tokens,
@@ -59,12 +91,12 @@ class POS(Task[TokenClassificationHeadConfig]):
         return replaceDatasetColumns_OneExampleToOneExample(dataset, datasetMap)
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
-        hp.archit_head_config.num_labels = len(self.tagset)
+        hp.archit_head_config.num_labels = len(self._id_to_tag)
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.
         assert predictions.shape == labels.shape
 
@@ -75,7 +107,7 @@ class POS(Task[TokenClassificationHeadConfig]):
             all_labels.append([])
             for position_id in range(labels.shape[1]):
                 if labels[example_id, position_id] != -100:
-                    all_predictions[-1].append(self.tagset[predictions[example_id, position_id]])  # seqeval requires string labels rather than ints. It's weird like that.
-                    all_labels[-1].append(     self.tagset[labels[example_id, position_id]])
+                    all_predictions[-1].append(self._id_to_tag[predictions[example_id, position_id]])  # seqeval requires string labels rather than ints. It's weird like that.
+                    all_labels[-1].append(self._id_to_tag[labels[example_id, position_id]])
 
         return all_predictions, all_labels

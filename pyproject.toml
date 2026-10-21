@@ -22,12 +22,13 @@ classifiers = [
 ]
 dependencies = [
     "transformers >= 4.45.1",  # Note: training is unstable between >4.45.2 and at least 4.48.0.
-    "datasets <= 3.6.0",  # Datasets 4 no longer supports CoNLL-2003. https://github.com/huggingface/datasets/issues/7675#issuecomment-3053565137,
+    "datasets >= 5.0.0",
     "evaluate >= 0.4.1",
     "pyfiglet >= 1.0.2",
     "wandb",
     "scikit-learn",  # Technically a dependency of evaluate, but they refuse to add it to their metadata.
     "conllu",
+    "seqeval",
     "zstandard"  # Needed for SlimPajama dataset. HuggingFace won't tell you, of course. Instead, SentencePiece will complain that your corpus has 0 sentences.
 ]
 

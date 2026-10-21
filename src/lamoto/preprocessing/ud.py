@@ -10,7 +10,7 @@ class UniversalDependenciesDataset:
         self.name = name
 
     def load(self) -> DatasetDict:  # Takes care of remote code and renaming splits and so on.
-        dataset = load_dataset("universal-dependencies/universal_dependencies", self.name, trust_remote_code=True)
+        dataset = load_dataset("universal-dependencies/universal_dependencies", self.name)
         if "dev" in dataset:
             dataset["validation"] = dataset.pop("dev")
         return dataset
@@ -18,8 +18,9 @@ class UniversalDependenciesDataset:
 
 class FilterAndCorrectUDtypes:
 
-    def __init__(self, dependency_tag_mapping: dict[str, int]=None):
-        self._tag_mapping = dependency_tag_mapping or dict()
+    def __init__(self, pos_tag_mapping: dict[str, int]=None, dependency_tag_mapping: dict[str, int]=None):
+        self._pos_mapping = pos_tag_mapping or dict()
+        self._dp_mapping  = dependency_tag_mapping or dict()
 
     def preprocess(self, words: list[str], heads: list[Union[int,str]], relations: list[str]=None, pos_tags: list[Union[int,str]]=None) -> tuple[list[str], list[int], list[int], list[int]]:
         """
@@ -34,9 +35,11 @@ class FilterAndCorrectUDtypes:
         if relations is None:
             relations = [None]*len(words)
         else:
-            assert self._tag_mapping
+            assert self._dp_mapping
         if pos_tags is None:
             pos_tags = [-100]*len(words)
+        else:
+            assert self._pos_mapping
         assert len(words) == len(heads) == len(relations) == len(pos_tags)
 
         filtered_words     = []
@@ -47,8 +50,8 @@ class FilterAndCorrectUDtypes:
             if head != "None":  # For entries where this is true, it is an MWE when  example["upos"][i] == 13 and example["xpos"][i] is None and example["deprel"][i] == "_"
                 filtered_words    .append(word)
                 filtered_heads    .append(int(head))
-                filtered_relations.append(self._tag_mapping[relation] if isinstance(relation, str) else -100)
-                filtered_pos      .append(int(pos))
+                filtered_relations.append(self._dp_mapping[relation] if isinstance(relation, str) else -100)
+                filtered_pos      .append(self._pos_mapping[pos]     if isinstance(pos, str) else -100)
                 # print(gridify([example["tokens"], example["xpos"], example["upos"], example["head"], example["deprel"]]))
 
         return filtered_words, filtered_heads, filtered_relations, filtered_pos

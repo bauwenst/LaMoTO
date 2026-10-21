@@ -1,4 +1,3 @@
-from typing import List
 from datasets import load_dataset
 from transformers import DataCollatorWithPadding, AutoModelForSequenceClassification
 
@@ -18,7 +17,7 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
 
     BASE_REPO = "glue"
 
-    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: List[str], num_labels: int, is_regressive: bool=False):
+    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: list[str], num_labels: int, is_regressive: bool=False):
         super().__init__(
             task_name=task_name,
             text_fields=text_fields,
@@ -40,7 +39,7 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
         )
 
     def _loadDatasetRaw(self) -> DatasetDict:
-        return load_dataset(self.BASE_REPO, self.task_name.lower().replace("-", ""), trust_remote_code=True)
+        return load_dataset(self.BASE_REPO, self.task_name.lower().replace("-", ""))
 
     def adjustHyperparameters(self, hp: SequenceTaskHyperparameters):
         hp.archit_head_config.num_labels = self._num_labels
@@ -48,7 +47,7 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
     def getCollator(self) -> DataCollator:
         return DataCollatorWithPadding(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.
         return predictions.tolist(), labels.tolist()
 

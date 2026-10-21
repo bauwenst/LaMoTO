@@ -36,7 +36,7 @@ class NER(Task[TokenClassificationHeadConfig]):
         )
 
     def _loadDataset(self) -> DatasetDict:
-        return load_dataset("eriktks/conll2003", trust_remote_code=True)
+        return load_dataset("eriktks/conll2003", revision="refs/pr/15")
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         tokenise_truncate_flatten = FlattenWordLabels(tokenizer=self.tokenizer,
@@ -59,7 +59,7 @@ class NER(Task[TokenClassificationHeadConfig]):
     def getCollator(self) -> DataCollator:
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         # print(eval.predictions.shape, eval.predictions[-1,:,:])
         # print(eval.label_ids.shape,   eval.label_ids[-1,:])
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.
