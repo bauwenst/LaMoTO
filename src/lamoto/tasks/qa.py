@@ -1,7 +1,7 @@
 """
 Extractive question answering with and without answerability classification.
 """
-from typing import Dict, Any, List, Tuple
+from typing import Any
 from dataclasses import dataclass
 from datasets import load_dataset, DatasetDict
 
@@ -35,7 +35,7 @@ class DataCollatorForQA(DataCollatorMixin):
     padding: str
     return_tensors: str = "pt"
 
-    def torch_call(self, examples: List[Dict[str,Any]]):
+    def torch_call(self, examples: list[dict[str,Any]]):
         # Take labels out of the examples beforehand.
         label_names = [name for name in examples[0].keys() if "label" in name]
         labels = {name: [example.pop(name) for example in examples] for name in label_names}
@@ -100,7 +100,7 @@ class _SquadTask(Task):
         return imputeTestSplit(load_dataset("rajpurkar/squad" + "_v2"*self._v2), column_for_stratification=None, seed=self.hyperparameters.seed)
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        def squadTokenConversion(example: Dict[str, Any]) -> Dict[str, Any]:
+        def squadTokenConversion(example: dict[str, Any]) -> dict[str, Any]:
             """
             About 20x slower per example than the preprocessor for UD PoS tagging because here you have about 400 pretokens
             per example rather than 20. You can offset this with example-level parallelism (since the dataset is not streamed)
@@ -169,7 +169,7 @@ class _SquadTask(Task):
                 "answerable": is_answerable
             }
 
-        def squadStriding(key_to_values: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+        def squadStriding(key_to_values: dict[str, list[Any]]) -> dict[str, list[Any]]:
             """
             Has to manage two things:
               1. Given a certain layout for the special tokens, compute how many examples you will need to represent
@@ -239,7 +239,7 @@ class _SquadTask(Task):
         dataset = replaceDatasetColumns_ManyExamplesToManyExamples(dataset, squadStriding)
         return dataset
 
-    def sneakyLogitTransform(self, logits: Tuple[torch.Tensor,torch.Tensor], labels: Tuple[torch.Tensor,torch.Tensor]) -> torch.Tensor:
+    def sneakyLogitTransform(self, logits: tuple[torch.Tensor,torch.Tensor], labels: tuple[torch.Tensor,torch.Tensor]) -> torch.Tensor:
         # Note: this is not hooked up to the metric because unlike in DP, the metric is autonomous since it requires access to input_ids and context_mask.
         return torch.tensor([[1]], device=logits[0].device)
 
@@ -249,7 +249,7 @@ class _SquadTask(Task):
     def getCollator(self) -> DataCollator:
         return DataCollatorForQA(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         return [], []
 
 

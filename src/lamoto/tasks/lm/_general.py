@@ -123,7 +123,7 @@ class TokenPredictionTask(Task[HC]):
     def sneakyLogitTransform(self, logits, labels):
         return torch.tensor([[1]], device=logits[0].device)
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any, Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any, Any]:
         return None, None
 
 
@@ -133,12 +133,12 @@ class TokenPredictionTask(Task[HC]):
 # See https://github.com/huggingface/datasets/issues/7440 for what the issue is.
 # Until recently, nothing could be done about this, but since then the offending code has been put into a class method,
 # which can be monkey-patched externally.
-from typing import Union, Optional, Generator, Type
+from typing import Union, Optional, Generator
 from datasets.utils.file_utils import FilesIterable, DownloadConfig, xisfile, xisdir, xbasename, xjoin, xwalk, logger
 import time
 
 
-def _iter_from_urlpaths(cls: Type[FilesIterable], urlpaths: Union[str, list[str]], download_config: Optional[DownloadConfig]=None) -> Generator[str, None, None]:
+def _iter_from_urlpaths(cls: type[FilesIterable], urlpaths: Union[str, list[str]], download_config: Optional[DownloadConfig]=None) -> Generator[str, None, None]:
     MAX_TRIES = 6
     SKIP_EXCEPTION = False
 

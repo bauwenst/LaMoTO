@@ -1,4 +1,4 @@
-from typing import Iterable, Union, TypeVar, Generator, List, Optional, Dict, Any, Callable, Generic, Tuple, Type
+from typing import Iterable, Union, TypeVar, Generator, Optional, Any, Callable, Generic
 from abc import ABC, abstractmethod
 
 from transformers import PreTrainedTokenizerBase
@@ -23,8 +23,8 @@ from .exceptions import ImpossibleBranchError
 
 N_THREADS_DATASET_MAP = 1 if not is_cluster() else 6
 
-HuggingfaceExample     = Dict[str,Any]
-HuggingfaceBatch       = Dict[str,List[Any]]
+HuggingfaceExample     = dict[str,Any]
+HuggingfaceBatch       = dict[str,list[Any]]
 
 HuggingfaceDatasetSplit = Union[Dataset, IterableDataset]
 HuggingfaceDatasetDict  = Union[DatasetDict, IterableDatasetDict]
@@ -43,10 +43,10 @@ class DictOfLists:
     """
 
     def __init__(self, keys: Iterable[str], append_none_for_missing_keys: bool=True):
-        self._dict: Dict[str,List[Any]] = {key: [] for key in keys}
+        self._dict: dict[str,list[Any]] = {key: [] for key in keys}
         self._append_none = append_none_for_missing_keys
 
-    def append(self, items: Dict[str,Any]):
+    def append(self, items: dict[str,Any]):
         for k,v in items.items():
             self._dict[k].append(v)  # Will error for keys unknown at construction.
 
@@ -55,7 +55,7 @@ class DictOfLists:
             for k in missing_keys:
                 self._dict[k].append(None)
 
-    def toDict(self) -> Dict[str,List[Any]]:
+    def toDict(self) -> dict[str,list[Any]]:
         return self._dict
 
 
@@ -77,7 +77,7 @@ def replaceDatasetColumns_ManyExamplesToManyExamples(dataset: Dataset_or_Dataset
     return dataset.remove_columns([c for c in set(old_columns) - set(but_keep or [])])  # Note: Since .map doesn't remove columns, all the old columns will still be part of the new columns. We assume .map did not overwrite any columns, and otherwise, that the overwritten columns are declared by the caller.
 
 
-def getDatasetColumnNames(dataset: HuggingfaceDataset) -> List[str]:
+def getDatasetColumnNames(dataset: HuggingfaceDataset) -> list[str]:
     if isinstance(dataset, (DatasetDict, IterableDatasetDict)):
         first_split_name = list(dataset.keys())[0]
         return dataset.column_names[first_split_name]
@@ -105,13 +105,13 @@ def getDatasetSize(dataset: HuggingfaceDatasetSplit, split: str= "train") -> int
             raise ValueError(f"Could not resolve size of dataset split '{split}'.")  # This is e.g. the case for the SlimPajama dataset.
 
 
-def getRowCount(dataset: Dataset_or_DatasetDict) -> Union[int, Dict[str,int]]:
+def getRowCount(dataset: Dataset_or_DatasetDict) -> Union[int, dict[str,int]]:
     if isinstance(dataset, DatasetDict):
         return {split: getRowCount(dataset[split]) for split in dataset}
     return dataset.num_rows
 
 
-def sortSplits(splits: Iterable[str]) -> List[str]:
+def sortSplits(splits: Iterable[str]) -> list[str]:
     def splitSortKey(split: str):
         if "tr" in split:
             return 0
@@ -168,12 +168,12 @@ class BalancingStrategy(ABC):
     compute the target amounts for each label value according to some balancing strategy.
     """
     @abstractmethod
-    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+    def getTargetCounts(self, label_counts: list[int]) -> list[int]:
         pass
 
 
 class NoBalancing(BalancingStrategy):
-    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+    def getTargetCounts(self, label_counts: list[int]) -> list[int]:
         return label_counts
 
 
@@ -181,7 +181,7 @@ class UpsampleToBiggest(BalancingStrategy):
     def __init__(self, max_repeats: float=1_000_000_000_000):
         self._max_repeats = max_repeats
 
-    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+    def getTargetCounts(self, label_counts: list[int]) -> list[int]:
         target = max(label_counts)
         return [min(target, int(count*self._max_repeats)) for count in label_counts]
 
@@ -190,14 +190,14 @@ class DownsampleToSmallest(BalancingStrategy):
     def __init__(self, min_fraction: float=0.0):
         self._min_fraction = min_fraction
 
-    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+    def getTargetCounts(self, label_counts: list[int]) -> list[int]:
         target = min(label_counts)
         return [max(target, int(count*self._min_fraction)) for count in label_counts]
 
 
 class BalanceToMedian(BalancingStrategy):
     """Balance every label to the median of all the class labels, which will include some upsampling and some downsampling."""
-    def getTargetCounts(self, label_counts: List[int]) -> List[int]:
+    def getTargetCounts(self, label_counts: list[int]) -> list[int]:
         return [int(np.median(label_counts))]*len(label_counts)
 
 
@@ -239,7 +239,7 @@ def rebalanceLabels(dataset: Dataset_or_DatasetDict, label_column: str, strategy
     return dataset.select(np.concatenate(sampled_indices))
 
 
-def applyPerSplit(dataset_dict: Union[DatasetDict, Dict[str,Dataset]], function: Callable[[Dataset], T]) -> Dict[str,T]:
+def applyPerSplit(dataset_dict: Union[DatasetDict, dict[str,Dataset]], function: Callable[[Dataset], T]) -> dict[str,T]:
     """Take a function meant for an individual dataset and apply it to every split in a DatasetDict."""
     return {name: function(split) for name,split in dataset_dict.items()}
 
@@ -250,7 +250,7 @@ class FieldType(ABC, Generic[T]):
     def extract(self, example: dict) -> T:
         pass
 
-    def involvesType(self, cls: "Type[FieldType[Any]]") -> bool:
+    def involvesType(self, cls: "type[FieldType[Any]]") -> bool:
         """Use this when you want to know if a field is 'actually' e.g. text, even when it is wrapped as a list or tagged as a foreign field."""
         return isinstance(self, cls)
 
@@ -276,7 +276,7 @@ class UnboundedIntegerLabel(_ExplicitField[int]):
     pass
 
 
-class ListOfField(FieldType[List[T2]]):
+class ListOfField(FieldType[list[T2]]):
     """Field that is a list of a certain type. The constructor asks for a field type that pretends that the list is
        replaced by a single element (it knows how to extract the list, but its type annotation describes the element type).
        For example, a column that is a list of tokens is a ListOfField(TextField("tokens"))."""
@@ -320,7 +320,7 @@ class CharacterIndex(_IndexLabel):
 class WordIndex(_IndexLabel):
     pass
 
-class SpanLabel(FieldType[Tuple[int,int]]):
+class SpanLabel(FieldType[tuple[int,int]]):
     def __init__(self, label_start: _IndexLabel, label_end: _IndexLabel):
         assert type(label_start) == type(label_end)
         # assert label_start.target.field == label_end.target.field
@@ -355,11 +355,11 @@ class NestedLabel(ImplicitLabel[T]):
 
 class DatasetMetadata:
 
-    def __init__(self, text_fields: List[FieldType], label_fields: List[FieldType]):
+    def __init__(self, text_fields: list[FieldType], label_fields: list[FieldType]):
         self.text_fields  = text_fields
         self.label_fields = label_fields
 
-    def getLabelCounts(self, dataset: Dataset) -> Dict[str, Dict[Any, int]]:
+    def getLabelCounts(self, dataset: Dataset) -> dict[str, dict[Any, int]]:
         field_to_valuecounts = dict()
         for label_field in self.label_fields:
             if isinstance(label_field, ListOfField):
@@ -371,7 +371,7 @@ class DatasetMetadata:
 
         return field_to_valuecounts
 
-    def getLabelDistribution(self, dataset: Dataset) -> Dict[str, Dict[Any, float]]:
+    def getLabelDistribution(self, dataset: Dataset) -> dict[str, dict[Any, float]]:
         field_to_valuefractions = dict()
         for field, value_counts in self.getLabelCounts(dataset).items():
             total = sum(value_counts.values())

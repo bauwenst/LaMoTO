@@ -1,4 +1,4 @@
-from typing import Tuple, Any, Optional, Union, List, Dict
+from typing import Any, Optional, Union
 from dataclasses import dataclass
 from datasets import DatasetDict
 from transformers import EvalPrediction, PreTrainedTokenizerBase, DataCollator
@@ -66,7 +66,7 @@ class COPA(SuperGLUETask):
     def getCollator(self) -> DataCollator:
         return DataCollatorForMultipleChoice(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         return eval.predictions.squeeze().argmax(-1).tolist(), eval.label_ids.squeeze().tolist()  # B x C x 1  --squeeze->  B x C  --argmax->  B.
 
 
@@ -82,7 +82,7 @@ class DataCollatorForMultipleChoice(DataCollatorMixin):
     max_length: Optional[int] = None
     pad_to_multiple_of: Optional[int] = None
 
-    def __call__(self, examples: List[Dict[str, Any]]):
+    def __call__(self, examples: list[dict[str, Any]]):
         # Take labels out of the examples beforehand, because they aren't nested.
         label_name = "label" if "label" in examples[0].keys() else "labels"
         labels = [example.pop(label_name) for example in examples]

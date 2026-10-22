@@ -19,7 +19,7 @@ This is pretty much limited to the CANINE model. According to J.H. Clark via per
 
 # TODO: There's something to be said for having a split point before the first character and after the last character.
 #       This way, the model will better learn compound boundaries.
-from typing import Iterable, List
+from typing import Iterable
 
 import numpy as np
 from datasets import Dataset
@@ -51,7 +51,7 @@ class ForSingleLabelTokenClassificationFactory:
         - Its __call__ is another class's __init__.
     """
 
-    def __init__(self, class_weights: List[float]):
+    def __init__(self, class_weights: list[float]):
         self.class_weights = class_weights
 
     # The only method we wanted to change.
@@ -195,7 +195,7 @@ class MBR(Task[TokenClassificationHeadConfig]):
         # The other reason is the too-deeply-nested tensors due to return_tensors="pt".
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         predictions, labels = eval.predictions.argmax(-1), eval.label_ids  # The last dimension of predictions (i.e. the logits) is the amount of classes.
         predictions, labels = predictions.flatten(), labels.flatten()  # Both are EXAMPLES x TOKENS
         mask = labels != -100  # Only select results where the label isn't padding.

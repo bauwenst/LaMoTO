@@ -2,7 +2,7 @@
 Tuning framework in which many models are trained for the same task with various hyperparameter sets.
 """
 from dataclasses import dataclass, asdict
-from typing import Optional, List, Dict, Tuple, Iterable, Union, Set
+from typing import Optional, Iterable, Union
 from pathlib import Path
 
 import itertools
@@ -56,11 +56,11 @@ class HyperparameterGrid:
 
     Where possibly you use even smaller warmup steps and effective batch sizes.
     """
-    seeds: Optional[List[int]] = None,
-    warmup_steps: Optional[List[int]] = None,
-    effective_batch_sizes: Optional[List[int]] = None,
-    learning_rates: Optional[List[float]] = None,
-    adamw_decay_rates: Optional[List[float]] = None,
+    seeds: Optional[list[int]] = None,
+    warmup_steps: Optional[list[int]] = None,
+    effective_batch_sizes: Optional[list[int]] = None,
+    learning_rates: Optional[list[float]] = None,
+    adamw_decay_rates: Optional[list[float]] = None,
 
     @dataclass(frozen=True)  # Allows hashing
     class Sample:
@@ -90,7 +90,7 @@ class HyperparameterGrid:
                 dr=hp.adamw_decay_rate
             )
 
-    def getFullGrid(self, defaults: TaskHyperparameters) -> List[List[Union[int, float]]]:
+    def getFullGrid(self, defaults: TaskHyperparameters) -> list[list[Union[int, float]]]:
         default_sample = HyperparameterGrid.Sample.fromHyperparameters(defaults)
         return [
             self.seeds                 or [default_sample.seed],
@@ -107,7 +107,7 @@ class HyperparameterGrid:
         for seed, wu, bs, lr, dr in itertools.product(*self.getFullGrid(defaults)):
             yield HyperparameterGrid.Sample(seed=seed, wu=wu, bs=bs, lr=lr, dr=dr)
 
-    def sample(self, sampling_seed: int, n_samples: int, defaults: TaskHyperparameters, excluded: Set["HyperparameterGrid.Sample"]=None) -> Iterable["HyperparameterGrid.Sample"]:
+    def sample(self, sampling_seed: int, n_samples: int, defaults: TaskHyperparameters, excluded: set["HyperparameterGrid.Sample"]=None) -> Iterable["HyperparameterGrid.Sample"]:
         """
         Randomly samples the grid.
         :param excluded: Samples to not generate nor count towards the total amount of samples. Note that in case
@@ -140,7 +140,7 @@ class TaskTuner:
         sampling_grid: Optional[HyperparameterGrid]=None,
         guaranteed_grid: Optional[HyperparameterGrid]=None,
         ###
-        model_augmentation: Optional[ModelAugmentation]=None, custom_callbacks: List[TrainerCallback]=None
+        model_augmentation: Optional[ModelAugmentation]=None, custom_callbacks: list[TrainerCallback]=None
     ):
         assert (sampling_grid is not None and sampling_grid.domainSize() > 0) or (guaranteed_grid is not None and guaranteed_grid.domainSize() > 0)
 
@@ -254,7 +254,7 @@ class TaskTuner:
 
         return best_sample
 
-    def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: HyperparameterGrid.Sample, results_folder: Path) -> Dict[str,float]:
+    def _phase2(self, task: Task, hp: TaskHyperparameters, meta: MetaHyperparameters, best_sample: HyperparameterGrid.Sample, results_folder: Path) -> dict[str,float]:
         """
         Use the best hyperparameters you found and run until you can't.
         """
@@ -283,7 +283,7 @@ class TaskTuner:
         return path
 
 
-def sampleGridWithoutReplacement(rng: npr.Generator, n_samples: Optional[int], *domains: List[float]) -> Iterable[Tuple[float, ...]]:
+def sampleGridWithoutReplacement(rng: npr.Generator, n_samples: Optional[int], *domains: list[float]) -> Iterable[tuple[float, ...]]:
     max_n_samples = prod(len(domain) for domain in domains)
     n_samples     = n_samples or max_n_samples
     if n_samples > max_n_samples:

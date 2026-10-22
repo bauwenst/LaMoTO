@@ -1,4 +1,3 @@
-from typing import Dict, Set, Tuple, List
 from torch import Tensor
 
 import torch
@@ -20,7 +19,7 @@ class QA(AutonomousMetric):
         self.squad_counter = 0
         self.squad_v1 = evaluate.load("squad")
 
-    def computeFromEnvironment(self) -> Dict[str, float]:
+    def computeFromEnvironment(self) -> dict[str, float]:
         for batch in self.environment.getDatasetWithCollator():  # Unlike in PPL calculation, you can have batched inference here.
             context_mask = batch.pop("context_mask")
 
@@ -32,7 +31,7 @@ class QA(AutonomousMetric):
         return self._finish()
 
     def _addBatch(self, logits: Tensor, labels: Tensor,
-                  input_ids: Tensor, context_mask: Tensor) -> Tuple[List[str],List[str]]:
+                  input_ids: Tensor, context_mask: Tensor) -> tuple[list[str],list[str]]:
         predicted_answers = []
         actual_answers    = []
 
@@ -77,7 +76,7 @@ class QA(AutonomousMetric):
         self._addFromStrings(predicted_answers, actual_answers)
         return predicted_answers, actual_answers
 
-    def _addFromStrings(self, predictions: List[str], actual_answers: List[str]):
+    def _addFromStrings(self, predictions: list[str], actual_answers: list[str]):
         for predicted_answer, actual_answer in zip(predictions, actual_answers):
             prediction = {"id": str(self.squad_counter), "prediction_text": predicted_answer}
             reference  = {"id": str(self.squad_counter), "answers": [{"text": actual_answer, "answer_start": 0}]}  # The metric doesn't use this 0, so it doesn't matter.
@@ -85,10 +84,10 @@ class QA(AutonomousMetric):
             self.squad_counter += 1  # If these IDs are not unique, the squad_metric completely messes up.
 
     @classmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         return {"EM", "F1"}
 
-    def _finish(self) -> Dict[str, float]:
+    def _finish(self) -> dict[str, float]:
         raw_metrics = self.squad_v1.compute()
         self.squad_counter = 0
 

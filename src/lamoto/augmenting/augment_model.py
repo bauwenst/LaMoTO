@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import List
 
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
@@ -45,7 +44,7 @@ class ModelAugmentation(ABC):
 
 class ModelAugmentationSequence(ModelAugmentation):
 
-    def __init__(self, augmentations: List[ModelAugmentation]):
+    def __init__(self, augmentations: list[ModelAugmentation]):
         self.augmentations = augmentations
 
     def name(self) -> str:

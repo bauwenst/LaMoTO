@@ -18,7 +18,7 @@ There are three ways to do this. Approach 2 and 3 are modelled below.
             4. The embeddings you add and the head you add have to be tied by PreTrainedModel.tie_weights() which
                ViT doesn't have supporting implementations for.
 """
-from typing import Tuple, Any
+from typing import Any
 
 import torch.nn as nn
 from transformers import PreTrainedTokenizerBase, PreTrainedModel
@@ -136,7 +136,7 @@ class Embeddings_LanguageInputVitOutput(RobertaEmbeddings):
     but still an output that follows the ViT-MAE interface (see the ViTMAEEmbeddings class).
     """
 
-    def forward(self, input_ids, token_type_ids, **kwargs) -> Tuple[Any,Any,Any]:
+    def forward(self, input_ids, token_type_ids, **kwargs) -> tuple[Any,Any,Any]:
         embeddings = super()(input_ids, token_type_ids, **kwargs)
         return embeddings, None, None
 

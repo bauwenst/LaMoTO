@@ -1,4 +1,3 @@
-from typing import Tuple, Dict, Set
 from dataclasses import dataclass
 import torch
 from datasets import Dataset
@@ -17,7 +16,7 @@ class PPL_Parameters(MetricHyperparameters):
 
 class Perplexity(AutonomousMetric):
 
-    def computeFromEnvironment(self) -> Dict[str, float]:
+    def computeFromEnvironment(self) -> dict[str, float]:
         params = PPL_Parameters.extractFromTask(self.environment.hyperparameters)
         p, n, t = ppl(
             model=self.environment.model,
@@ -32,12 +31,12 @@ class Perplexity(AutonomousMetric):
         }
 
     @classmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         return {"ppl", "nll", "total_tokens"}
 
 
 def ppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset,
-        stride_fraction: float, tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
+        stride_fraction: float, tqdm_dataset_size: int=None) -> tuple[float, float, int]:
     """
     Causal perplexity has two boundary conditions:
         - One "document" (a coherent sequence of sentences) cannot be conditioned on another.

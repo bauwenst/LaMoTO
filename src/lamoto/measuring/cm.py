@@ -1,4 +1,3 @@
-from typing import Dict, Set
 from torch import Tensor
 
 import torch
@@ -34,7 +33,7 @@ class BinaryConfusionMatrix(StreamedMetric):
         return thresholded_predictions
 
     @classmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         return {
             "accuracy",
             "TN", "FP", "FN", "TP",
@@ -43,7 +42,7 @@ class BinaryConfusionMatrix(StreamedMetric):
             "PrM", "ReM", "F1M"
         }
 
-    def computeFromMemory(self) -> Dict[str, float]:
+    def computeFromMemory(self) -> dict[str, float]:
         if self.cache is None:
             raise RuntimeError("Cannot compute metric across zero examples.")
 

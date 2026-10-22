@@ -1,4 +1,4 @@
-from typing import Protocol, Any, Dict, Type, Optional, Set, Union
+from typing import Protocol, Any, Optional, Union
 
 from archit.instantiation.configs import RecursiveSerialisable
 from typing_extensions import Self  # https://stackoverflow.com/a/77247460/9352077
@@ -45,7 +45,7 @@ class MetricHyperparameters(RecursiveSerialisable):
         constructors, rather than using a factory pattern like a registry.
 
         (The other way to link user arguments to an existing metric would be passing
-        a Dict[str, PARAMCLASS] to the trainer, with no autocompletion on the string
+        a dict[str, PARAMCLASS] to the trainer, with no autocompletion on the string
         and the parameter class. At least when the task parameters have a dedicated field
         for each metric, you know what hyperparameters to fill in and don't need to know the metric name.)
         """
@@ -55,7 +55,7 @@ class MetricHyperparameters(RecursiveSerialisable):
 
 
 class Metric(Protocol):  # Protocol so that HuggingFace's evaluate.Metric is made part of the hierarchy and hence its .compute() actually counts as THE SAME method as this one, which isn't possible with a Union[LamotoMetric, HuggingfaceMetric].
-    def compute(self, predictions: Any, references: Any) -> Dict[str, Any]:
+    def compute(self, predictions: Any, references: Any) -> dict[str, Any]:
         pass
 
 
@@ -70,7 +70,7 @@ class LamotoMetric(Metric, ABC):
         self.environment = environment
 
     @abstractmethod
-    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:  # LaMoTO's type signature is more predictable.
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> dict[str, float]:  # LaMoTO's type signature is more predictable.
         pass
 
     @abstractmethod
@@ -79,7 +79,7 @@ class LamotoMetric(Metric, ABC):
 
     @classmethod
     @abstractmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         """The keys to expect in the dictionary produced by .compute()."""
         pass
 
@@ -98,11 +98,11 @@ class StreamedMetric(LamotoMetric):
     Metric to which data are added at runtime, so there is no point passing any predictions to it at compute time.
     """
 
-    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> dict[str, float]:
         return self.computeFromMemory()
 
     @abstractmethod
-    def computeFromMemory(self) -> Dict[str, float]:
+    def computeFromMemory(self) -> dict[str, float]:
         pass
 
     def isAutonomous(self) -> bool:
@@ -114,11 +114,11 @@ class AutonomousMetric(LamotoMetric):
     Metric that generates its own data, rather than just using logits and labels.
     """
 
-    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> Dict[str, float]:
+    def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> dict[str, float]:
         return self.computeFromEnvironment()
 
     @abstractmethod
-    def computeFromEnvironment(self) -> Dict[str, float]:
+    def computeFromEnvironment(self) -> dict[str, float]:
         pass
 
     def isAutonomous(self) -> bool:
@@ -128,9 +128,9 @@ class AutonomousMetric(LamotoMetric):
 class MetricRegistry:
 
     def __init__(self):
-        self.custom_metrics: Dict[str,Type[LamotoMetric]] = dict()
+        self.custom_metrics: dict[str,type[LamotoMetric]] = dict()
 
-    def registerMetric(self, name: str, metric: Type[LamotoMetric]):
+    def registerMetric(self, name: str, metric: type[LamotoMetric]):
         if name in self.custom_metrics:
             raise ValueError(f"Cannot register custom metric {name} because it already exists.")
 

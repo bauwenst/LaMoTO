@@ -23,7 +23,7 @@ Then after this, you create a script that parses command-line arguments and uses
     REGISTRYNAME.get(LINEAGENAME).run(NODENAME)
 to run an experiment.
 """
-from typing import Type, List, Iterable, Union, Optional, TypeVar, Iterator, Tuple, Callable, Generic
+from typing import Iterable, Union, Optional, TypeVar, Iterator, Callable, Generic
 from typing_extensions import Self
 from pathlib import Path
 from collections import Counter
@@ -48,7 +48,7 @@ from ..util.visuals import warn
 
 class ConfigFactory(ABC):
     @abstractmethod
-    def buildConfig(self, base_model: Type[BaseModel], serialised_tokeniser: SerialisedTokeniser) -> PretrainedConfig:
+    def buildConfig(self, base_model: type[BaseModel], serialised_tokeniser: SerialisedTokeniser) -> PretrainedConfig:
         pass
 
 Checkpoint = Union[str,Path]
@@ -65,7 +65,7 @@ class _LineageNode(ABC):
     def __init__(self, handle: str):
         self.handle = handle
 
-        self._children: List[_LineageNode] = []
+        self._children: list[_LineageNode] = []
         self._parent: Optional[_LineageNode] = None
 
     def next(self, child: LN) -> LN:
@@ -94,7 +94,7 @@ class _LineageNode(ABC):
     def accept(self, visitor: "_LineageNodeVisitor[T]") -> T:
         pass
 
-    def nextInParalllel(self, children: List["_LineageNode"]):
+    def nextInParalllel(self, children: list["_LineageNode"]):
         for child in children:
             self.next(child)
 
@@ -113,7 +113,7 @@ class _LineageNode(ABC):
 
     # Walking up the tree
 
-    def _getAncestors(self) -> List["_LineageNode"]:
+    def _getAncestors(self) -> list["_LineageNode"]:
         """Trace back the parent relationship until the top of the tree."""
         nodes = [self]
         while nodes[-1]._parent is not None:  # When this condition triggers, nodes[-1] is the top of the tree.
@@ -151,9 +151,9 @@ class _AnchorNode(_LineageNode, ABC):
     Node from which each property (e.g. the tokeniser) that isn't None is copied by all descendants for which there is
     no anchor node between this and them with the same property not None.
     """
-    def __init__(self, base_model: Optional[Type[BaseModel]], tokeniser: Optional[SerialisedTokeniser]):
+    def __init__(self, base_model: Optional[type[BaseModel]], tokeniser: Optional[SerialisedTokeniser]):
         super().__init__(handle="")
-        self._base_model: Optional[Type[BaseModel]]    = base_model
+        self._base_model: Optional[type[BaseModel]]    = base_model
         self._tokeniser: Optional[SerialisedTokeniser] = tokeniser
 
     def _getTokeniserFactory(self) -> SerialisedTokeniser:
@@ -180,7 +180,7 @@ class LineageAnchorNode(_AnchorNode):
 
 class LineageRootNode(_AnchorNode):
     def __init__(self, name: str, starting_config_or_checkpoint: NodeOutput,
-                 base_model: Type[BaseModel], tokeniser: SerialisedTokeniser):
+                 base_model: type[BaseModel], tokeniser: SerialisedTokeniser):
         super().__init__(tokeniser=tokeniser, base_model=base_model)
         self._config_or_checkpoint = starting_config_or_checkpoint
         self._lineage: Lineage = None
@@ -224,12 +224,12 @@ class LineagePlaceholderNode(_LineageNode):
             parent.next(child_tree)
         return parent
 
-    def afterMany(self, parents: List[_LineageNode]):
+    def afterMany(self, parents: list[_LineageNode]):
         """Same as after() except in bulk."""
         for parent in parents:
             self.after(parent)
 
-    def buildRegistry(self, starting_nodes: List[_LineageNode], quiet: bool=True) -> "LineageRegistry":
+    def buildRegistry(self, starting_nodes: list[_LineageNode], quiet: bool=True) -> "LineageRegistry":
         """
         Append this node tree to each of the given nodes, turn the resulting trees into lineages stored in a registry,
         and print these lineages.
@@ -308,7 +308,7 @@ class Lineage:
         else:
             raise ValueError(f"Handle not in lineage: {node_handle}")
 
-    def listHandles(self) -> List[str]:
+    def listHandles(self) -> list[str]:
         return [node.handle for node in self]
 
     def __repr__(self):
@@ -343,22 +343,22 @@ class LineageRegistry:
         except:
             raise KeyError(f"No lineage with handle '{handle}' in registry with handles {self.listHandles()}")
 
-    def listHandles(self) -> List[str]:
+    def listHandles(self) -> list[str]:
         return [l.handle for l in self]
 
-    def listNames(self) -> List[str]:
+    def listNames(self) -> list[str]:
         return [l.name for l in self]
 
     def __iter__(self) -> Iterable[Lineage]:
         for lineage in self._registry.values():
             yield lineage
 
-    def mapNodeHandles(self, f: Callable[[str,str],str]) -> Iterable[List[str]]:
+    def mapNodeHandles(self, f: Callable[[str,str],str]) -> Iterable[list[str]]:
         """
         Attempts to align the nodes of all the lineages in the registry and then for each stack of aligned nodes returns
         the list of results for applying f(lineage handle, node handle) to the nodes in that stack.
         """
-        pair_generators: List[Iterator[Tuple[Lineage,_LineageNode]]] = [zip(itertools.repeat(l), reversed(list(l))) for l in self]
+        pair_generators: list[Iterator[tuple[Lineage,_LineageNode]]] = [zip(itertools.repeat(l), reversed(list(l))) for l in self]
         results = []
         while True:
             pairs = [tryExceptNone(lambda: next(g)) for g in pair_generators]

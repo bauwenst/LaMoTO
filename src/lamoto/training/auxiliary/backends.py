@@ -1,7 +1,7 @@
 """
 Extensions of the HuggingFace Trainer, which implement the training loop behind LaMoTO's train() methods.
 """
-from typing import Optional, List, Dict, Tuple, Callable, Union, Any
+from typing import Optional, Callable, Union, Any
 from pathlib import Path
 
 import torch
@@ -37,12 +37,12 @@ class ModelTrainer(Trainer):
         args: Optional[TrainingArguments] = None,
         data_collator: Optional[DataCollator] = None,
         train_dataset: Optional[Union[Dataset, IterableDataset, Any]] = None,
-        eval_dataset: Optional[Union[Dataset, Dict[str, Dataset], Any]] = None,
+        eval_dataset: Optional[Union[Dataset, dict[str, Dataset], Any]] = None,
         tokenizer: Optional[PreTrainedTokenizerBase] = None,
         model_init: Optional[Callable[[], PreTrainedModel]] = None,
-        compute_metrics: Optional[Callable[[EvalPrediction], Dict]] = None,
-        callbacks: Optional[List[TrainerCallback]] = None,
-        optimizers: Optional[Tuple[Optimizer, LambdaLR]] = (None, None),
+        compute_metrics: Optional[Callable[[EvalPrediction], dict]] = None,
+        callbacks: Optional[list[TrainerCallback]] = None,
+        optimizers: Optional[tuple[Optimizer, LambdaLR]] = (None, None),
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None
     ):
         try:  # super() interface with processing_class rather than tokenizer, which has existed since about transformers 4.46. https://github.com/huggingface/transformers/pull/32385.
@@ -100,7 +100,7 @@ class ModelTrainer(Trainer):
         # Apply it recursively.
         model.apply(f)
 
-    def log(self, logs: Dict[str, float], start_time: Optional[float]=None):
+    def log(self, logs: dict[str, float], start_time: Optional[float]=None):
         # In transformers, the log() method figures out that you're training based on whether start_time is None... no.
         counts = {"train": 0, "eval": 0, "test": 0}
         for key in logs:
@@ -165,7 +165,7 @@ class ModelTrainer(Trainer):
         for checkpoint in checkpoint_paths[0:amount]:
             shutil.rmtree(checkpoint, ignore_errors=True)
 
-    def tryDeleteFolder(self, unless_contains_subfolders: List[str]=None):
+    def tryDeleteFolder(self, unless_contains_subfolders: list[str]=None):
         """
         Deletes the entire model folder filled by the current trainer instance. If any of the given folders are
         present, the folder is preserved along with those subfolders.
@@ -205,7 +205,7 @@ class ModelTrainerWithoutEvaluationLoop(ModelTrainer):
         dataloader: DataLoader,
         description: str,
         prediction_loss_only: Optional[bool] = None,
-        ignore_keys: Optional[List[str]] = None,
+        ignore_keys: Optional[list[str]] = None,
         metric_key_prefix: str = "eval",
     ) -> EvalLoopOutput:
         # Copy-pasted from Trainer.evaluation_loop (transformers 4.39.3)

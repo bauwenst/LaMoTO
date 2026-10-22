@@ -2,7 +2,6 @@
 Utility class for outputting a discrete series.
 """
 from abc import ABC, abstractmethod
-from typing import Tuple, List
 
 
 class Schedule(ABC):
@@ -28,7 +27,7 @@ class Schedule(ABC):
         self._it_cunt = 0
         self._cum     = 0
 
-    def next(self) -> Tuple[int,int]:
+    def next(self) -> tuple[int,int]:
         """Returns the next value of the schedule, and also its enumerate() index."""
         if self.isDone():
             raise StopIteration("Failed to get next schedule value since it is depleted (schedule.isDone() == True).")
@@ -71,7 +70,7 @@ class NoSchedule(ConstantSchedule):
 
 class ScheduleCascade(Schedule):
 
-    def __init__(self, schedules: List[Schedule]):
+    def __init__(self, schedules: list[Schedule]):
         super().__init__()
         assert len(schedules) > 0
         assert all(schedule.count() == 0 for schedule in schedules)  # Used to ensure the assertion after this makes sense.

@@ -74,8 +74,6 @@ In total, I compute 18 metrics:
           answerability classifier wrongfully assumes there is no answer, which is never the case in SQuAD v1 and hence
           P(correct | ans) == EM == EM_tp in SQuAD v1.
 """
-from typing import Dict, Set
-
 import torch
 import evaluate
 from archit.instantiation.abstracts import Tensors, Tensor
@@ -121,12 +119,12 @@ class AQA(QA):
                                                actual_answers=[qa_answers[idx]  for idx in indices_in_qa_with_correct_ua])
 
     @classmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         return {"correctness", "correctness-ans"} | \
                {"QA_Uni" + name for name in QA.keys()} | \
                {"UA_" + name    for name in BinaryConfusionMatrix.keys()}
 
-    def _finish(self) -> Dict[str, float]:
+    def _finish(self) -> dict[str, float]:
         # Compute the separate QA and UA metrics.
         qa_metrics = super()._finish()
         ua_metrics = self.matrix.computeFromMemory()

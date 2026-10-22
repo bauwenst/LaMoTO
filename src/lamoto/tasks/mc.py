@@ -1,7 +1,7 @@
 """
 Multiple-choice subtasks.
 """
-from typing import Tuple, Any
+from typing import Any
 
 from archit.instantiation.tasks import ForSingleAnswerMultipleChoice
 from archit.instantiation.heads import SequenceClassificationHeadForNestedBatches
@@ -52,7 +52,7 @@ class SWAG(Task[SequenceClassificationHeadForNestedBatches]):
     def getCollator(self) -> DataCollator:
         return DataCollatorForMultipleChoice(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         return eval.predictions.squeeze().argmax(-1).tolist(), eval.label_ids.squeeze().tolist()
 
     def adjustHyperparameters(self, hp):

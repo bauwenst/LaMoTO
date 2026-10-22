@@ -1,5 +1,3 @@
-from typing import Any, Dict, Tuple, Set
-
 import torch
 from supar.utils.metric import AttachmentMetric
 from supar.models.dep.biaffine.model import CoNLL, MatrixTree, DependencyCRF
@@ -16,7 +14,7 @@ class DependencyParsingMetrics(StreamedMetric):
     def add(self, other: AttachmentMetric):
         self.content += other
 
-    def computeFromMemory(self) -> Dict[str, float]:
+    def computeFromMemory(self) -> dict[str, float]:
         """
         Ignore the input (because we know it's empty) and output your own internal metrics.
         """
@@ -30,11 +28,11 @@ class DependencyParsingMetrics(StreamedMetric):
         return summary
 
     @classmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         return {"uas", "las", "ucm", "lcm"}
 
     @staticmethod
-    def logitsAndLabelsToMetric(logits: Tuple[torch.LongTensor,torch.LongTensor], labels: Tuple[torch.LongTensor,torch.LongTensor],
+    def logitsAndLabelsToMetric(logits: tuple[torch.LongTensor,torch.LongTensor], labels: tuple[torch.LongTensor,torch.LongTensor],
                                 # criterion=torch.nn.CrossEntropyLoss(),
                                 enforce_projective=False, enforce_tree=True) -> AttachmentMetric:
         """

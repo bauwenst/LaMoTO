@@ -1,4 +1,4 @@
-from typing import List, Dict, Union, Optional
+from typing import Optional
 from dataclasses import dataclass
 from collections import Counter
 
@@ -51,7 +51,7 @@ class DataCollatorForDependencyParsing(DataCollatorMixin):
     label_pad_value: int = -100
     return_tensors: str = "pt"
 
-    def torch_call(self, examples: List[dict]):
+    def torch_call(self, examples: list[dict]):
         # First handle the tokens.
         #   - Truncate words with many tokens, and pad those with few tokens.
         for example in examples:
@@ -87,23 +87,13 @@ class DP(Task[DependencyParsingHeadConfig]):
     Dependency parsing measured by UAS and LAS.
 
     Note: this task has an extremely niche issue where, if you train for like 12 epochs with device batch size 128,
-    GPU memory has slowly become too fragmented due to the logit tensors of size N² with N varying per example. No idea
-    how to fix this. Here's the error:
-
-        torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 28.16 GiB.
-        GPU 0 has a total capacity of 79.14 GiB of which 27.70 GiB is free.
-        Including non-PyTorch memory, this process has 51.44 GiB memory in use.
-        Of the allocated memory 41.16 GiB is allocated by PyTorch, and 8.37 GiB is reserved by PyTorch but unallocated.
-        If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation. See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
-
-    You can sort of fix it by using a different device batch size, although no guarantees...
+    GPU memory has slowly become too fragmented due to the logit tensors of size N² with N varying per example.
+    You can try to use a different device batch size or use PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True.
     """
 
     def __init__(self):
-        # The dataloader doesn't provide a domain for the labels. Since UD allows using "sublabels", we can't even hardcode the 37 standard labels ["nsubj", "obj", "iobj", "csubj", "ccomp", "xcomp", "obl", "vocative", "expl", "dislocated", "advcl", "advmod", "discourse", "aux", "cop", "mark", "nmod", "appos", "nummod", "acl", "amod", "det", "clf", "case", "conj", "cc", "fixed", "flat", "list", "parataxis", "compound", "orphan", "goeswith", "reparandum", "punct", "root", "dep"]
-        tags = self.getTagset()
-        self.tagset = list(sorted(tags, key=tags.get, reverse=True))
-        self.reltag_to_id = {tag: i for i, tag in enumerate(self.tagset)}
+        self._id_to_reltag = self._generateTagset()
+        self._reltag_to_id = {tag: i for i, tag in enumerate(self._id_to_reltag)}
         super().__init__(
             task_name="DP",
             text_fields=[ListOfField(TextField("tokens"))],
@@ -123,7 +113,7 @@ class DP(Task[DependencyParsingHeadConfig]):
             archit_class=ForDependencyParsing,
             automodel_class=None,  # Technically there is no HuggingFace-compatible AutoModelForDP. Best we have is supar, but it can only load from a base model checkpoint, not from a supar checkpoint!
 
-            num_labels=len(self.tagset)
+            num_labels=len(self._id_to_reltag)
         )
 
         # Extra temporary field that must be reset every time you reset the metrics.
@@ -133,32 +123,33 @@ class DP(Task[DependencyParsingHeadConfig]):
         super().resetTemporaryFields()
         self._metric = None
 
-    def _setMetrics(self, m: Optional[Dict[str, Metric]]):
+    def _setMetrics(self, m: Optional[dict[str, Metric]]):
         super()._setMetrics(m)
         if m is not None:
             self._metric = self.metrics["attachment"]
 
-    def sneakyLogitTransform(self, logits: Tuple[torch.Tensor,torch.Tensor], labels: Tuple[torch.Tensor,torch.Tensor]):
+    def sneakyLogitTransform(self, logits: tuple[torch.Tensor,torch.Tensor], labels: tuple[torch.Tensor,torch.Tensor]):
         self._metric.add(DependencyParsingMetrics.logitsAndLabelsToMetric(logits, labels))
         return torch.tensor([[1]], device=logits[0].device)
 
     def _loadDataset(self) -> DatasetDict:
         return UniversalDependenciesDataset("en_ewt").load()
 
-    def getTagset(self) -> Counter:
+    def _generateTagset(self) -> list[str]:
+        # The dataloader doesn't provide a domain for the labels. Since UD allows using "sublabels", we can't even hardcode the 37 standard labels ["nsubj", "obj", "iobj", "csubj", "ccomp", "xcomp", "obl", "vocative", "expl", "dislocated", "advcl", "advmod", "discourse", "aux", "cop", "mark", "nmod", "appos", "nummod", "acl", "amod", "det", "clf", "case", "conj", "cc", "fixed", "flat", "list", "parataxis", "compound", "orphan", "goeswith", "reparandum", "punct", "root", "dep"]
         log("Generating DP tagset...")
         counter = Counter()
         dataset = self._loadDataset()
         for split in dataset:
             for label_sequence in dataset[split]["deprel"]:
                 counter.update(label_sequence)
-        return counter
+        return sorted(counter.keys(), key=counter.get, reverse=True)  # Highest tag first, just because it's weird to see a bunch of middle classes in examples.
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):
-        hp.archit_head_config.num_labels = len(self.tagset)
+        hp.archit_head_config.num_labels = len(self._id_to_reltag)
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
-        filter_and_correct = FilterAndCorrectUDtypes(self.reltag_to_id)
+        filter_and_correct = FilterAndCorrectUDtypes(dependency_tag_mapping=self._reltag_to_id)
         truncator = WordLevelPreprocessorWithDummies(self.tokenizer, max_tokens=self._getMaxInputLength(), add_specials=self.hyperparameters.add_special_tokens, redirect_to_dummy_if_index_was_truncated=False)
 
         def datasetMap(example: dict):
@@ -179,5 +170,5 @@ class DP(Task[DependencyParsingHeadConfig]):
     def getCollator(self) -> DataCollator:
         return DataCollatorForDependencyParsing(self.tokenizer)
 
-    def getPredictionsAndReferences(self, eval: EvalPrediction) -> Tuple[Any,Any]:
+    def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         return [], []

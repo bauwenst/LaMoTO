@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Dict, Tuple, Any, Union, Optional
+from typing import Any, Union
 from transformers import PreTrainedTokenizerBase
 
 from ..util.exceptions import ImpossibleBranchError
@@ -21,13 +21,13 @@ class WordLevelPreprocessor:
     def reservedForSpecials(self) -> int:
         return self._tokenizer.num_special_tokens_to_add(pair=False)*self._add_specials
 
-    def preprocess(self, words: List[str], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+    def preprocess(self, words: list[str], indexing_labels: dict[str,list[int]], other_labels: dict[str,list[Any]]) -> tuple[list[list[int]], dict[str,list[int]], dict[str,list[Any]]]:
         tokens, indexing_labels, other_labels = self.tokenizeAndTruncate(words, indexing_labels, other_labels)
         if self._add_specials:
             tokens, indexing_labels, other_labels = self.addSpecialsAndShiftIndices(tokens, indexing_labels, other_labels)
         return tokens, indexing_labels, other_labels
 
-    def tokenizeAndTruncate(self, words: List[str], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+    def tokenizeAndTruncate(self, words: list[str], indexing_labels: dict[str,list[int]], other_labels: dict[str,list[Any]]) -> tuple[list[list[int]], dict[str,list[int]], dict[str,list[Any]]]:
         """
         Tokenise the words into subwords, stopping (possibly truncating the subwords of the last word that was tokenised)
         once we reach the maximally allowed amount of tokens.
@@ -89,7 +89,7 @@ class WordLevelPreprocessor:
 
         return subword_ids_per_word, indexing_labels_truncated, other_labels_truncated
 
-    def addSpecialsAndShiftIndices(self, tokens: list[list[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+    def addSpecialsAndShiftIndices(self, tokens: list[list[int]], indexing_labels: dict[str,list[int]], other_labels: dict[str,list[Any]]) -> tuple[list[list[int]], dict[str,list[int]], dict[str,list[Any]]]:
         # Now we introduce specials anywhere in the sequence. You get a list that looks like [special, [subword, subword], [subword, subword, subword], [subword], special] and so on.
         tokens_with_specials: list[Union[list[int],int]] = self._tokenizer.build_inputs_with_special_tokens(tokens)
 
@@ -144,14 +144,14 @@ class WordLevelPreprocessorWithDummies(WordLevelPreprocessor):
     def reservedForSpecials(self) -> int:
         return self._tokenizer.num_special_tokens_to_add(pair=False)*self._add_specials + (1 + self._end_dummy)
 
-    def preprocess(self, words: List[str], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+    def preprocess(self, words: list[str], indexing_labels: dict[str,list[int]], other_labels: dict[str,list[Any]]) -> tuple[list[list[int]], dict[str,list[int]], dict[str,list[Any]]]:
         tokens, indexing_labels, other_labels = self.tokenizeAndTruncate(words, indexing_labels, other_labels)
         tokens, indexing_labels, other_labels = self.addDummies(tokens, indexing_labels, other_labels)
         if self._add_specials:
             tokens, indexing_labels, other_labels = self.addSpecialsAndShiftIndices(tokens, indexing_labels, other_labels)
         return tokens, indexing_labels, other_labels
 
-    def addDummies(self, tokens: List[List[int]], indexing_labels: Dict[str,List[int]], other_labels: Dict[str,List[Any]]) -> Tuple[List[List[int]], Dict[str,List[int]], Dict[str,List[Any]]]:
+    def addDummies(self, tokens: list[list[int]], indexing_labels: dict[str,list[int]], other_labels: dict[str,list[Any]]) -> tuple[list[list[int]], dict[str,list[int]], dict[str,list[Any]]]:
         """
         :param indexing_labels: Lists of labels, with each label being the index of one of the words in the inputs. The
                                 assumption is that
@@ -199,15 +199,15 @@ class FlattenWordLabels(WordLevelPreprocessor):
         super().__init__(tokenizer, max_tokens, add_specials)
         self._pooling = pooling_mode
 
-    def preprocess(self, words: List[str], labels: Dict[str,List[Any]]) -> Tuple[List[Any], Dict[str,List[Any]]]:
+    def preprocess(self, words: list[str], labels: dict[str,list[Any]]) -> tuple[list[Any], dict[str,list[Any]]]:
         tokens, _, labels = self.tokenizeAndTruncate(words, dict(), labels)
         if self._add_specials:
             tokens, _, labels = self.addSpecialsAndShiftIndices(tokens, _, labels)
         return self.flattenTokensAndPoolLabels(tokens, labels)
 
-    def flattenTokensAndPoolLabels(self, tokens: List[List[int]], labels: Dict[str,List[Any]]) -> Tuple[List[int], Dict[str,List[Any]]]:
+    def flattenTokensAndPoolLabels(self, tokens: list[list[int]], labels: dict[str,list[Any]]) -> tuple[list[int], dict[str,list[Any]]]:
         flattened_tokens = []
-        flattened_labels: Dict[str,list] = {field: [] for field in labels}
+        flattened_labels: dict[str,list] = {field: [] for field in labels}
 
         for word_idx, subword_tokens in enumerate(tokens):
             flattened_tokens.extend(subword_tokens)

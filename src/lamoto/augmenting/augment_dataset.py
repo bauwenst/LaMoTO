@@ -1,4 +1,4 @@
-from typing import Set, TypeVar, Optional
+from typing import TypeVar, Optional
 from abc import abstractmethod, ABC
 
 from datasets.iterable_dataset import IterableDataset, Dataset
@@ -120,7 +120,7 @@ class TaskWithAugmentedDataset(TaskWrapper):
     Wrapper around a fine-tuning task that augments certain splits of its dataset.
     """
 
-    def __init__(self, task: Task[HC], augmentation: DatasetAugmentation, splits: Set[str]):
+    def __init__(self, task: Task[HC], augmentation: DatasetAugmentation, splits: set[str]):
         super().__init__(task, augmentation.getName() + "(" + ",".join(sortSplits(splits)) + ")")
         self._augmentation = augmentation
         self._splits = splits
@@ -134,7 +134,7 @@ class TaskWithAugmentedDataset(TaskWrapper):
 
 class TaskWithTypos(TaskWithAugmentedDataset):
 
-    def __init__(self, task: Task, p: float, splits: Set[str], text_fields: Set[str]=None):
+    def __init__(self, task: Task, p: float, splits: set[str], text_fields: set[str]=None):
         if any(f.involvesType(CharacterIndex) or f.involvesType(SubstringLabel) for f in task.dataset_metadata.label_fields):
             raise NotImplementedError("Cannot yet apply typos to datasets where the labels refer to characters in the input.")
         if text_fields is None:

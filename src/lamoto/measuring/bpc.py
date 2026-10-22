@@ -38,7 +38,6 @@ You can express NPC in terms of PPL as
 
     BPC = \frac{N}{T} \cdot \frac{\ln(PPL)}{\ln(2)}
 """
-from typing import Tuple, Dict, Set
 from transformers import PreTrainedModel, PreTrainedTokenizerBase
 from datasets import Dataset
 
@@ -50,7 +49,7 @@ from .ppl import ppl, PPL_Parameters
 
 class BitsPerCharacter(AutonomousMetric):
 
-    def computeFromEnvironment(self) -> Dict[str, float]:
+    def computeFromEnvironment(self) -> dict[str, float]:
         params = PPL_Parameters.extractFromTask(self.environment.hyperparameters)
         b, c = bpc(self.environment.model, self.environment.tokeniser, self.environment.getDatasetWithoutCollator(),
                    stride_fraction=params.stride_fraction)
@@ -60,12 +59,12 @@ class BitsPerCharacter(AutonomousMetric):
         }
 
     @classmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         return {"bpc", "total_chars"}
 
 
 def bpc(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset, stride_fraction: float,
-        tqdm_dataset_size: int=None) -> Tuple[float, int]:
+        tqdm_dataset_size: int=None) -> tuple[float, int]:
     PPL, _, N_tokens = ppl(model, tokenizer, dataset, stride_fraction, tqdm_dataset_size)
 
     # Compute N_characters (note: this requires that the dataset can be iterated with the same return values both times)

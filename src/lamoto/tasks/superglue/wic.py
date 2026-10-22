@@ -10,7 +10,6 @@ TODO: The architecture described by the authors is not bad. Mean-pooling the wor
       have an extra ArchIt architecture that mean-pools the ranges between specials (here, generating 3 embeddings)
       and then either sends them through a 3H x C linear head or something more complex.
 """
-from typing import Tuple, List
 from datasets import DatasetDict
 from transformers import PreTrainedTokenizerBase
 
@@ -56,7 +55,7 @@ class WiC(ClassifySentenceSuperGLUETask):
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"label"})
 
 
-def deduceTemplateSpecials(hf_tokeniser: PreTrainedTokenizerBase) -> Tuple[List[str], List[str], List[str]]:
+def deduceTemplateSpecials(hf_tokeniser: PreTrainedTokenizerBase) -> tuple[list[str], list[str], list[str]]:
     x_tokens = hf_tokeniser.tokenize("x", add_special_tokens=False)
     y_tokens = hf_tokeniser.tokenize("y", add_special_tokens=False)
 

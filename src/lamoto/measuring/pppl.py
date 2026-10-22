@@ -1,4 +1,3 @@
-from typing import Tuple, Dict, Set
 from tqdm.auto import tqdm
 from dataclasses import dataclass
 
@@ -17,7 +16,7 @@ class PPPL_Parameters(MetricHyperparameters):
 
 class PseudoPerplexity(AutonomousMetric):
 
-    def computeFromEnvironment(self) -> Dict[str, float]:
+    def computeFromEnvironment(self) -> dict[str, float]:
         params = PPPL_Parameters.extractFromTask(self.environment.hyperparameters)
         p, n, t = pppl(
             model=self.environment.model,
@@ -33,12 +32,12 @@ class PseudoPerplexity(AutonomousMetric):
         }
 
     @classmethod
-    def keys(cls) -> Set[str]:
+    def keys(cls) -> set[str]:
         return {"pppl", "nll", "total_tokens"}
 
 
 def pppl(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, dataset: Dataset, device_batch_size: int,
-         rightward_fraction: float=0.5, tqdm_dataset_size: int=None) -> Tuple[float, float, int]:
+         rightward_fraction: float=0.5, tqdm_dataset_size: int=None) -> tuple[float, float, int]:
     """
     Masked perplexity (pseudo-perplexity). Same boundary conditions as causal perplexity apply, except the task is not to
     predict the next token but to predict the token under a mask. This is fundamentally different to causal PPL, because
