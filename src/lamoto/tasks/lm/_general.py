@@ -8,12 +8,12 @@ from transformers import DataCollatorForLanguageModeling
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
 
 from archit.instantiation.tasks import ModelWithHead
+from archit.instantiation.heads import TokenVocabularyHeadConfig
 
 from tktkt.util.types import Languish, L, Language
 
 from .._core import *
 from ...util.datasets import PackedDataset, FieldType
-from ...training.auxiliary.hyperparameters import HC
 
 
 @dataclass
@@ -47,7 +47,7 @@ class Corpus(ABC):
         return self._loadDataset(self._language)
 
 
-class TokenPredictionTask(Task[HC]):
+class TokenPredictionTask(Task[TokenVocabularyHeadConfig]):
     """
     Classification task where the goal is to predict one or more tokens from a vocabulary of tens of thousands of possibilities.
     """
@@ -111,7 +111,7 @@ class TokenPredictionTask(Task[HC]):
 
         return dataset
 
-    def adjustHyperparameters(self, hp: TaskHyperparameters[HC]):
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenVocabularyHeadConfig]):
         pass
 
     def getCollator(self) -> DataCollator:

@@ -1,19 +1,17 @@
 """
 Multiple-choice subtasks.
 """
-from typing import Any
-
 from archit.instantiation.tasks import ForSingleAnswerMultipleChoice
-from archit.instantiation.heads import SequenceClassificationHeadForNestedBatches
+from archit.instantiation.heads import NestedPooledClassifierHeadConfig
 from datasets import DatasetDict, load_dataset
 from transformers import DataCollator, EvalPrediction, AutoModelForMultipleChoice
 
-from ._core import Task, MetricSetup
+from ._core import *
 from .superglue.copa import DataCollatorForMultipleChoice
 from ..util.datasets import imputeTestSplit, replaceDatasetColumns_OneExampleToOneExample
 
 
-class SWAG(Task[SequenceClassificationHeadForNestedBatches]):
+class SWAG(Task[NestedPooledClassifierHeadConfig]):
     """
     Single-choice "next-sentence selection".
     https://aclanthology.org/D18-1009/
@@ -35,9 +33,10 @@ class SWAG(Task[SequenceClassificationHeadForNestedBatches]):
                     "accuracy":  {"accuracy": "Acc"}
                 }
             ),
-            num_labels=1,
             archit_class=ForSingleAnswerMultipleChoice,
-            automodel_class=AutoModelForMultipleChoice
+            automodel_class=AutoModelForMultipleChoice,
+
+            num_labels=1
         )
 
     def _loadDataset(self) -> DatasetDict:
@@ -55,5 +54,9 @@ class SWAG(Task[SequenceClassificationHeadForNestedBatches]):
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         return eval.predictions.squeeze().argmax(-1).tolist(), eval.label_ids.squeeze().tolist()
 
-    def adjustHyperparameters(self, hp):
-        hp.archit_head_config.num_labels = 1
+    def adjustHyperparameters(self, hp: TaskHyperparameters[NestedPooledClassifierHeadConfig]):
+        hp.archit_head_config.n_classes = 1
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import TwoLayerPoolingHeadForNestedBatchesConfig
+        return TwoLayerPoolingHeadForNestedBatchesConfig()

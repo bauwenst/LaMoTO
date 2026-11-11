@@ -29,7 +29,7 @@ import torch
 from modest.interfaces.morphologies import WordSegmentation
 from modest.interfaces.datasets import ModestDataset
 from modest.languages.english import English_Celex
-from archit.instantiation.heads import TokenClassificationHeadConfig
+from archit.instantiation.heads import TokenClassifierHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
@@ -37,83 +37,7 @@ from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, ListOf
 from ..util.visuals import log
 
 
-# TODO: In the future, ArchIt will probably have to be refactored so that all the "buildSomething()" methods are instance
-#       methods on a separate class like a ForTaskFactory accompanying every ForTask, like below.
-#       Alternatively, CombinedConfig should actually be (base, head, loss) and give a config to buildLoss() which may have label weights.
-from archit.instantiation.configs import CombinedConfig, PretrainedConfig, HC
-from archit.instantiation.abstracts import BaseModel, ModelWithHead
-from archit.util import dataclass_from_dict
-from torch.nn.modules.loss import CrossEntropyLoss
-class ForSingleLabelTokenClassificationFactory:
-    """
-    Pretends to be a class, while it is actually secretly an instance.
-        - Its instance methods mimic class methods.
-        - Its __call__ is another class's __init__.
-    """
-
-    def __init__(self, class_weights: list[float]):
-        self.class_weights = class_weights
-
-    # The only method we wanted to change.
-
-    def buildLoss(self):
-        return CrossEntropyLoss(weight=torch.tensor(self.class_weights, dtype=torch.float32))  # float32 is the standard when no .to(bfloat16) has been called.
-
-    # The methods that call the above method also have to be reimplemented, where every "cls" is replaced by "self".
-
-    def fromModelAndHeadConfig(self, base_model, head_config):
-        return ForSingleLabelTokenClassification(
-            CombinedConfig(base_model_config=base_model.config, head_config=head_config),
-            base_model,
-            self.buildHead(base_model.__class__.standardiseConfig(base_model.config), head_config),
-            self.buildLoss()
-        )
-
-    def from_pretrained(self, checkpoint: str, base_model_class: type[BaseModel], head_config=None):
-        base_model_config, _ = PretrainedConfig.get_config_dict(checkpoint)
-        if "base_model_config" in base_model_config:
-            head_config       = head_config or dataclass_from_dict(self.headClass().configClass(), base_model_config["head_config"])
-            base_model_config = base_model_config["base_model_config"]
-
-        base_model_config = base_model_class.configClass().from_dict(base_model_config)
-        return super(ModelWithHead, ForSingleLabelTokenClassification).from_pretrained(  # This super() call means "Get the super class of ModelWithHead, and whenever you call class methods on the resulting class, use the ForSingleLabelTokenClassification class" (h/t ChatGPT).
-            checkpoint,
-            base_model_class(base_model_config),
-            self.buildHead(base_model_class.standardiseConfig(base_model_config), head_config),
-            self.buildLoss(),
-
-            head_config=head_config,
-            base_model_config_class=base_model_class.configClass(),
-            head_config_class=self.headClass().configClass()
-        )
-
-    # Mimic all the other classmethods as instance methods.
-
-    def __call__(self, combined_config, model, head, loss):
-        return ForSingleLabelTokenClassification(combined_config, model, head, loss)
-
-    @property
-    def __name__(self):
-        return ForSingleLabelTokenClassification.__name__
-
-    def headClass(self):
-        return ForSingleLabelTokenClassification.headClass()
-
-    config_class = ForSingleLabelTokenClassification.config_class
-
-    def buildHead(self, base_model_config, head_config):
-        return ForSingleLabelTokenClassification.buildHead(base_model_config, head_config)
-
-
-# Alternatively, but I don't think this will work since it will be impossible to load this from a checkpoint, you can
-# generate classes on-the-fly with monkeypatching like this:
-# > class_weights = [...]
-# > class ForSingleLabelTokenClassificationWeighted(ForSingleLabelTokenClassification):
-# >     pass
-# > ForSingleLabelTokenClassificationWeighted.buildLoss = classmethod(lambda self: CrossEntropyLoss(weight=torch.tensor(class_weights)))
-
-
-class MBR(Task[TokenClassificationHeadConfig]):
+class MBR(Task[TokenClassifierHeadConfig]):
 
     def __init__(self, morphologies: ModestDataset[WordSegmentation]=English_Celex(), dataset_out_of_context: bool=True, weighted_labels: bool=True):
         super().__init__(
@@ -138,17 +62,18 @@ class MBR(Task[TokenClassificationHeadConfig]):
         self._morphologies = morphologies
         self._is_single_word_dataset = dataset_out_of_context
 
+        self._label_distribution = None
         if weighted_labels:
             _,label_distribution = self.dataset_metadata.getLabelDistribution(self.loadDataset()["train"]).popitem()
+            label_distribution = {str(k): float(v) for k,v in label_distribution.items()}
             log(f"Class labels will be weighted proportional to the inverse of the following distribution:\n\t{sorted(label_distribution.items())}")
             label_distribution = [1/p for _, p in sorted(label_distribution.items())]
             label_distribution = [w/sum(label_distribution) for w in label_distribution]
-            self.archit_class = ForSingleLabelTokenClassificationFactory(label_distribution)
+            self._label_distribution = label_distribution
 
         # self.tokenizer: CanineTokenizer = AutoTokenizer.from_pretrained(CHECKPOINT)  # There is no unk_token because any Unicode codepoint is mapped via a hash table to an ID (which is better than UTF-8 byte tokenisation although not reversible).
 
     def _datasetOutOfContext(self) -> Iterable[dict]:
-        print("> Building dataset")
         for obj in self._morphologies.generate():
             text = obj.word
 
@@ -183,8 +108,13 @@ class MBR(Task[TokenClassificationHeadConfig]):
                                   truncation=True, max_length=self._getMaxInputLength())
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess, but_keep={"labels"})
 
-    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
-        hp.archit_head_config.num_labels = 2
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassifierHeadConfig]):
+        hp.archit_head_config.n_classes = 2
+        hp.archit_head_config.label_loss_weights = self._label_distribution
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import SingleLayerHeadConfig
+        return SingleLayerHeadConfig()
 
     def getCollator(self) -> DataCollator:
         # Get the batch generator, a.k.a. collator (https://huggingface.co/docs/transformers/main_classes/data_collator).
@@ -203,16 +133,16 @@ class MBR(Task[TokenClassificationHeadConfig]):
         return predictions[mask].tolist(), labels[mask].tolist()
 
     @classmethod
-    def getDefaultHyperparameters(cls) -> TaskHyperparameters[TokenClassificationHeadConfig]:
+    def getDefaultHyperparameters(cls) -> TaskHyperparameters[TokenClassifierHeadConfig]:
         from archit.instantiation.basemodels import CanineBaseModel
         from ..training.auxiliary.hyperparameters import NEveryEpoch, AfterNEpochs
         hp = super().getDefaultHyperparameters()
-        hp.archit_basemodel_class       = CanineBaseModel
+        hp.archit_base_model_class       = CanineBaseModel
         hp.model_config_or_checkpoint   = "google/canine-c"
         hp.tokeniser                    = "google/canine-c"
         hp.effective_batches_warmup     = 1000  # TODO: No idea if still relevant.
         hp.eval_vs_save_intervals.evaluation = NEveryEpoch(per_epoch=9)
         hp.evals_of_patience       = 30
         hp.hard_stopping_condition = AfterNEpochs(100)
-        hp.archit_head_config      = TokenClassificationHeadConfig()
+        hp.archit_head_config      = None
         return hp

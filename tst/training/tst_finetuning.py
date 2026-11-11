@@ -17,16 +17,16 @@ hp.discard_artifacts = True
 def setModel(id: int=1):
     if id == 1:
         hp.model_config_or_checkpoint = "haisongzhang/roberta-tiny-cased"  # 4 layers, 512 hidden size
-        hp.archit_basemodel_class = RobertaBaseModel
+        hp.archit_base_model_class = RobertaBaseModel
     elif id == 2:
         hp.model_config_or_checkpoint = "microsoft/deberta-base"
-        hp.archit_basemodel_class = DebertaBaseModel
+        hp.archit_base_model_class = DebertaBaseModel
     elif id == 3:  # Will only work on my local machine.
         hp.model_config_or_checkpoint = LamotoPaths.pathToCheckpoints() / "roberta-tiny-cased_DP_2024-12-17_02-17-40" / "checkpoint-3072"
-        hp.archit_basemodel_class = RobertaBaseModel
+        hp.archit_base_model_class = RobertaBaseModel
     elif id == 4:
         hp.model_config_or_checkpoint = "answerdotai/ModernBERT-base"
-        hp.archit_basemodel_class = ModernBertBaseModel
+        hp.archit_base_model_class = ModernBertBaseModel
     else:
         raise RuntimeError()
 

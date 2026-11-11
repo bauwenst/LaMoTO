@@ -11,7 +11,7 @@ class MNLI(CompareSentencesGLUETask):
     """
     def __init__(self):
         super().__init__("MNLI", rank_by=RankingMetricSpec("f1_macro", "f1", True),
-                         num_labels=3, text_field1="premise", text_field2="hypothesis")
+                         n_classes=3, text_field1="premise", text_field2="hypothesis")
 
     def _loadDataset(self) -> DatasetDict:
         original_datasetdict = load_dataset("glue", self.task_name.lower())

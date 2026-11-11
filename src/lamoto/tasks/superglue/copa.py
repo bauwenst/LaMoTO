@@ -50,7 +50,7 @@ class COPA(SuperGLUETask):
                     "accuracy":  {"accuracy": "Acc"}
                 }
             ),
-            num_labels=1
+            n_classes=1
         )
         # Need to reset these classes since GLUETask always uses sequence classification as the architecture, while this task is an exception.
         self.archit_class    = ForSingleAnswerMultipleChoice

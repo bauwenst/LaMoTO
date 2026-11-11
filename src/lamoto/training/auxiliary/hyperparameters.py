@@ -1,4 +1,4 @@
-from typing import Optional, Union, Generic, Any
+from typing import Optional, Union, Generic, Any, TypeVar
 from typing_extensions import Self, deprecated
 from abc import ABC, abstractmethod, ABCMeta
 from dataclasses import dataclass
@@ -13,7 +13,7 @@ from datasets.arrow_dataset import DatasetInfoMixin
 from tktkt.interfaces import TokeniserWithVocabulary, TokeniserFactory
 from tktkt.interfaces.identifiers import _ProhibitDeclaringConstructor
 from archit.instantiation.abstracts import PC, HC, BaseModel
-from archit.instantiation.configs import RecursiveSerialisable, Dictable
+from archit.instantiation.configs import RecursiveSerialisable, Dictable, HeadConfig
 
 from ...util.datasets import getDatasetSize, totalBatches
 from .callbacks import CombinedCallback, EventType, CallbackAtExpInterval, CallbackAtRatchetingInterval, \
@@ -207,6 +207,8 @@ class Intervals:
     backups: Optional[_IntervalConfig] = None  # Stores the weights of the model (and nothing else!) to a permanent backup, i.e. a folder that falls outside of the "checkpoint rotation" (the system that removes older checkpoints to keep a fixed amount stored).
 
 
+HC2 = TypeVar("HC2", bound=HeadConfig)
+
 @dataclass
 class TaskHyperparameters(RecursiveSerialisable, Generic[HC]):
     # Naming (not necessary in case a checkpoint name is given)
@@ -241,11 +243,12 @@ class TaskHyperparameters(RecursiveSerialisable, Generic[HC]):
     # - Initialising:
     seed: int
     model_config_or_checkpoint: Union[str, Path, PretrainedConfig]
-    archit_basemodel_class: type[BaseModel]
-    archit_head_config: HC
+    archit_base_model_class: type[BaseModel]  # Format of these three fields: archit_{base,head}_{model,config}_{/,class}
+    archit_head_config_class: Optional[type[HC]]  # Can be used instead of the head config field below when loading from an ArchIt checkpoint. Cannot be used in other cases due to lack of information about how to fill the class. (We don't pass the Head class by analogy with the BaseModel class, because ArchIt's Head does not know its config class at runtime whilst BaseModel does.)
+    archit_head_config: Optional[HC]
 
     init_weights: bool  # Whether to initialise any weights at all. Doesn't apply to the cases where HuggingFace is used.
-    load_hf_automodel_if_hf_checkpoint_and_matches_task: bool  # You want this to be false for doing inference, e.g. in CLM after training. When you load a checkpoint for token classification in the context of a task that classifies tokens, by default the old head weights will be reused even if that means num_labels is wrong. This is intentional, because too many task-specific checks would otherwise need to be run.
+    load_hf_automodel_if_hf_checkpoint_and_matches_task: bool  # You want this to be false for doing inference, e.g. in CLM after training. When you load a checkpoint for token classification in the context of a task that classifies tokens, by default the old head weights will be reused even if that means n_classes is wrong. This is intentional, because too many task-specific checks would otherwise need to be run.
     custom_hf_class: Optional[type[PreTrainedModel]]  # If set, will be used instead of ArchIt or AutoModel.
 
     # - Gradients:
@@ -261,7 +264,7 @@ class TaskHyperparameters(RecursiveSerialisable, Generic[HC]):
     def copy(self) -> Self:
         return deepcopy(self)
 
-    def withHeadConfig(self, config: HC):
+    def withHeadConfig(self, config: HC2) -> "TaskHyperparameters[HC2]":
         hp = self.copy()
         hp.archit_head_config = config
         return hp
@@ -271,7 +274,7 @@ class TaskHyperparameters(RecursiveSerialisable, Generic[HC]):
         hp_as_dict["_hp_class"]               = self.__class__.__name__
         hp_as_dict["hard_stopping_condition"] = repr(self.hard_stopping_condition)
         hp_as_dict["eval_vs_save_intervals"]  = repr(self.eval_vs_save_intervals)
-        hp_as_dict["archit_basemodel_class"]  = self.archit_basemodel_class.__name__ if self.archit_basemodel_class else None
+        hp_as_dict["archit_basemodel_class"]  = self.archit_base_model_class.__name__ if self.archit_base_model_class else None
         hp_as_dict["custom_hf_class"]         = self.custom_hf_class.__name__        if self.custom_hf_class        else None
         if isinstance(self.model_config_or_checkpoint, PretrainedConfig):
             hp_as_dict["model_config_or_checkpoint"] = {
@@ -291,7 +294,7 @@ class TaskHyperparameters(RecursiveSerialisable, Generic[HC]):
         hp = hp_class(**data)
         hp.hard_stopping_condition = eval(hp.hard_stopping_condition)
         hp.eval_vs_save_intervals = eval(hp.eval_vs_save_intervals)
-        hp.archit_basemodel_class = eval(hp.archit_basemodel_class)
+        hp.archit_base_model_class = eval(hp.archit_base_model_class)
         hp.custom_hf_class = eval(hp.custom_hf_class) if hp.custom_hf_class is not None else None
         if isinstance(hp.model_config_or_checkpoint, dict):
             config_class = eval(hp.model_config_or_checkpoint["_config_class"])

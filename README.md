@@ -26,7 +26,7 @@ from lamoto.training.auxiliary.hyperparameters import getDefaultHyperparameters
 # Define task hyperparameters.
 hp = getDefaultHyperparameters()
 hp.model_config_or_checkpoint = "roberta-base"
-hp.archit_basemodel_class = RobertaBaseModel
+hp.archit_base_model_class = RobertaBaseModel
 hp.archit_head_config = DependencyParsingHeadConfig(
     head_dropout=0.33,
     extended_model_config=BaseModelExtendedConfig(

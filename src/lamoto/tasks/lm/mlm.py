@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from transformers import AutoModelForMaskedLM
-from archit.instantiation.heads import MaskedLMHeadConfig
 from archit.instantiation.tasks import ForMaskedLM
 
 from ._general import *
@@ -9,12 +8,12 @@ from ...measuring.pppl import PPPL_Parameters
 
 
 @dataclass
-class MlmHyperparameters(TaskHyperparameters[MaskedLMHeadConfig]):
+class MlmHyperparameters(TaskHyperparameters[TokenVocabularyHeadConfig]):
     mlm_probability: float
     pppl: PPPL_Parameters
 
 
-class MLM(TokenPredictionTask[MaskedLMHeadConfig]):
+class MLM(TokenPredictionTask):
 
     def _isAutoregressive(self) -> bool:
         return False
@@ -39,6 +38,10 @@ class MLM(TokenPredictionTask[MaskedLMHeadConfig]):
             automodel_class=AutoModelForMaskedLM,
             automodel_kwargs=dict()
         )
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import TwoLayerLMHeadConfig
+        return TwoLayerLMHeadConfig(tie_to_model=True)
 
     @classmethod
     def getDefaultHyperparameters(cls) -> MlmHyperparameters:
@@ -68,8 +71,9 @@ class MLM(TokenPredictionTask[MaskedLMHeadConfig]):
             seed=69420,
             init_weights=False,
             model_config_or_checkpoint="roberta-base",
-            archit_basemodel_class=RobertaBaseModel,
-            archit_head_config=MaskedLMHeadConfig(),
+            archit_base_model_class=RobertaBaseModel,
+            archit_head_config=None,
+            archit_head_config_class=None,
             load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
             custom_hf_class=None,
 

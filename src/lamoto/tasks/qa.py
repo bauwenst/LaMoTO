@@ -12,7 +12,7 @@ from transformers import DataCollator, EvalPrediction, PreTrainedTokenizerBase
 
 from tktkt.preparation.splitters import Pretokeniser, IntoWhitespacePrefixed, IsolatePunctuation, HyphenMode, PretokeniserSequence
 from archit.instantiation.tasks import ForExtractiveAQA, ForExtractiveQA
-from archit.instantiation.heads import ExtractiveQAHeadConfig, ExtractiveAQAHeadConfig
+from archit.instantiation.heads import TokenClassifierHeadConfig, TokenAndPooledClassifierHeadConfig, HC
 
 from ._core import Task, MetricSetup, RankingMetricSpec
 from ..util.datasets import imputeTestSplit, DictOfLists, \
@@ -52,7 +52,7 @@ class DataCollatorForQA(DataCollatorMixin):
         return batch
 
 
-class _SquadTask(Task):
+class _SquadTask(Task[HC]):
 
     def __init__(self, with_answerability: bool,
                  context_stride: float=0.5, concatenable_pretoken_generator: Pretokeniser=DefaultSquadPretokeniser):
@@ -243,7 +243,7 @@ class _SquadTask(Task):
         # Note: this is not hooked up to the metric because unlike in DP, the metric is autonomous since it requires access to input_ids and context_mask.
         return torch.tensor([[1]], device=logits[0].device)
 
-    def adjustHyperparameters(self, hp):  # AQA has its labels pre-set to 2.
+    def adjustHyperparameters(self, hp):  # n_classes should already be set to 2 by the task architecture.
         pass
 
     def getCollator(self) -> DataCollator:
@@ -253,7 +253,7 @@ class _SquadTask(Task):
         return [], []
 
 
-class SQuADv1(_SquadTask):
+class SQuADv1(_SquadTask[TokenClassifierHeadConfig]):
     """
     Extractive question answering.
     https://aclanthology.org/D16-1264.pdf
@@ -262,8 +262,12 @@ class SQuADv1(_SquadTask):
         super().__init__(with_answerability=False,
                          context_stride=context_stride, concatenable_pretoken_generator=concatenable_pretoken_generator)
 
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import SingleLayerHeadConfig
+        return SingleLayerHeadConfig()
 
-class SQuADv2(_SquadTask):
+
+class SQuADv2(_SquadTask[TokenAndPooledClassifierHeadConfig]):
     """
     Extractive answerability and question answering.
     https://aclanthology.org/P18-2124.pdf
@@ -271,3 +275,11 @@ class SQuADv2(_SquadTask):
     def __init__(self, context_stride: float=0.5, concatenable_pretoken_generator: Pretokeniser=DefaultSquadPretokeniser):
         super().__init__(with_answerability=True,
                          context_stride=context_stride, concatenable_pretoken_generator=concatenable_pretoken_generator)
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import SingleLayerHeadConfig, TwoLayerPoolingHeadConfig, OneTokenHeadOnePooledHeadConfig
+        return OneTokenHeadOnePooledHeadConfig(
+            token_head=SingleLayerHeadConfig(),
+            pooled_head=TwoLayerPoolingHeadConfig(),
+            pooled_loss_weight=1.0
+        )

@@ -1,16 +1,15 @@
 from datasets import load_dataset
 from transformers import AutoModelForTokenClassification, DataCollatorForTokenClassification
 
-from archit.instantiation.heads import TokenClassificationHeadConfig
+from archit.instantiation.heads import TokenClassifierHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
-
 
 from ._core import *
 from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
 from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample
 
 
-class NER(Task[TokenClassificationHeadConfig]):
+class NER(Task[TokenClassifierHeadConfig]):
     """
     Named entity recognition using the SeqEval-IOB2 metrics (which automatically exclude the "O" tag when computing F1,
     otherwise it would just be accuracy).
@@ -53,11 +52,15 @@ class NER(Task[TokenClassificationHeadConfig]):
 
         return replaceDatasetColumns_OneExampleToOneExample(dataset, preprocess)
 
-    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
-        hp.archit_head_config.num_labels = len(self.tagset)
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassifierHeadConfig]):
+        hp.archit_head_config.n_classes = len(self.tagset)
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import SingleLayerHeadConfig
+        return SingleLayerHeadConfig()
 
     def getPredictionsAndReferences(self, eval: EvalPrediction) -> tuple[Any,Any]:
         # print(eval.predictions.shape, eval.predictions[-1,:,:])

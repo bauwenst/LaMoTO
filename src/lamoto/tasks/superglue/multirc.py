@@ -22,7 +22,7 @@ class MultiRC(CompareSentencesSuperGLUETask):
     """
 
     def __init__(self):
-        super().__init__(task_name="MultiRC", num_labels=2,
+        super().__init__(task_name="MultiRC", n_classes=2,
                          text_field1="paragraph+question", text_field2="answer")
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:

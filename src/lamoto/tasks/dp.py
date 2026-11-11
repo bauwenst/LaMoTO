@@ -2,13 +2,13 @@ from typing import Optional
 from dataclasses import dataclass
 from collections import Counter
 
-from datasets import load_dataset
 from transformers import PreTrainedTokenizerBase
 from transformers.data.data_collator import DataCollatorMixin
 import torch
 from supar.utils.fn import pad
 
-from archit.instantiation.tasks import ForDependencyParsing, DependencyParsingHeadConfig
+from archit.instantiation.tasks import ForDependencyParsing
+from archit.instantiation.heads import TokenToTokenDualHeadsConfig
 
 from ._core import *
 from ..measuring import DependencyParsingMetrics, Metric
@@ -82,7 +82,7 @@ class DataCollatorForDependencyParsing(DataCollatorMixin):
         }
 
 
-class DP(Task[DependencyParsingHeadConfig]):
+class DP(Task[TokenToTokenDualHeadsConfig]):
     """
     Dependency parsing measured by UAS and LAS.
 
@@ -145,8 +145,12 @@ class DP(Task[DependencyParsingHeadConfig]):
                 counter.update(label_sequence)
         return sorted(counter.keys(), key=counter.get, reverse=True)  # Highest tag first, just because it's weird to see a bunch of middle classes in examples.
 
-    def adjustHyperparameters(self, hp: TaskHyperparameters[DependencyParsingHeadConfig]):
-        hp.archit_head_config.num_labels = len(self._id_to_reltag)
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenToTokenDualHeadsConfig]):
+        hp.archit_head_config.n_classes = len(self._id_to_reltag)
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import BiaffineTokenToTokenHeadConfig, PoolingAndStridingConfig
+        return BiaffineTokenToTokenHeadConfig(extended_model_config=PoolingAndStridingConfig())
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:
         filter_and_correct = FilterAndCorrectUDtypes(dependency_tag_mapping=self._reltag_to_id)

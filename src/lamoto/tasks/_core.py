@@ -10,7 +10,7 @@ import torch
 from datasets import DatasetDict
 from transformers import DataCollator, PreTrainedTokenizerBase, PretrainedConfig, EvalPrediction
 from transformers.models.auto.auto_factory import _BaseAutoModelClass
-from archit.instantiation.abstracts import ModelWithHead, CombinedConfig
+from archit.instantiation.abstracts import ModelWithHead, ArchitConfig
 
 from ..augmenting.augment_model import ModelAugmentation
 from ..measuring._core import Metric
@@ -62,7 +62,7 @@ class Task(ABC, Generic[HC]):
         # Temporary fields only instantiated during training. These are effectively hidden method arguments.
         self.hyperparameters: Optional[TaskHyperparameters[HC]] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
-        self.model_config: Optional[CombinedConfig] = None
+        self.model_config: Optional[ArchitConfig] = None
         self.metrics: Optional[dict[str, Metric]] = None
 
     def resetCaches(self):
@@ -85,6 +85,11 @@ class Task(ABC, Generic[HC]):
 
     @abstractmethod
     def getCollator(self) -> DataCollator:
+        pass
+
+    @abstractmethod
+    def getSuggestedHeadConfig(self) -> HC:
+        """Returns a head config for a head architecture that is known to work for this task."""
         pass
 
     @abstractmethod
@@ -133,7 +138,7 @@ class Task(ABC, Generic[HC]):
 
     def _setHyperparameters(self, hp: Optional[TaskHyperparameters[HC]]):
         self.hyperparameters = hp
-    def _setModelConfig(self, mc: Optional[CombinedConfig]):
+    def _setModelConfig(self, mc: Optional[ArchitConfig]):
         self.model_config = mc
     def _setMetrics(self, m: Optional[dict[str, Metric]]):
         self.metrics = m
@@ -162,18 +167,6 @@ class Task(ABC, Generic[HC]):
                 return getattr(self.model_config, self.model_config.attribute_map["max_position_embeddings"])
             else:
                 raise RuntimeError("Couldn't find maximum input length in the tokeniser nor the model config.")
-
-    def _isHfCheckpointForThisTask(self, architecture_name: str):
-        """
-        HuggingFace architectures look like "[Base]For[Task]" while ArchIt architectures can in principle be anything,
-        although they conventionally look like "For[Task]".
-        ArchIt architectures define which HuggingFace [Task] string is equivalent for them. If an architecture hence
-        contains that string (but isn't equal to it, because in that case it is not HuggingFace and hence must be ArchIt)
-        it comes from HuggingFace and is tailored to this task.
-        """
-        return self.archit_class.headClass().hfEquivalentSuffix() and \
-               self.archit_class.headClass().hfEquivalentSuffix() in architecture_name and \
-               self.archit_class.headClass().hfEquivalentSuffix() != architecture_name
 
     @classmethod
     def getDefaultHyperparameters(cls) -> TaskHyperparameters[HC]:
@@ -204,8 +197,9 @@ class Task(ABC, Generic[HC]):
             init_weights=True,
             load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
             model_config_or_checkpoint="roberta-base",
-            archit_basemodel_class=RobertaBaseModel,
+            archit_base_model_class=RobertaBaseModel,
             archit_head_config=None,
+            archit_head_config_class=None,
             custom_hf_class=None,
 
             learning_rate=2e-5,
@@ -225,8 +219,7 @@ class Task(ABC, Generic[HC]):
 
     def smoke(self):
         """Smoke test of the parts of training defined by this task using its default hyperparameters."""
-        from archit.instantiation.heads import HeadConfigWithLabels
-        self.train(hyperparameters=self.getDefaultHyperparameters().withHeadConfig(HeadConfigWithLabels(num_labels=10)), smoke=True)
+        self.train(hyperparameters=self.getDefaultHyperparameters().withHeadConfig(self.getSuggestedHeadConfig()), smoke=True)
 
 
 class TaskWrapper(Task[HC]):
@@ -254,6 +247,9 @@ class TaskWrapper(Task[HC]):
 
     def getCollator(self) -> DataCollator:
         return self._method_implementations.getCollator()
+
+    def getSuggestedHeadConfig(self) -> HC:
+        return self._method_implementations.getSuggestedHeadConfig()
 
     def adjustHyperparameters(self, hp: TaskHyperparameters[HC]):
         return self._method_implementations.adjustHyperparameters(hp)

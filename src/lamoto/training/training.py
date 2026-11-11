@@ -5,13 +5,14 @@ import time
 import torch
 import wandb
 import transformers
+from archit.instantiation.configs import HeadConfig
 from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer, \
     PreTrainedTokenizerBase, EvalPrediction, PretrainedConfig
 from transformers.trainer_utils import has_length, TrainOutput
 from transformers.utils.logging import set_verbosity_error
 from huggingface_hub.constants import HF_HUB_CACHE
 
-from archit.instantiation.abstracts import CombinedConfig
+from archit.instantiation.abstracts import ArchitConfig, Head
 from archit.util import torchPrint, parameterCountBaseVsHead
 from fiject.applications.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
@@ -78,6 +79,7 @@ class TaskTrainer:
         # Imputations and sanity checks
         if isinstance(hyperparameters.model_config_or_checkpoint, Path):
             hyperparameters.model_config_or_checkpoint = hyperparameters.model_config_or_checkpoint.as_posix()  # FIXME: Possibly have to make it a relative path due to HF restrictions.
+        is_archit = ArchitConfig.isNativeArchit(hyperparameters.model_config_or_checkpoint) if isinstance(hyperparameters.model_config_or_checkpoint, str) else False
         if task.metric_config.to_rank is None or hyperparameters.rank_checkpoints_using_loss:
             metric_to_rank = RankingMetricSpec(metric_name="", result_name="loss", higher_is_better=False)
         else:
@@ -85,10 +87,15 @@ class TaskTrainer:
 
         if hyperparameters.init_weights and not isinstance(hyperparameters.model_config_or_checkpoint, str):
             raise ValueError("You said you wanted to initialise model weights from the checkpoint, but didn't give a checkpoint path!")
-        if hyperparameters.archit_basemodel_class is None:
+        if hyperparameters.archit_base_model_class is None:  # Head config logic is handled by ArchitConfig.
             raise ValueError("In order to parse model configs, the archit_basemodel_class hyperparameter cannot be None.")
-        if hyperparameters.archit_head_config is None and not isinstance(hyperparameters.model_config_or_checkpoint, str):  # Note: there is another failure case: when the checkpoint *is* a string, but *isn't* an ArchIt checkpoint. It errors below.
-            raise ValueError("Without a checkpoint, a head config must be provided to instantiate a new head.")
+        # There are 3 x 3 head config cases: (no checkpoint, non-ArchIt checkpoint, ArchIt checkpoint) x (nothing given, config class given, config given).
+        if hyperparameters.archit_head_config is None and (not isinstance(hyperparameters.model_config_or_checkpoint, str) or not is_archit):  # The first check matches (..., nothing) and (..., class), which is 6 cases. The 3 other cases need no imputation.
+            hyperparameters.archit_head_config = task.getSuggestedHeadConfig()  # You can map (nothing, nothing) and (nothing, class) to (nothing, head) and you can map (non-archit, nothing) and (non-archit, class) to (non-archit, head). That's 4 of the 6 cases handled. 1 of the remaining cases is illegal, and it is covered below: (archit, nothing).
+        if hyperparameters.archit_head_config is None is None and hyperparameters.archit_head_config_class is None:  # If even after the above imputations you have no head information, we error.
+            raise ValueError("Missing head information. If you are loading an ArchIt checkpoint and want to preserve its head, provide the class of the head config. Otherwise, provide a head config.")
+        elif hyperparameters.archit_head_config is not None and hyperparameters.archit_head_config_class is not None and hyperparameters.archit_head_config_class != type(hyperparameters.archit_head_config):  # Head config has priority over head config class, but we still error on mismatch for safety. This is not one of the 9 cases.
+            raise ValueError(f"Mismatch between the given head config instance ({type(hyperparameters.archit_head_config).__name__}) and head config class ({type(hyperparameters.archit_head_config_class.__name__)}).")
         if not hyperparameters.track_best_checkpoint and hyperparameters.rank_checkpoints_using_loss:
             raise ValueError("Asked to rank models with loss, but also to not track the best model.")
         if hyperparameters.track_best_checkpoint and metric_to_rank.fullName() == "loss" and not hyperparameters.rank_checkpoints_using_loss:
@@ -137,25 +144,34 @@ class TaskTrainer:
         n_passes = hyperparameters.examples_per_effective_batch // n_examples_per_pass
 
         # Metadata
-        try:
-            task.adjustHyperparameters(hyperparameters)
-        except:
-            log("Failed to adjust hyperparameters; an error is on its way.")
+        if hyperparameters.archit_head_config is not None:
+            try:
+                task.adjustHyperparameters(hyperparameters)
+            except:
+                log("Failed to adjust hyperparameters; an error is on its way.")
         task._setHyperparameters(hyperparameters)
 
         log("Loading model config...")
         config_or_str = hyperparameters.model_config_or_checkpoint
         if isinstance(config_or_str, str):  # It's a checkpoint string. Can either be a checkpoint for the ModelWithHead we're about to load, or for anything else compatible. We'll figure that out.
-            model_config = CombinedConfig.from_pretrained(config_or_str,
-                                                          head_config=hyperparameters.archit_head_config,  # This overwrites what's in the checkpoint if it is a JSONified CombinedConfig. FWIW, task.archit_class.from_pretrained() ignores whatever is in the JSON if the given head config is not None.
-                                                          base_model_config_class=hyperparameters.archit_basemodel_class.configClass())  # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
-        else:  # It's an object.
+            # Note that there is no need for AutoConfig because we KNOW the config class (even if not registered in AutoConfig). Also means we don't have to store the "model type" in the config.
+            if hyperparameters.archit_head_config is None:
+                model_config = ArchitConfig.from_pretrained(config_or_str,
+                                                            base_model_config_class=hyperparameters.archit_base_model_class.configClass(),
+                                                            head_config_class=hyperparameters.archit_head_config_class)
+            else:
+                model_config = ArchitConfig.from_pretrained(config_or_str,
+                                                            base_model_config_class=hyperparameters.archit_base_model_class.configClass(),
+                                                            head_config_class=hyperparameters.archit_head_config_class,
+                                                            head_config=hyperparameters.archit_head_config)  # Will be picked up by get_config_dict to overwrite the JSON value before the cls(**json_dict) sends it to the ArchitConfig constructor.
+        else:  # It's an object. (And we know the head config is definitely not None.)
             assert isinstance(config_or_str, PretrainedConfig)
-            if isinstance(config_or_str, CombinedConfig):
+            if isinstance(config_or_str, ArchitConfig):
                 raise ValueError("When instantiating a new model from a config, it must only parameterise the base model. The head has its own config.")
-            model_config = CombinedConfig(base_model_config=config_or_str,
-                                          head_config=hyperparameters.archit_head_config,
-                                          base_model_config_class=hyperparameters.archit_basemodel_class.configClass())  # This call pretends to be CombinedConfig(**json).
+            model_config = ArchitConfig(base_model_config=config_or_str,
+                                        head_config=hyperparameters.archit_head_config,
+                                        base_model_config_class=hyperparameters.archit_base_model_class.configClass(),
+                                        head_config_class=hyperparameters.archit_head_config_class)
         task._setModelConfig(model_config)
 
         model_identifier, global_model_identifier = self._getRunIdentifiers(task, hyperparameters)
@@ -212,26 +228,36 @@ class TaskTrainer:
         task.automodel_args["torch_dtype"] = torch.bfloat16 if do_bf16 and not task.task_name.lower().startswith("dp") else torch.float32
 
         hf_checkpoint_classname = task.model_config.architectures[0] if task.model_config.architectures is not None else ""  # Always present and correct for HuggingFace configs.
-        is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and task._isHfCheckpointForThisTask(hf_checkpoint_classname)
+        is_exact_hf_checkpoint    = hyperparameters.init_weights and hyperparameters.load_hf_automodel_if_hf_checkpoint_and_matches_task and self._isHfEquivalent(hyperparameters, hf_checkpoint_classname)
         is_custom_hf_architecture = hyperparameters.custom_hf_class is not None
         if smoke:
             model = None
-        elif not is_exact_hf_checkpoint and not is_custom_hf_architecture:  # Use ArchIt. This is the usual case.
+        elif not is_exact_hf_checkpoint and not is_custom_hf_architecture:  # Use ArchIt for the architecture. This is the usual case.
             log("Instantiating an ArchIt model.")
             torch.set_default_dtype(task.automodel_args["torch_dtype"])
-            if hyperparameters.init_weights:
-                model: PreTrainedModel = task.archit_class.from_pretrained(hyperparameters.model_config_or_checkpoint, hyperparameters.archit_basemodel_class, hyperparameters.archit_head_config)
+            if hyperparameters.init_weights:  # implies checkpoint is valid
+                # Like for the config's .from_pretrained() calls above, here we also have two options depending on whether the user provided a value to overwrite the stored head config with.
+                if hyperparameters.archit_head_config is None:
+                    model: PreTrainedModel = task.archit_class.from_pretrained(hyperparameters.model_config_or_checkpoint,
+                                                                               base_model_class=hyperparameters.archit_base_model_class,
+                                                                               head_config_class=hyperparameters.archit_head_config_class)
+                else:
+                    model: PreTrainedModel = task.archit_class.from_pretrained(hyperparameters.model_config_or_checkpoint,
+                                                                               base_model_class=hyperparameters.archit_base_model_class,
+                                                                               head_config_class=hyperparameters.archit_head_config_class,
+                                                                               head_config=hyperparameters.archit_head_config)
             else:
-                assert hyperparameters.archit_head_config is not None, "You forgot to set the head config in the hyperparameters!"
-                model: PreTrainedModel = task.archit_class.fromModelAndHeadConfig(hyperparameters.archit_basemodel_class.from_config(task.model_config), hyperparameters.archit_head_config)
+                if hyperparameters.archit_head_config is None:
+                    raise ValueError("When initialising a model from scratch, you need to provide a full head config.")
+                model: PreTrainedModel = task.archit_class.fromModelAndHeadConfig(base_model=hyperparameters.archit_base_model_class.from_config(task.model_config), head_config=hyperparameters.archit_head_config)
         else:  # Edge cases.
             if is_custom_hf_architecture:
                 log("Instantiating a custom HuggingFace class.")
-                if hyperparameters.init_weights:  # model_config_or_checkpoint is a string
+                if hyperparameters.init_weights:  # implies checkpoint is valid
                     model: PreTrainedModel = hyperparameters.custom_hf_class.from_pretrained(hyperparameters.model_config_or_checkpoint, **task.automodel_args)
                 else:
                     model: PreTrainedModel = hyperparameters.custom_hf_class._from_config(task.model_config.base_model_config, **task.automodel_args)
-            elif is_exact_hf_checkpoint:  # model_config_or_checkpoint is a string
+            elif is_exact_hf_checkpoint:
                 log(f"The given checkpoint seems to be a HuggingFace architecture ({hf_checkpoint_classname}) for this specific task ({task.archit_class.__name__}),\nwe will instantiate the model with AutoModel ({task.automodel_class.__name__}) instead of ArchIt.")
                 model: PreTrainedModel = task.automodel_class.from_pretrained(hyperparameters.model_config_or_checkpoint, **task.automodel_args)
             else:
@@ -624,3 +650,16 @@ class TaskTrainer:
 
     def _getEvalPath(self, global_identifier: str, identifier_suffix: str=""):
         return LamotoPaths.pathToEvaluations(global_identifier + identifier_suffix)
+
+    def _isHfEquivalent(self, hp: TaskHyperparameters[HC], architecture_name: str):
+        """
+        HuggingFace architectures look like "[Base]For[Task]" while ArchIt architectures can in principle be anything,
+        although they conventionally look like "For[Task]".
+        ArchIt head architectures define which HuggingFace [Task] string is equivalent for them. If an architecture hence
+        contains that string (but isn't equal to it, because in that case it is not HuggingFace and hence must be ArchIt)
+        it comes from HuggingFace and is tailored to this task.
+        """
+        head_class = (hp.archit_head_config or hp.archit_head_config_class).headClass()
+        return head_class.hfEquivalentSuffix() and \
+               head_class.hfEquivalentSuffix() in architecture_name and \
+               head_class.hfEquivalentSuffix() != architecture_name

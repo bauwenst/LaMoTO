@@ -1,16 +1,15 @@
 from transformers import AutoModelForTokenClassification, DataCollatorForTokenClassification
 
-from archit.instantiation.heads import TokenClassificationHeadConfig
+from archit.instantiation.heads import TokenClassifierHeadConfig
 from archit.instantiation.tasks import ForSingleLabelTokenClassification
 
 from ._core import *
 from ..preprocessing.ud import FilterAndCorrectUDtypes, UniversalDependenciesDataset
 from ..preprocessing.wordlevel import FlattenWordLabels, LabelPooling
-from ..util.visuals import log
 from ..util.datasets import replaceDatasetColumns_OneExampleToOneExample, TextField, ListOfField, ClassLabel
 
 
-class POS(Task[TokenClassificationHeadConfig]):
+class POS(Task[TokenClassifierHeadConfig]):
 
     def __init__(self):
         self._id_to_tag = self._generateTagset()
@@ -90,8 +89,12 @@ class POS(Task[TokenClassificationHeadConfig]):
 
         return replaceDatasetColumns_OneExampleToOneExample(dataset, datasetMap)
 
-    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassificationHeadConfig]):
-        hp.archit_head_config.num_labels = len(self._id_to_tag)
+    def adjustHyperparameters(self, hp: TaskHyperparameters[TokenClassifierHeadConfig]):
+        hp.archit_head_config.n_classes = len(self._id_to_tag)
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import SingleLayerHeadConfig
+        return SingleLayerHeadConfig()
 
     def getCollator(self) -> DataCollator:
         return DataCollatorForTokenClassification(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())

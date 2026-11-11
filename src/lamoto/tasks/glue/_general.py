@@ -1,23 +1,23 @@
 from datasets import load_dataset
 from transformers import DataCollatorWithPadding, AutoModelForSequenceClassification
 
-from archit.instantiation.heads import SequenceClassificationHeadConfig
+from archit.instantiation.heads import PooledClassifierHeadConfig
 from archit.instantiation.tasks import ForSingleLabelSequenceClassification, ForSequenceRegression
 
 from .._core import *
 from ...util.datasets import imputeTestSplit, replaceDatasetColumns_OneExampleToOneExample
 
 
-SequenceTaskHyperparameters = TaskHyperparameters[SequenceClassificationHeadConfig]
+SequenceTaskHyperparameters = TaskHyperparameters[PooledClassifierHeadConfig]
 
-class GLUETask(Task[SequenceClassificationHeadConfig]):
+class GLUETask(Task[PooledClassifierHeadConfig]):
     """
     Since all GLUE tasks are sequence tasks, they share a bunch of their code.
     """
 
     BASE_REPO = "glue"
 
-    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: list[str], num_labels: int, is_regressive: bool=False):
+    def __init__(self, task_name: str, metric_config: MetricSetup, text_fields: list[str], n_classes: int, is_regressive: bool=False):
         super().__init__(
             task_name=task_name,
             text_fields=text_fields,
@@ -26,9 +26,9 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
             archit_class=ForSingleLabelSequenceClassification if not is_regressive else ForSequenceRegression,
             automodel_class=AutoModelForSequenceClassification,
 
-            num_labels=num_labels
+            num_labels=n_classes  # AutoModel argument
         )
-        self._num_labels = num_labels
+        self._n_classes = n_classes
         self._is_regressive = is_regressive
 
     def _loadDataset(self) -> DatasetDict:
@@ -42,7 +42,11 @@ class GLUETask(Task[SequenceClassificationHeadConfig]):
         return load_dataset(self.BASE_REPO, self.task_name.lower().replace("-", ""))
 
     def adjustHyperparameters(self, hp: SequenceTaskHyperparameters):
-        hp.archit_head_config.num_labels = self._num_labels
+        hp.archit_head_config.n_classes = self._n_classes
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import TwoLayerPoolingHeadConfig
+        return TwoLayerPoolingHeadConfig()
 
     def getCollator(self) -> DataCollator:
         return DataCollatorWithPadding(self.tokenizer, padding="longest", max_length=self._getMaxInputLength())
@@ -57,7 +61,7 @@ class CompareSentencesGLUETask(GLUETask):
     For all the NLI and similarity tasks in GLUE.
     """
 
-    def __init__(self, task_name: str, num_labels: int, rank_by: RankingMetricSpec=RankingMetricSpec("accuracy", "accuracy", True), text_field1: str="sentence1", text_field2: str="sentence2", is_regressive: bool=False):
+    def __init__(self, task_name: str, n_classes: int, rank_by: RankingMetricSpec=RankingMetricSpec("accuracy", "accuracy", True), text_field1: str= "sentence1", text_field2: str= "sentence2", is_regressive: bool=False):
         super().__init__(
             task_name=task_name,
             text_fields=[text_field1, text_field2],
@@ -71,7 +75,7 @@ class CompareSentencesGLUETask(GLUETask):
                 },
                 to_rank=rank_by
             )
-            if not is_regressive and num_labels == 2 else
+            if not is_regressive and n_classes == 2 else
             MetricSetup(
                 to_compute=["precision_macro", "recall_macro", "f1_macro", "accuracy"],
                 to_track={
@@ -91,10 +95,9 @@ class CompareSentencesGLUETask(GLUETask):
                 },
                 to_rank=RankingMetricSpec("spearmanr", "spearmanr", True)
             ),
-            num_labels=num_labels,
+            n_classes=n_classes,
             is_regressive=is_regressive
         )
-        self._num_labels = num_labels
         self._field1 = text_field1
         self._field2 = text_field2
 
@@ -126,7 +129,7 @@ class ClassifySentenceGLUETask(GLUETask):
                 },
                 to_rank=rank_by
             ),
-            num_labels=2
+            n_classes=2
         )
 
     def _prepareDataset(self, dataset: DatasetDict) -> DatasetDict:

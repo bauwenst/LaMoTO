@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from transformers import AutoModelForCausalLM
-from archit.instantiation.heads import CausalLMHeadConfig
 from archit.instantiation.tasks import ForCausalLM
 
 from ._general import *
@@ -9,11 +8,11 @@ from ...measuring.ppl import PPL_Parameters
 
 
 @dataclass
-class ClmHyperparameters(TaskHyperparameters[CausalLMHeadConfig]):
+class ClmHyperparameters(TaskHyperparameters[TokenVocabularyHeadConfig]):
     ppl: PPL_Parameters  # Which fraction of the model's context length we stride in the perplexity function. The complement of this is the amount of context the first token of the second chunk of an example sees. 1/contextlength is slowest but gives actual perplexity, whilst 1.0 is fastest but means that long examples act like multiple independent examples.
 
 
-class CLM(TokenPredictionTask[CausalLMHeadConfig]):
+class CLM(TokenPredictionTask):
 
     def _isAutoregressive(self) -> bool:
         return True
@@ -35,6 +34,10 @@ class CLM(TokenPredictionTask[CausalLMHeadConfig]):
             automodel_class=AutoModelForCausalLM,
             automodel_kwargs=dict()
         )
+
+    def getSuggestedHeadConfig(self):
+        from archit.instantiation.heads import SingleLayerLMHeadConfig
+        return SingleLayerLMHeadConfig(tie_to_model=True)
 
     @classmethod
     def getDefaultHyperparameters(cls) -> ClmHyperparameters:
@@ -65,8 +68,9 @@ class CLM(TokenPredictionTask[CausalLMHeadConfig]):
             seed=69420,
             init_weights=False,
             model_config_or_checkpoint="openai-community/gpt2",
-            archit_basemodel_class=GPT2BaseModel,
-            archit_head_config=CausalLMHeadConfig(),
+            archit_base_model_class=GPT2BaseModel,
+            archit_head_config=None,
+            archit_head_config_class=None,
             load_hf_automodel_if_hf_checkpoint_and_matches_task=True,
             custom_hf_class=None,
 
