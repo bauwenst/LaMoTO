@@ -18,7 +18,7 @@ class SlimPajama(Corpus):
         return language == L("English")
 
     def _loadDataset(self, language: Language) -> datasets.IterableDatasetDict:
-        dataset: datasets.IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True, trust_remote_code=True)
+        dataset: datasets.IterableDatasetDict = datasets.load_dataset("cerebras/SlimPajama-627B", streaming=True)
         return dataset.remove_columns(["meta"])
 
 
@@ -33,12 +33,12 @@ class FineWeb(Corpus):
 
     def _loadDataset(self, language: Language) -> datasets.IterableDatasetDict:
         # if self._language == L("English"):
-        dataset: datasets.IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb", "default", streaming=True, trust_remote_code=True)
+        dataset: datasets.IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb", "default", streaming=True)
         full_iterable: datasets.IterableDataset = dataset["train"]
         dataset["train"]      = full_iterable.skip(FineWeb._ENGLISH_VALIDATION_SIZE)
         dataset["validation"] = full_iterable.take(FineWeb._ENGLISH_VALIDATION_SIZE)
         # else:
-        #     dataset: IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb-2", ..., streaming=True, trust_remote_code=True)
+        #     dataset: IterableDatasetDict = datasets.load_dataset("HuggingFaceFW/fineweb-2", ..., streaming=True)
         return dataset.remove_columns(["id", "dump", "url", "date", "file_path", "language", "language_score", "token_count"])
 
 

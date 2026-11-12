@@ -375,7 +375,7 @@ class TaskTrainer:
             gradient_accumulation_steps=n_passes,
 
             # Style of computations
-            gradient_checkpointing=hyperparameters.gradient_checkpointing_if_possible and model.supports_gradient_checkpointing,  # Lowers VRAM needed for remembering gradients, at the cost of time needed to recompute results. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
+            gradient_checkpointing=hyperparameters.gradient_checkpointing_if_possible and (smoke or model.supports_gradient_checkpointing),  # Lowers VRAM needed for remembering gradients, at the cost of time needed to recompute results. Good explanation with animations: https://medium.com/tensorflow/fitting-larger-networks-into-memory-583e3c758ff9
             bf16=do_bf16,
 
             # Evaluation
