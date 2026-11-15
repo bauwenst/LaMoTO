@@ -1,18 +1,16 @@
-from typing import Any
 from pathlib import Path
 
 import time
 import torch
 import wandb
 import transformers
-from archit.instantiation.configs import HeadConfig
 from transformers import PreTrainedModel, TrainingArguments, IntervalStrategy, EarlyStoppingCallback, AutoTokenizer, \
     PreTrainedTokenizerBase, EvalPrediction, PretrainedConfig
 from transformers.trainer_utils import has_length, TrainOutput
 from transformers.utils.logging import set_verbosity_error
 from huggingface_hub.constants import HF_HUB_CACHE
 
-from archit.instantiation.abstracts import ArchitConfig, Head
+from archit.instantiation.abstracts import ArchitConfig
 from archit.util import torchPrint, parameterCountBaseVsHead
 from fiject.applications.transformers import FijectCallback
 from tktkt.interfaces.huggingface import TktktToHuggingFace
@@ -28,7 +26,7 @@ from ..measuring import METRICS
 from ..measuring._core import LamotoMetric, EvaluationEnvironment
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.exceptions import tryExceptNone, ImpossibleBranchError
-from ..util.strings import getSubstringAfterLastSlash
+from ..util.strings import getSubstringAfterLastSlash, prefixKeys
 from ..util.visuals import log, printLamotoWelcome, warn
 from .auxiliary.callbacks import *
 from .auxiliary.hyperparameters import *
@@ -569,13 +567,13 @@ class TaskTrainer:
 
             log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on validation set...")
             env.use_test_not_validation = False
-            validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="eval")
+            validation_results = trainer.evaluate(datasetdict["validation"], metric_key_prefix="eval") if compute_eval_loss else prefixKeys(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), prefix="eval")
             dprint(validation_results, indent=1)
 
             if "test" in datasetdict:
                 log("Evaluation of " + ("best" if hyperparameters.track_best_checkpoint else "last") + " model on test set...")
                 env.use_test_not_validation = True
-                test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if compute_eval_loss else self._prefixMetrics(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), metric_key_prefix="test")
+                test_results = trainer.evaluate(datasetdict["test"], metric_key_prefix="test") if compute_eval_loss else prefixKeys(task._computeMetrics(EvalPrediction(predictions=[], label_ids=[])), prefix="test")
                 train_and_eval_and_test_results |= validation_results | test_results
                 dprint(test_results, indent=1)
             else:
@@ -619,13 +617,6 @@ class TaskTrainer:
     def _alwaysDiscardResults(self):
         """Internal method used when saving results is handled by something that wraps the Trainer."""
         self._is_tuning = True
-
-    def _prefixMetrics(self, metrics: dict[str,Any], metric_key_prefix: str) -> dict[str,Any]:
-        metrics = metrics.copy()
-        for key in list(metrics.keys()):
-            if not key.startswith(f"{metric_key_prefix}_"):
-                metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
-        return metrics
 
     def _getRunIdentifiers(self, task: Task, hp: TaskHyperparameters) -> tuple[str,str]:
         if hp.save_as:

@@ -95,7 +95,8 @@ class LogitLabelMetric(LamotoMetric):
 
 class StreamedMetric(LamotoMetric):
     """
-    Metric to which data are added at runtime, so there is no point passing any predictions to it at compute time.
+    Metric to which data are added at runtime (using custom methods defined in subclasses), so there is no point passing
+    any predictions to it at compute time.
     """
 
     def compute(self, predictions: Union[list,ndarray], references: Union[list,ndarray]) -> dict[str, float]:

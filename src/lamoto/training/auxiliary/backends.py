@@ -6,19 +6,21 @@ from pathlib import Path
 
 import torch
 import shutil
-import warnings
 import os
 
 from torch import Tensor
 from torch.nn import Module
 from torch.optim.lr_scheduler import LambdaLR
 from torch.optim.optimizer import Optimizer as Optimizer
-from torch.utils.data import Dataset, IterableDataset
-from transformers.trainer import Trainer, PreTrainedModel, TrainingArguments, DataCollator, PreTrainedTokenizerBase, EvalPrediction, DataLoader, EvalLoopOutput, denumpify_detensorize, deepspeed_init, logger, has_length, TrainerCallback
-from transformers.trainer_utils import speed_metrics
+from transformers.trainer import Trainer, PreTrainedModel, TrainingArguments, DataCollator, PreTrainedTokenizerBase, BaseImageProcessor, FeatureExtractionMixin, ProcessorMixin, EvalPrediction, DataLoader, EvalLoopOutput, denumpify_detensorize, TrainerCallback
+from transformers.trainer_pt_utils import nested_gather
+from transformers.trainer_utils import sort_checkpoints
+from datasets import Dataset, IterableDataset
 
 from archit.instantiation.mixins import LoggingState, ReportDiagnosticsMixin
 from tktkt.util.dicts import dictToJson
+
+from ...util.strings import prefixKeys
 
 BACKUPS_FOLDER = "backups"
 
@@ -39,43 +41,32 @@ class ModelTrainer(Trainer):
         train_dataset: Optional[Union[Dataset, IterableDataset, Any]] = None,
         eval_dataset: Optional[Union[Dataset, dict[str, Dataset], Any]] = None,
         tokenizer: Optional[PreTrainedTokenizerBase] = None,
+        processing_class: Optional[Union[PreTrainedTokenizerBase,BaseImageProcessor,FeatureExtractionMixin,ProcessorMixin]] = None,
         model_init: Optional[Callable[[], PreTrainedModel]] = None,
         compute_metrics: Optional[Callable[[EvalPrediction], dict]] = None,
         callbacks: Optional[list[TrainerCallback]] = None,
         optimizers: Optional[tuple[Optimizer, LambdaLR]] = (None, None),
+        optimizer_cls_and_kwargs: Optional[tuple[type[torch.optim.Optimizer], dict[str, Any]]] = None,
         preprocess_logits_for_metrics: Optional[Callable[[Tensor, Tensor], Tensor]] = None
     ):
-        try:  # super() interface with processing_class rather than tokenizer, which has existed since about transformers 4.46. https://github.com/huggingface/transformers/pull/32385.
-            super().__init__(
-                model=model,
-                args=args,
-                data_collator=data_collator,
-                train_dataset=train_dataset,
-                eval_dataset=eval_dataset,
-                processing_class=tokenizer,
-                model_init=model_init,
-                compute_metrics=compute_metrics,
-                callbacks=callbacks,
-                optimizers=optimizers,
-                preprocess_logits_for_metrics=preprocess_logits_for_metrics
-            )
-        except TypeError:
-            super().__init__(
-                model=model,
-                args=args,
-                data_collator=data_collator,
-                train_dataset=train_dataset,
-                eval_dataset=eval_dataset,
-                tokenizer=tokenizer,
-                model_init=model_init,
-                compute_metrics=compute_metrics,
-                callbacks=callbacks,
-                optimizers=optimizers,
-                preprocess_logits_for_metrics=preprocess_logits_for_metrics
-            )
+        possible_tokeniser = tokenizer or processing_class
+        super().__init__(
+            model=model,
+            args=args,
+            data_collator=data_collator,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            processing_class=possible_tokeniser,
+            model_init=model_init,
+            compute_metrics=compute_metrics,
+            callbacks=callbacks,
+            optimizers=optimizers,
+            optimizer_cls_and_kwargs=optimizer_cls_and_kwargs,
+            preprocess_logits_for_metrics=preprocess_logits_for_metrics
+        )
 
         # We store a reference to the tokeniser so that we can un-redirect HF's access to self.tokenizer.
-        self._tokenizer = tokenizer
+        self._tokenizer = possible_tokeniser if isinstance(possible_tokeniser, PreTrainedTokenizerBase) else None
 
         # Keep loss scale independent of the amount of gradient accumulation.
         self.model_accepts_loss_kwargs = False
@@ -100,8 +91,12 @@ class ModelTrainer(Trainer):
         # Apply it recursively.
         model.apply(f)
 
+    def _nested_gather(self, tensors):
+        return nested_gather(tensors, self.args.parallel_mode)
+
     def log(self, logs: dict[str, float], start_time: Optional[float]=None):
-        # In transformers, the log() method figures out that you're training based on whether start_time is None... no.
+        # Determine the current split based on existing metrics.
+        # Transformers just uses "start_time is None" to determine this, but we can do better.
         counts = {"train": 0, "eval": 0, "test": 0}
         for key in logs:
             for prefix in counts:
@@ -112,33 +107,22 @@ class ModelTrainer(Trainer):
                 counts["train"] += 1
         split = max(counts, key=counts.get)
 
-        # Compute extra logs from registrations.
+        # Now compute extra logs from registrations made with ArchIt's reporting mixin.
         extra_logs = self._extra_log.compute(tensor_gathering_function=self._nested_gather, round_digits=None)
 
-        # Lastly, get extra diagnostic logs, namely for speed and total floating point operations.
-        #   - In transformers v4.49.0, the last version before .from_pretrained() is broken, the speed metrics are actually calculated in the super() call below, but they forget to add the results to the logs... yeah.
-        #   - The floating point operations are only counted during training, but they are also only outputted at the end of training. There's no good reason for that.
+        # Lastly, get extra diagnostic logs, namely for device and total floating point operations.
+        # FLOPs are only counted during training, but they are also only outputted at the end of training. There's no good reason for that.
         profiling_logs = {f"{split}_device": torch.cuda.get_device_name()}
         if split == "train":
             profiling_logs |= {"train_flos": self.state.total_flos}
-            if start_time is not None:
-                profiling_logs |= speed_metrics(split, start_time, num_tokens=self.state.num_input_tokens_seen)
-        if (split == "train" and start_time is None) or not any(key.endswith("_runtime") for key in logs):  # Then speed_metrics was run outside of self.log(). Bad design by HF that speed_metrics is run in two different places.
-            warnings.warn("Speed metrics could not be added to the logs.")
 
         # Now call into the super method to add epoch and num_input_tokens_seen.
-        try:
-            super().log(extra_logs | profiling_logs | logs, start_time)
-        except TypeError:  # The start_time argument is not yet supported in transformers v4.46.3, the last version with stable DeBERTa.
-            super().log(extra_logs | profiling_logs | logs)
+        super().log(extra_logs | profiling_logs | logs, start_time)
 
-    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch: int, ignore_keys_for_eval, start_time: Optional[float]=None):
+    def _maybe_log_save_evaluate(self, tr_loss: torch.Tensor, grad_norm: torch.Tensor | float | None, model: torch.nn.Module, trial: "optuna.Trial | dict[str, Any] | None", epoch: float, ignore_keys_for_eval: list[str] | None, start_time: float, learning_rate: float | None = None):
         # maybe_log_save_evaluate (which should actually be called maybe_log_evaluate_save) is run AFTER on_step_end,
         # which means that anything that requires the latest logs, latest evals or latest checkpoint, needs to wait until then.
-        try:
-            super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time)
-        except TypeError:
-            super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval)
+        super()._maybe_log_save_evaluate(tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time, learning_rate)
 
         if self.extra_control.should_backup:
             self.save_backup()
@@ -161,7 +145,7 @@ class ModelTrainer(Trainer):
 
     def deleteCheckpointsInOrder(self, amount: int):
         assert amount > 0
-        checkpoint_paths = self._sorted_checkpoints(use_mtime=False, output_dir=self._get_output_dir(None))  # Note: puts best model at the end of the list if applicable.
+        checkpoint_paths = sort_checkpoints(self._get_output_dir(None), use_mtime=False, best_model_checkpoint=self.state.best_model_checkpoint)  # Note: puts best model at the end of the list if applicable.
         for checkpoint in checkpoint_paths[0:amount]:
             shutil.rmtree(checkpoint, ignore_errors=True)
 
@@ -193,68 +177,13 @@ class ModelTrainer(Trainer):
 class ModelTrainerWithoutEvaluationLoop(ModelTrainer):
     """
     Has a version of the evaluation loop where, rather than looping over a dataloader, we call compute_metrics on Nones.
-    The reason for not altering evaluate() or get_eval_dataloader() is that we now still have the benefits of
-    getting speed metrics and of logging.
-
-    We basically cut out everything to do with logits/labels, while keeping the acceleration setup.
-
-    TODO: Needs to be updated to a more recent version of transformers.
     """
 
-    def evaluation_loop(self,
-        dataloader: DataLoader,
-        description: str,
-        prediction_loss_only: Optional[bool] = None,
-        ignore_keys: Optional[list[str]] = None,
-        metric_key_prefix: str = "eval",
-    ) -> EvalLoopOutput:
-        # Copy-pasted from Trainer.evaluation_loop (transformers 4.39.3)
-        ############################################################################################################
-        if self.is_deepspeed_enabled and self.deepspeed is None:
-            _, _ = deepspeed_init(self, num_training_steps=0, inference=True)
+    # Alternatively, you would handle this by self.callback_handler.on_evaluate.
+    def evaluation_loop(self, dataloader: DataLoader, description: str, prediction_loss_only: bool = None, ignore_keys: list[str] = None, metric_key_prefix: str = "eval") -> EvalLoopOutput:
+        # Call the original evaluation on an empty data loader, so you inherit all the in-place setup.
+        prep_output = super().evaluation_loop(self.get_eval_dataloader(Dataset.from_dict({"input_ids": [], "attention_mask": []})), description="Evaluation setup", metric_key_prefix=metric_key_prefix)
 
-        model = self._wrap_model(self.model, training=False, dataloader=dataloader)
-
-        if len(self.accelerator._models) == 0 and model is self.model:
-            model = (
-                self.accelerator.prepare(model)
-                if self.is_deepspeed_enabled
-                else self.accelerator.prepare_model(model, evaluation_mode=True)
-            )
-            if self.is_fsdp_enabled:
-                self.model = model
-            if model is not self.model:
-                self.model_wrapped = model
-            if self.is_deepspeed_enabled:
-                self.deepspeed = self.model_wrapped
-
-        if not self.is_in_train:
-            if self.args.fp16_full_eval:
-                model = model.to(dtype=torch.float16, device=self.args.device)
-            elif self.args.bf16_full_eval:
-                model = model.to(dtype=torch.bfloat16, device=self.args.device)
-
-        batch_size = self.args.eval_batch_size
-
-        logger.info(f"***** Running {description} *****")
-        if has_length(dataloader):
-            logger.info(f"  Num examples = {self.num_examples(dataloader)}")
-        else:
-            logger.info("  Num examples: Unknown")
-        logger.info(f"  Batch size = {batch_size}")
-
-        model.eval()
-
-        ############################################################################################################
-
-        metrics = self.compute_metrics(EvalPrediction(predictions=None, label_ids=None))
-
-        # Copy-pasted from Trainer.evaluation_loop
-        ############################################################################################################
-
-        metrics = denumpify_detensorize(metrics)
-        for key in list(metrics.keys()):
-            if not key.startswith(f"{metric_key_prefix}_"):
-                metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
-
-        return EvalLoopOutput(predictions=None, label_ids=None, metrics=metrics, num_samples=0)
+        # Now use compute_metrics.
+        metrics = prep_output.metrics | denumpify_detensorize(self.compute_metrics(EvalPrediction([], [])))
+        return EvalLoopOutput(None, None, metrics=prefixKeys(metrics, prefix=metric_key_prefix), num_samples=0)
