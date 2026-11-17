@@ -1,13 +1,19 @@
 from .. import __version__
 
+from pathlib import Path
+from collections import Counter
+from torch import dtype
+
 import pyfiglet
 import colorama
 import warnings
 import logging as logger
 import time
-from pathlib import Path
 
-__all__ = ["__version__", "log", "warn", "printLamotoWelcome"]
+from tktkt.util.printing import percent, intsep, roundHuman
+
+__all__ = ["__version__", "log", "warn", "printLamotoWelcome", "formatTypeDistribution"]
+
 
 def log(*args, **kwargs):
     print(f"[LaMoTO | {time.strftime('%Y-%m-%d %H:%M:%S')}]", *args, **kwargs)
@@ -51,3 +57,16 @@ def printLamotoWelcome():
     print()
     print("\n".join(lines))
     print()
+
+
+def formatTypeDistribution(type_counts: Counter[dtype], min_fraction_to_show: float=0.005) -> list[tuple[str,str,str]]:
+    """
+    Given a counter with the amount of weights of each PyTorch dtype in a model, format the type, amount and fraction
+    to be human-readable.
+    """
+    total = type_counts.total()
+    return [
+        (f"{dt}", roundHuman(n, round_to=0), percent(n, total, decimals=1) + "%")
+        for dt, n in sorted(type_counts.items(), key=lambda kv: kv[1], reverse=True)
+        if n/total >= min_fraction_to_show
+    ]

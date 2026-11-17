@@ -27,7 +27,7 @@ from ..measuring._core import LamotoMetric, EvaluationEnvironment
 from ..util.datasets import shuffleAndTruncate, getDatasetSize, totalBatches
 from ..util.exceptions import tryExceptNone, ImpossibleBranchError
 from ..util.strings import getSubstringAfterLastSlash, prefixKeys
-from ..util.visuals import log, printLamotoWelcome, warn
+from ..util.visuals import log, printLamotoWelcome, warn, formatTypeDistribution
 from .auxiliary.callbacks import *
 from .auxiliary.hyperparameters import *
 from .auxiliary.hyperparameters import _CallbackInterval, _FixedBatchesInterval
@@ -270,8 +270,8 @@ class TaskTrainer:
                     self._model_augmentation.augment(model, task.tokenizer)
             model.to("cuda")
             log("Model sent to GPU.")
-            print("\t Attention implementation:", model.config._attn_implementation)
-            print("\tPrecision at construction:", model.dtype)  # Note: the way this is computed is just by looking at the dtype of the last model parameter. So let's hope it's not an exception to the rule.
+            print("\t  Attention implementation:", model.config._attn_implementation)
+            print("\tPrecisions at construction:", ", ".join(map(lambda x: f"{x[2]} {x[0]} ({x[1]} params)", formatTypeDistribution(model))))
 
         # ...and verify that after all of this, the model, the config and the tokeniser all agree about the pad token.
         pad_tk     = task.tokenizer.pad_token_id
